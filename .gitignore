@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env*.local
+dev.db
+dev.db-journal
+.DS_Store
+*.log
+public/media
+.wwebjs_auth
+.wwebjs_cache
+.x_auth
+.x_profile
+public/avatars

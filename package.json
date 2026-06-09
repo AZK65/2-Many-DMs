@@ -1,0 +1,49 @@
+{
+  "name": "omni-crm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "sync": "tsx sync/worker.ts",
+    "tg:login": "tsx sync/login-telegram.ts",
+    "x:login": "tsx sync/login-x.ts",
+    "x:unlock": "tsx sync/x-unlock.ts",
+    "db:clean-mock": "tsx prisma/clean-mock.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "dotenv": "^17.4.2",
+    "input": "^1.0.1",
+    "motion": "^12.40.0",
+    "next": "^14.2.35",
+    "proxy-chain": "^3.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "telegram": "^2.26.22",
+    "whatsapp-web.js": "github:timothydillan/whatsapp-web.js#fix/duplicate-events-and-bindings"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.40",
+    "prisma": "^5.18.0",
+    "tailwindcss": "^3.4.7",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4"
+  }
+}
