@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { MEDIA_LABEL, type ConversationDTO, type MediaType } from "@/lib/types";
 import type { Platform } from "@/lib/platforms";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const conversations = await prisma.conversation.findMany({
     orderBy: { lastMessageAt: "desc" },
