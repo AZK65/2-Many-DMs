@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  name          String
+  handle        String
+  avatarUrl     String?
+  company       String?
+  notes         String?
+  externalKey   String?        @unique // e.g. "telegram:123456789" — for sync dedupe
+  createdAt     DateTime       @default(now())
+  conversations Conversation[]
+  tags          ContactTag[]
+}
+
+model Tag {
+  id       String       @id @default(cuid())
+  name     String       @unique
+  color    String       @default("#64748b")
+  contacts ContactTag[]
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+}
+
+model Conversation {
+  id            String               @id @default(cuid())
+  platform      String // 'x' | 'whatsapp' | 'telegram'
+  externalId    String? // platform chat/peer id used to route replies
+  contactId     String
+  contact       Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime             @default(now())
+  unread        Int                  @default(0)
+  pinned        Boolean              @default(false)
+  hidden        Boolean              @default(false) // "not a client" — hidden from the default inbox
+  messages      Message[]
+  folders       ConversationFolder[]
+
+  @@unique([platform, externalId])
+}
+
+model Folder {
+  id            String               @id @default(cuid())
+  name          String
+  createdAt     DateTime             @default(now())
+  conversations ConversationFolder[]
+}
+
+model ConversationFolder {
+  conversationId String
+  folderId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  folder         Folder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, folderId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  body           String
+  direction      String // 'in' | 'out'
+  mediaType      String? // 'image' | 'video' | 'audio' | 'sticker' | 'file'
+  mediaUrl       String? // served path, e.g. "/media/telegram_123_45.jpg"
+  mediaName      String? // original filename (for files)
+  externalKey    String?      @unique // e.g. "telegram:<chatId>:<msgId>" — for sync dedupe
+  createdAt      DateTime     @default(now())
+}

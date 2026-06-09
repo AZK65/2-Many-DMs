@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+dev.db
+dev.db-journal
+.wwebjs_auth
+.wwebjs_cache
+.x_auth
+.x_profile
+public/media
+public/avatars
+.env
+.git
+*.log
