@@ -3,9 +3,11 @@ FROM node:20-slim
 
 # Use the distro's Chromium instead of downloading puppeteer's, and install the
 # shared libraries WhatsApp Web / XChat need to render headless.
+# (NODE_ENV is set to production *after* the build — setting it earlier makes
+# npm ci skip devDeps like tailwindcss/postcss that `next build` needs, and the
+# worker runs at runtime via tsx which is also a devDep.)
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    NODE_ENV=production
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
@@ -26,7 +28,8 @@ COPY . .
 RUN npx prisma generate && npm run build
 
 # Persist DB + login sessions here (mount a Railway volume at /data).
-ENV DATA_DIR=/data
+ENV NODE_ENV=production \
+    DATA_DIR=/data
 RUN mkdir -p /data
 
 EXPOSE 3000
