@@ -11,14 +11,23 @@ const adapters = new Map<string, Adapter>();
 async function startAdapters() {
   const { TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION } = process.env;
   if (TELEGRAM_API_ID && TELEGRAM_API_HASH && TELEGRAM_SESSION) {
-    const tg = new TelegramAdapter(
-      Number(TELEGRAM_API_ID),
-      TELEGRAM_API_HASH,
-      TELEGRAM_SESSION
-    );
-    await tg.start(persistInbound);
-    adapters.set("telegram", tg);
-    console.log("[sync] telegram adapter started");
+    // Non-fatal: a bad/duplicated session (AUTH_KEY_DUPLICATED) must not crash
+    // the whole worker and take down the other platforms + control server.
+    try {
+      const tg = new TelegramAdapter(
+        Number(TELEGRAM_API_ID),
+        TELEGRAM_API_HASH,
+        TELEGRAM_SESSION
+      );
+      await tg.start(persistInbound);
+      adapters.set("telegram", tg);
+      console.log("[sync] telegram adapter started");
+    } catch (e) {
+      console.error(
+        "[telegram] start failed (continuing without it) — re-run `npm run tg:login` if the session is invalid:",
+        e
+      );
+    }
   } else {
     console.log(
       "[sync] telegram not configured — set TELEGRAM_API_ID / TELEGRAM_API_HASH / TELEGRAM_SESSION (run `npm run tg:login`)."
@@ -117,10 +126,14 @@ async function main() {
   // Control server first so /status + /send respond during the (possibly slow,
   // staggered) adapter startup.
   startControlServer();
-  await startAdapters();
+  try {
+    await startAdapters();
+  } catch (e) {
+    // Keep the worker (and its control server) alive even if startup partially
+    // fails — a single platform error must not kill the process.
+    console.error("[sync] startAdapters error (continuing):", e);
+  }
 }
 
-main().catch((e) => {
-  console.error("[sync] fatal:", e);
-  process.exit(1);
-});
+main().catch((e) => console.error("[sync] error:", e));
+

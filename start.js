@@ -11,27 +11,37 @@ spawnSync("npx", ["prisma", "db", "push", "--skip-generate", "--accept-data-loss
   stdio: "inherit",
 });
 
+let dying = false;
+
+// The web server is the container's lifeline — if it dies, the container exits
+// (Railway restarts it). The worker is supervised separately and restarted on
+// crash so a platform error (e.g. a bad Telegram session) never takes down the
+// UI.
 const web = spawn("npx", ["next", "start", "-p", String(port)], {
   stdio: "inherit",
 });
-const worker = spawn("npx", ["tsx", "sync/worker.ts"], { stdio: "inherit" });
-
-let dying = false;
-function shutdown(code) {
-  if (dying) return;
-  dying = true;
-  web.kill("SIGTERM");
-  worker.kill("SIGTERM");
-  process.exit(code);
-}
-
 web.on("exit", (c) => {
   console.error("[start] web exited", c);
   shutdown(c || 0);
 });
-worker.on("exit", (c) => {
-  console.error("[start] worker exited", c);
-  shutdown(c || 0);
-});
+
+let worker;
+function startWorker() {
+  worker = spawn("npx", ["tsx", "sync/worker.ts"], { stdio: "inherit" });
+  worker.on("exit", (c) => {
+    if (dying) return;
+    console.error(`[start] worker exited (${c}) — restarting in 10s`);
+    setTimeout(startWorker, 10000);
+  });
+}
+startWorker();
+
+function shutdown(code) {
+  if (dying) return;
+  dying = true;
+  try { web.kill("SIGTERM"); } catch {}
+  try { worker && worker.kill("SIGTERM"); } catch {}
+  process.exit(code);
+}
 process.on("SIGTERM", () => shutdown(0));
 process.on("SIGINT", () => shutdown(0));
