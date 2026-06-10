@@ -66,6 +66,12 @@ export class WhatsAppAdapter implements Adapter {
   // guards ensure the workaround and backfill each run once per connection.
   private syncTriggered = false;
   private readyDone = false;
+  private proxyUrl?: string;
+
+  // Per-account ready: pass the account's proxy. Falls back to global PROXY_URL.
+  constructor(opts: { proxyUrl?: string } = {}) {
+    this.proxyUrl = opts.proxyUrl;
+  }
 
   private buildClient(proxy: string | null): Client {
     // Pinning a known-good WhatsApp Web build fixes "can't link device" /
@@ -136,7 +142,7 @@ export class WhatsAppAdapter implements Adapter {
     this.syncTriggered = false;
     this.readyDone = false;
     this.cleanLocks();
-    const proxy = await chromeProxyServer();
+    const proxy = await chromeProxyServer(this.proxyUrl);
     this.client = this.buildClient(proxy);
     this.attachHandlers();
     try {

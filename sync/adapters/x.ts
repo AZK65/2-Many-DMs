@@ -5,6 +5,8 @@ import puppeteer, { REAL_UA } from "../x-browser";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
+import { FingerprintGenerator } from "fingerprint-generator";
+import { FingerprintInjector } from "fingerprint-injector";
 import type {
   Adapter,
   AdapterStatus,
@@ -50,6 +52,32 @@ function hash(s: string): string {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// A consistent, realistic browser fingerprint — generated once and persisted,
+// so it doesn't change every launch (a fingerprint that shifts each run is
+// itself a detection signal). Layered on top of the stealth plugin.
+function loadOrCreateFingerprint(): any {
+  const dir = process.env.DATA_DIR || process.cwd();
+  const file = path.join(dir, ".x_fingerprint.json");
+  try {
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    /* regenerate below */
+  }
+  const fp = new FingerprintGenerator({
+    browsers: [{ name: "chrome", minVersion: 120 }],
+    operatingSystems: ["macos", "windows"],
+    devices: ["desktop"],
+    locales: ["en-CA", "en-US"],
+  }).getFingerprint();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(fp));
+  } catch {
+    /* non-fatal */
+  }
+  return fp;
+}
+
 interface ScrapedConversation {
   id: string;
   name: string;
@@ -72,6 +100,12 @@ export class XAdapter implements Adapter {
   private onMessage?: (m: InboundMessage) => Promise<void>;
   private timer?: ReturnType<typeof setInterval>;
   private reconnecting = false;
+  private proxyUrl?: string;
+
+  // Per-account ready: pass the account's proxy. Falls back to global PROXY_URL.
+  constructor(opts: { proxyUrl?: string } = {}) {
+    this.proxyUrl = opts.proxyUrl;
+  }
 
   getStatus(): AdapterStatus {
     return { platform: "x", state: this.state, detail: this.detail };
@@ -103,7 +137,7 @@ export class XAdapter implements Adapter {
       /* already gone */
     }
 
-    const proxy = await chromeProxyServer();
+    const proxy = await chromeProxyServer(this.proxyUrl);
     this.browser = await puppeteer.launch({
       headless: true,
       timeout: 60000,
@@ -128,8 +162,18 @@ export class XAdapter implements Adapter {
     });
 
     this.page = await this.browser.newPage();
-    await this.page.setUserAgent(REAL_UA);
-    await this.page.setViewport({ width: 1280, height: 900 });
+    // Inject a consistent realistic fingerprint (UA, viewport, navigator/WebGL
+    // overrides) on top of the stealth plugin — best free anti-detect for X.
+    try {
+      await new FingerprintInjector().attachFingerprintToPuppeteer(
+        this.page,
+        loadOrCreateFingerprint()
+      );
+    } catch (e) {
+      console.error("[x] fingerprint inject failed, using default UA:", e);
+      await this.page.setUserAgent(REAL_UA);
+      await this.page.setViewport({ width: 1280, height: 900 });
+    }
     await this.page.setCookie(...cookies);
     this.page.on("error", (err) => {
       console.error("[x] page error:", err.message);
