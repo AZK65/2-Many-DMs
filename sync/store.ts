@@ -3,6 +3,18 @@ import type { InboundMessage } from "./adapters/types";
 
 export const prisma = new PrismaClient();
 
+// Clears the unread badge for a chat after it's been read on the platform
+// (e.g. you opened it on your phone). Idempotent.
+export async function persistRead(
+  platform: string,
+  chatExternalId: string
+): Promise<void> {
+  await prisma.conversation.updateMany({
+    where: { platform, externalId: chatExternalId },
+    data: { unread: 0 },
+  });
+}
+
 // Writes an inbound (or echoed outbound) message into the same DB the UI reads.
 // Idempotent: messages are deduped by their platform-unique externalKey, so
 // re-running backfill or receiving our own echoed sends won't create duplicates.
@@ -76,6 +88,11 @@ export async function persistInbound(m: InboundMessage): Promise<void> {
     data: {
       lastMessageAt: m.timestamp,
       unread: m.direction === "in" ? { increment: 1 } : undefined,
+      // A new inbound message re-surfaces the chat: back to "open" (your turn)
+      // and any snooze/done is cleared.
+      ...(m.direction === "in"
+        ? { status: "open", snoozedUntil: null }
+        : {}),
     },
   });
 }

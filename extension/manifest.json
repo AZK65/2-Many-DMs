@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "OmniCRM — Connect X",
+  "version": "1.0.0",
+  "description": "Securely link your X (Twitter) account to your unified inbox by handing off your existing session.",
+  "permissions": ["cookies", "storage"],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "http://localhost/*",
+    "https://*.up.railway.app/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Connect X to OmniCRM"
+  }
+}

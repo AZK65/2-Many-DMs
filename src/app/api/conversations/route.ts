@@ -29,12 +29,18 @@ export async function GET() {
       lastMessage: preview,
       pinned: c.pinned,
       hidden: c.hidden,
+      status: c.status as ConversationDTO["status"],
+      snoozedUntil: c.snoozedUntil ? c.snoozedUntil.toISOString() : null,
+      lastOpenedAt: c.lastOpenedAt ? c.lastOpenedAt.toISOString() : null,
+      lastDirection: last ? (last.direction as "in" | "out") : null,
       folderIds: c.folders.map((f) => f.folderId),
       contact: {
         id: c.contact.id,
         name: c.contact.name,
         handle: c.contact.handle,
         company: c.contact.company,
+        email: c.contact.email,
+        phone: c.contact.phone,
         notes: c.contact.notes,
         avatarUrl: c.contact.avatarUrl,
         tags: c.contact.tags.map((ct) => ({

@@ -14,6 +14,7 @@
     "tg:login": "tsx sync/login-telegram.ts",
     "x:login": "tsx sync/login-x.ts",
     "x:unlock": "tsx sync/x-unlock.ts",
+    "x:clean-tweets": "tsx sync/delete-tweets.ts",
     "db:clean-mock": "tsx prisma/clean-mock.ts"
   },
   "prisma": {

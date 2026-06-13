@@ -11,6 +11,7 @@ import type {
   Adapter,
   AdapterStatus,
   InboundMessage,
+  OutboundMedia,
   SentMessage,
 } from "./types";
 
@@ -377,7 +378,11 @@ export class XAdapter implements Adapter {
     });
   }
 
-  async send(chatExternalId: string, body: string): Promise<SentMessage> {
+  async send(
+    chatExternalId: string,
+    body: string,
+    media?: OutboundMedia
+  ): Promise<SentMessage> {
     if (!this.page) throw new Error("X not ready");
     this.busy = true;
     try {
@@ -390,8 +395,20 @@ export class XAdapter implements Adapter {
         (await this.page.$('[data-testid="dm-conversation-panel"] [role="textbox"]')) ||
         (await this.page.$('[data-testid="dmComposerTextInput"]'));
       if (!input) throw new Error("XChat composer not found");
+
+      // Attach a photo/video by driving the hidden file input, then wait for
+      // the preview to attach before sending.
+      if (media) {
+        const fileInput = (await this.page.$(
+          'input[data-testid="fileInput"]'
+        )) || (await this.page.$('input[type="file"]'));
+        if (!fileInput) throw new Error("X file input not found");
+        await (fileInput as any).uploadFile(media.path);
+        await delay(2500);
+      }
+
       await input.click();
-      await this.page.keyboard.type(body, { delay: 15 });
+      if (body) await this.page.keyboard.type(body, { delay: 15 });
       await this.page.keyboard.press("Enter");
       await delay(1500);
       return {

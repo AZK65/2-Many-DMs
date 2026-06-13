@@ -11,6 +11,44 @@ export const PLATFORMS: Record<
 
 export const PLATFORM_ORDER: Platform[] = ["x", "whatsapp", "telegram"];
 
+// What each platform can send. Types differ: Telegram takes any file, WhatsApp
+// takes media + documents, X only photos/GIFs/videos.
+export type SendableMediaType = "image" | "video" | "audio" | "file";
+
+export interface AttachmentCaps {
+  accept: string; // <input accept> attribute
+  types: SendableMediaType[];
+  hint: string; // shown in the attach tooltip
+}
+
+export const PLATFORM_ATTACHMENTS: Record<Platform, AttachmentCaps> = {
+  telegram: {
+    accept: "*/*",
+    types: ["image", "video", "audio", "file"],
+    hint: "Photos, videos, audio or any file",
+  },
+  whatsapp: {
+    accept:
+      "image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip",
+    types: ["image", "video", "audio", "file"],
+    hint: "Photos, videos, audio or documents",
+  },
+  x: {
+    accept: "image/*,video/*",
+    types: ["image", "video"],
+    hint: "Photos, GIFs or videos only",
+  },
+};
+
+// Map a file's MIME type to the stored media category.
+export function mimeToMediaType(mime: string): SendableMediaType {
+  const m = (mime || "").toLowerCase();
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  return "file";
+}
+
 // Deterministic avatar background from a string so the same contact always
 // gets the same color, keeping the UI identical regardless of platform.
 const AVATAR_COLORS = [

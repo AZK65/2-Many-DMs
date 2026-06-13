@@ -27,6 +27,14 @@ export interface SentMessage {
   timestamp: string; // ISO
 }
 
+// An attachment to send out, resolved to an absolute path on the shared disk.
+export interface OutboundMedia {
+  type: MediaType;
+  path: string; // absolute filesystem path under public/media
+  name: string;
+  mime?: string;
+}
+
 export type AdapterState =
   | "starting"
   | "qr"
@@ -43,8 +51,19 @@ export interface AdapterStatus {
 
 export interface Adapter {
   platform: Platform;
-  start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void>;
-  send(chatExternalId: string, body: string): Promise<SentMessage>;
+  start(
+    onMessage: (m: InboundMessage) => Promise<void>,
+    // Called when a chat is read on the platform (e.g. on the phone) so the
+    // inbox can clear its unread badge.
+    onRead?: (chatExternalId: string) => Promise<void>
+  ): Promise<void>;
+  send(
+    chatExternalId: string,
+    body: string,
+    media?: OutboundMedia
+  ): Promise<SentMessage>;
+  // Marks a chat as read on the platform (when the user opens it in the inbox).
+  markRead?(chatExternalId: string): Promise<void>;
   getStatus(): AdapterStatus;
   stop(): Promise<void>;
 }

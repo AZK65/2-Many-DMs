@@ -43,6 +43,24 @@ export function sameDay(a: string, b: string): boolean {
   return new Date(a).toDateString() === new Date(b).toDateString();
 }
 
+// Whole days since a timestamp — for "going cold" surfacing.
+export function daysSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+}
+
+// Short "snoozed until" label, e.g. "Tue" or "Mar 5".
+export function snoozeLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOf = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOf(d) - startOf(now)) / 86_400_000);
+  if (diffDays <= 0) return clockTime(iso);
+  if (diffDays === 1) return "tomorrow";
+  if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 // Conversation-list timestamp (WhatsApp/Telegram style): clock time if today,
 // "Yesterday", short weekday this week, else a short date.
 export function listTime(iso: string): string {

@@ -1,9 +1,10 @@
 import "dotenv/config";
 import http from "node:http";
+import path from "node:path";
 import { TelegramAdapter } from "./adapters/telegram";
 import { WhatsAppAdapter } from "./adapters/whatsapp";
 import { XAdapter } from "./adapters/x";
-import { persistInbound } from "./store";
+import { persistInbound, persistRead, prisma } from "./store";
 import type { Adapter } from "./adapters/types";
 
 const adapters = new Map<string, Adapter>();
@@ -19,7 +20,7 @@ async function startAdapters() {
         TELEGRAM_API_HASH,
         TELEGRAM_SESSION
       );
-      await tg.start(persistInbound);
+      await tg.start(persistInbound, (id) => persistRead("telegram", id));
       adapters.set("telegram", tg);
       console.log("[sync] telegram adapter started");
     } catch (e) {
@@ -39,7 +40,7 @@ async function startAdapters() {
     wa = new WhatsAppAdapter();
     adapters.set("whatsapp", wa);
     // Not awaited: initialize() blocks until the QR is scanned / session loads.
-    wa.start(persistInbound).catch((e) =>
+    wa.start(persistInbound, (id) => persistRead("whatsapp", id)).catch((e) =>
       console.error("[whatsapp] start error:", e)
     );
     console.log("[sync] whatsapp adapter starting (scan the QR if prompted)");
@@ -84,7 +85,7 @@ function startControlServer() {
         req.on("data", (c) => (body += c));
         req.on("end", async () => {
           try {
-            const { platform, chatExternalId, text } = JSON.parse(body);
+            const { platform, chatExternalId, text, media } = JSON.parse(body);
             const adapter = adapters.get(platform);
             if (!adapter) {
               res.writeHead(400, { "Content-Type": "application/json" });
@@ -92,9 +93,40 @@ function startControlServer() {
                 JSON.stringify({ error: `adapter '${platform}' not running` })
               );
             }
-            const sent = await adapter.send(chatExternalId, text);
+            // The web side passes a served path ("/media/x.jpg"); resolve it to
+            // the real file on the shared disk for the adapter to upload.
+            const outMedia = media
+              ? {
+                  type: media.type,
+                  name: media.name,
+                  path: path.join(
+                    process.cwd(),
+                    "public",
+                    String(media.url).replace(/^\//, "")
+                  ),
+                }
+              : undefined;
+            const sent = await adapter.send(chatExternalId, text, outMedia);
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(sent));
+          } catch (e) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: String(e) }));
+          }
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/read") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", async () => {
+          try {
+            const { platform, chatExternalId } = JSON.parse(body);
+            const adapter = adapters.get(platform);
+            // markRead is optional (X can't reliably mark read) — no-op then.
+            if (adapter?.markRead) await adapter.markRead(chatExternalId);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
           } catch (e) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: String(e) }));
@@ -122,10 +154,42 @@ function startControlServer() {
     .listen(port, () => console.log(`[sync] control server on :${port}`));
 }
 
+// Fire recurring (scheduled) automations when they're due. The web app holds
+// the engine, so we just trigger its /run endpoint for each due automation.
+function startAutomationScheduler() {
+  const webUrl =
+    process.env.WEB_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const tick = async () => {
+    try {
+      const autos = await prisma.automation.findMany({
+        where: { enabled: true, schedule: { not: "manual" } },
+      });
+      const now = Date.now();
+      for (const a of autos) {
+        const last = a.lastRunAt ? a.lastRunAt.getTime() : 0;
+        const intervalMs =
+          a.schedule === "daily"
+            ? 86_400_000
+            : (a.everyNDays || 1) * 86_400_000;
+        if (now - last < intervalMs) continue;
+        console.log(`[automations] running "${a.name}"`);
+        await fetch(`${webUrl}/api/automations/${a.id}/run`, {
+          method: "POST",
+        }).catch((e) => console.error("[automations] run error:", e));
+      }
+    } catch (e) {
+      console.error("[automations] scheduler error:", e);
+    }
+  };
+  setInterval(tick, 5 * 60 * 1000); // check every 5 minutes
+  console.log("[automations] scheduler started");
+}
+
 async function main() {
   // Control server first so /status + /send respond during the (possibly slow,
   // staggered) adapter startup.
   startControlServer();
+  startAutomationScheduler();
   try {
     await startAdapters();
   } catch (e) {
