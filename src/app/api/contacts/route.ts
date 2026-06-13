@@ -36,6 +36,7 @@ export async function GET() {
       conversationId: conv?.id ?? null,
       lastMessage: preview,
       lastMessageAt: conv?.lastMessageAt.toISOString() ?? null,
+      stage: c.stage ?? null,
       tags: c.tags.map((ct) => ({
         id: ct.tag.id,
         name: ct.tag.name,

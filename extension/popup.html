@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        width: 320px;
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background: #0a0a0a;
+        color: #fafafa;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px;
+        border-bottom: 1px solid #262626;
+      }
+      .logo {
+        width: 32px; height: 32px; border-radius: 8px;
+        background: #0f1419; color: #fff;
+        display: grid; place-items: center; font-weight: 700;
+      }
+      h1 { font-size: 15px; margin: 0; }
+      .sub { font-size: 12px; color: #a3a3a3; margin-top: 2px; }
+      .body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      label { font-size: 11px; font-weight: 600; color: #a3a3a3; display: block; margin-bottom: 4px; }
+      input {
+        width: 100%; padding: 9px 10px; border-radius: 8px;
+        border: 1px solid #404040; background: #171717; color: #fafafa;
+        font-size: 13px; outline: none;
+      }
+      input:focus { border-color: #3b82f6; }
+      button {
+        width: 100%; padding: 10px; border: 0; border-radius: 8px;
+        background: #2563eb; color: #fff; font-size: 14px; font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .status { font-size: 12px; min-height: 16px; }
+      .status.err { color: #f87171; }
+      .status.ok { color: #34d399; }
+      .hint { font-size: 11px; color: #737373; line-height: 1.4; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <div class="logo">𝕏</div>
+      <div>
+        <h1>Connect X</h1>
+        <div class="sub">Hands your X session to your inbox</div>
+      </div>
+    </div>
+    <div class="body">
+      <div>
+        <label>App URL</label>
+        <input id="appUrl" placeholder="http://localhost:3000" />
+      </div>
+      <div>
+        <label>Pairing code (from the app's onboarding)</label>
+        <input id="code" placeholder="e.g. 7K2QF9" autocomplete="off" />
+      </div>
+      <button id="connect">Connect my X account</button>
+      <div id="status" class="status"></div>
+      <div class="hint">
+        Make sure you're logged into x.com in this browser. We read only your
+        session cookies and send them over HTTPS to your app — nothing else.
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

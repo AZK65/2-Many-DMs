@@ -1,5 +1,5 @@
 import path from "node:path";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import { Client, LocalAuth, MessageMedia } from "whatsapp-web.js";
 import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import { extFromMime, saveMedia, MAX_BYTES } from "../media";
@@ -11,6 +11,7 @@ import type {
   AdapterStatus,
   InboundMessage,
   MediaType,
+  OutboundMedia,
   SentMessage,
 } from "./types";
 
@@ -62,6 +63,11 @@ export class WhatsAppAdapter implements Adapter {
   private qr: string | null = null;
   private detail?: string;
   private onMessage?: (m: InboundMessage) => Promise<void>;
+  private onRead?: (chatExternalId: string) => Promise<void>;
+  // whatsapp-web.js has no "read on phone" event, so we poll unread counts and
+  // fire onRead when a chat's unread count drops. Tracks the last seen count.
+  private lastUnread = new Map<string, number>();
+  private readPoll?: ReturnType<typeof setInterval>;
   // Standard whatsapp-web.js re-emits authenticated/ready repeatedly; these
   // guards ensure the workaround and backfill each run once per connection.
   private syncTriggered = false;
@@ -133,9 +139,43 @@ export class WhatsAppAdapter implements Adapter {
     };
   }
 
-  async start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void> {
+  async start(
+    onMessage: (m: InboundMessage) => Promise<void>,
+    onRead?: (chatExternalId: string) => Promise<void>
+  ): Promise<void> {
     this.onMessage = onMessage;
+    this.onRead = onRead;
     await this.connect();
+    this.startReadPoll();
+  }
+
+  // Poll chats for unread-count drops (a read on the phone) and clear the badge.
+  private startReadPoll(): void {
+    if (this.readPoll || !this.onRead) return;
+    this.readPoll = setInterval(async () => {
+      if (this.state !== "ready") return;
+      try {
+        const chats: any[] = await this.client.getChats();
+        for (const c of chats) {
+          const id = c.id?._serialized;
+          if (!id) continue;
+          const count = c.unreadCount ?? 0;
+          const prev = this.lastUnread.get(id);
+          if (prev !== undefined && count < prev) {
+            this.onRead?.(id).catch(() => {});
+          }
+          this.lastUnread.set(id, count);
+        }
+      } catch {
+        /* transient — try again next tick */
+      }
+    }, 30000);
+  }
+
+  async markRead(chatExternalId: string): Promise<void> {
+    const chat: any = await this.client.getChatById(chatExternalId);
+    await chat.sendSeen();
+    this.lastUnread.set(chatExternalId, 0);
   }
 
   private async connect(): Promise<void> {
@@ -376,8 +416,21 @@ export class WhatsAppAdapter implements Adapter {
     console.log(`[whatsapp] backfilled ${count} messages from ${dms.length} chats`);
   }
 
-  async send(chatExternalId: string, body: string): Promise<SentMessage> {
-    const sent: any = await this.client.sendMessage(chatExternalId, body);
+  async send(
+    chatExternalId: string,
+    body: string,
+    media?: OutboundMedia
+  ): Promise<SentMessage> {
+    let sent: any;
+    if (media) {
+      const m = MessageMedia.fromFilePath(media.path);
+      sent = await this.client.sendMessage(chatExternalId, m, {
+        caption: body || undefined,
+        sendMediaAsDocument: media.type === "file",
+      });
+    } else {
+      sent = await this.client.sendMessage(chatExternalId, body);
+    }
     return {
       messageExternalId: `whatsapp:${sent.id._serialized}`,
       timestamp: new Date().toISOString(),
@@ -385,6 +438,8 @@ export class WhatsAppAdapter implements Adapter {
   }
 
   async stop(): Promise<void> {
+    if (this.readPoll) clearInterval(this.readPoll);
+    this.readPoll = undefined;
     await this.client.destroy();
   }
 }

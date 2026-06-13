@@ -7,17 +7,76 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Multi-tenant SaaS foundation ──────────────────────────────────────────
+// A customer of the SaaS. Each user connects one or more platform Accounts.
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  signupIp  String? // IP we first saw them on — drives proxy region matching
+  createdAt DateTime  @default(now())
+  accounts  Account[]
+}
+
+// One connected platform login for a user (their Telegram, WhatsApp, X…).
+// The session blob is encrypted at rest; a sticky proxy is pinned per account.
+model Account {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform  String // telegram | whatsapp | x
+  label     String? // phone number / @handle shown to the user
+  status    String   @default("disconnected") // connected | pending | disconnected | error
+  session   String? // encrypted session (Telegram StringSession, etc.)
+  proxyId   String?
+  proxy     Proxy?   @relation(fields: [proxyId], references: [id])
+  detail    String? // last status detail / error message
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, platform, label])
+}
+
+// A sticky egress proxy (ideally a 5G/mobile IP) matched to the user's region.
+model Proxy {
+  id        String    @id @default(cuid())
+  url       String // upstream proxy url incl. auth
+  region    String? // country/region this IP is in
+  provider  String? // bright-data | soax | iproyal | manual …
+  inUse     Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  accounts  Account[]
+}
+
 model Contact {
-  id            String         @id @default(cuid())
+  id            String            @id @default(cuid())
   name          String
   handle        String
   avatarUrl     String?
   company       String?
+  email         String?
+  phone         String?
   notes         String?
-  externalKey   String?        @unique // e.g. "telegram:123456789" — for sync dedupe
-  createdAt     DateTime       @default(now())
+  stage         String? // CRM pipeline stage: lead | contacted | negotiating | won | lost
+  externalKey   String?           @unique // e.g. "telegram:123456789" — for sync dedupe
+  createdAt     DateTime          @default(now())
   conversations Conversation[]
   tags          ContactTag[]
+  relations     ContactRelation[] @relation("ContactToRelation")
+}
+
+// A directed link from a contact to another conversation (a colleague's chat,
+// a group chat they're in, etc.) with a free-text label like "works with".
+model ContactRelation {
+  id                   String       @id @default(cuid())
+  contactId            String
+  contact              Contact      @relation("ContactToRelation", fields: [contactId], references: [id], onDelete: Cascade)
+  targetConversationId String
+  targetConversation   Conversation @relation("ConversationToRelation", fields: [targetConversationId], references: [id], onDelete: Cascade)
+  label                String?
+  createdAt            DateTime     @default(now())
+
+  @@unique([contactId, targetConversationId])
 }
 
 model Tag {
@@ -46,8 +105,12 @@ model Conversation {
   unread        Int                  @default(0)
   pinned        Boolean              @default(false)
   hidden        Boolean              @default(false) // "not a client" — hidden from the default inbox
+  status        String               @default("open") // triage: open | waiting | done
+  snoozedUntil  DateTime? // follow-up: hidden from Active until this time
+  lastOpenedAt  DateTime? // last time you opened this chat — resets the cold clock
   messages      Message[]
   folders       ConversationFolder[]
+  relatedFrom   ContactRelation[]    @relation("ConversationToRelation")
 
   @@unique([platform, externalId])
 }
@@ -66,6 +129,52 @@ model ConversationFolder {
   folder         Folder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
   @@id([conversationId, folderId])
+}
+
+// Saved canned responses. `shortcut` is a single key used with Cmd/Ctrl to
+// insert the text; the `/` composer menu lists them all to pick from.
+model Snippet {
+  id        String   @id @default(cuid())
+  title     String
+  text      String
+  shortcut  String? // single key, e.g. "p" → Cmd/Ctrl+P
+  createdAt DateTime @default(now())
+}
+
+// An outreach automation: a trigger + filters that select chats, and a message
+// template to send them — on demand or on a schedule.
+model Automation {
+  id           String          @id @default(cuid())
+  name         String
+  enabled      Boolean         @default(true)
+  trigger      String // keyword | no_reply | unanswered | new_chat | broadcast
+  keyword      String? // for the keyword trigger
+  noReplyDays  Int? // day threshold for time-based triggers
+  platform     String? // filter: only this platform (null = any)
+  tagId        String? // filter: only chats with this tag
+  folderId     String? // filter: only chats in this folder
+  message      String // legacy/first-step message (kept for summaries)
+  actions      String? // JSON array of action steps: send | tag | status
+  schedule     String          @default("manual") // manual | daily | every_n_days
+  everyNDays   Int? // for every_n_days schedule
+  cooldownDays Int             @default(7) // don't re-message the same chat within N days
+  lastRunAt    DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  runs         AutomationRun[]
+}
+
+// A log row per chat an automation acted on — also enforces the cooldown.
+model AutomationRun {
+  id             String     @id @default(cuid())
+  automationId   String
+  automation     Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  conversationId String
+  status         String // sent | failed | skipped
+  detail         String?
+  createdAt      DateTime   @default(now())
+
+  @@index([automationId, conversationId])
 }
 
 model Message {

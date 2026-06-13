@@ -5,6 +5,9 @@
 :root {
   color-scheme: light;
 }
+.dark {
+  color-scheme: dark;
+}
 
 html,
 body {
@@ -12,7 +15,45 @@ body {
 }
 
 body {
-  @apply bg-slate-100 text-slate-900 antialiased;
+  @apply bg-slate-100 text-slate-900 antialiased transition-colors duration-300;
+}
+.dark body {
+  @apply bg-black text-neutral-100;
+}
+
+/* Reliable CSS fade-in (used by the global support bubble). */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+.animate-fade-in-1 { animation: fade-in 0.5s ease-out 0.05s both; }
+.animate-fade-in-2 { animation: fade-in 0.5s ease-out 0.12s both; }
+.animate-fade-in-3 { animation: fade-in 0.5s ease-out 0.2s both; }
+
+/* Landing page atmosphere: faint blueprint grid + soft top mask. */
+.lp-grid {
+  background-image:
+    linear-gradient(to right, rgba(100, 116, 139, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(100, 116, 139, 0.14) 1px, transparent 1px);
+  background-size: 54px 54px;
+}
+.dark .lp-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+.lp-grid-mask {
+  -webkit-mask-image: radial-gradient(120% 75% at 50% 0%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(120% 75% at 50% 0%, #000 35%, transparent 78%);
 }
 
 /* Thin, unobtrusive scrollbars so every platform thread looks identical */
@@ -22,6 +63,24 @@ body {
 .scroll-thin::-webkit-scrollbar-thumb {
   @apply bg-slate-300 rounded-full;
 }
+.dark .scroll-thin::-webkit-scrollbar-thumb {
+  @apply bg-neutral-700;
+}
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Circular-reveal theme switch via the View Transitions API. The toggle drives
+   the clip-path animation inline (from the click point); we just disable the
+   default cross-fade so the new theme wipes in cleanly over the old one. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 9999;
 }

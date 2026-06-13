@@ -1,8 +1,10 @@
 "use client";
 
-import { motion } from "motion/react";
+import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
+import { TelegramConnect } from "./TelegramConnect";
 
 export type ConnState =
   | "starting"
@@ -38,6 +40,8 @@ export function ConnectionsModal({
   data: ConnectionsData | null;
   onClose: () => void;
 }) {
+  const [connectingTelegram, setConnectingTelegram] = useState(false);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -52,14 +56,14 @@ export function ConnectionsModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl"
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <h2 className="text-base font-semibold">Connections</h2>
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-neutral-700">
+          <h2 className="text-base font-semibold dark:text-neutral-100">Connections</h2>
           <button
             onClick={onClose}
-            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
             aria-label="Close"
           >
             ✕
@@ -67,14 +71,14 @@ export function ConnectionsModal({
         </div>
 
         {data && !data.workerRunning && (
-          <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800">
+          <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
             Sync worker isn&apos;t running. Start it with{" "}
-            <code className="rounded bg-amber-100 px-1">npm run sync</code> to
+            <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">npm run sync</code> to
             connect your accounts.
           </div>
         )}
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100 dark:divide-neutral-700">
           {PLATFORM_ORDER.map((p) => {
             const status = data?.platforms?.[p];
             const state: ConnState = status?.state ?? "disabled";
@@ -90,8 +94,8 @@ export function ConnectionsModal({
                     <PlatformGlyph platform={p} className="h-4 w-4" />
                   </span>
                   <div className="flex-1">
-                    <div className="font-medium">{plat.label}</div>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <div className="font-medium dark:text-neutral-100">{plat.label}</div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-neutral-400">
                       <span
                         className="inline-block h-2 w-2 rounded-full"
                         style={{ backgroundColor: meta.color }}
@@ -100,22 +104,30 @@ export function ConnectionsModal({
                       {status?.detail ? ` · ${status.detail}` : ""}
                     </div>
                   </div>
+                  {p === "telegram" && (
+                    <button
+                      onClick={() => setConnectingTelegram(true)}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                    >
+                      {state === "ready" ? "Re-link" : "Connect"}
+                    </button>
+                  )}
                   {p === "x" && state === "disabled" && (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-neutral-700 dark:text-neutral-400">
                       Not enabled
                     </span>
                   )}
                 </div>
 
                 {state === "qr" && status?.qr && (
-                  <div className="mt-3 flex flex-col items-center gap-2 rounded-xl bg-slate-50 p-4">
+                  <div className="mt-3 flex flex-col items-center gap-2 rounded-xl bg-slate-50 p-4 dark:bg-neutral-900">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={status.qr}
                       alt="WhatsApp QR code"
                       className="h-56 w-56 rounded-lg bg-white"
                     />
-                    <p className="text-center text-xs text-slate-500">
+                    <p className="text-center text-xs text-slate-500 dark:text-neutral-400">
                       On your phone: WhatsApp → <b>Settings</b> →{" "}
                       <b>Linked Devices</b> → <b>Link a Device</b>, then scan
                       this code.
@@ -124,24 +136,24 @@ export function ConnectionsModal({
                 )}
 
                 {state === "disconnected" && p === "x" && (
-                  <p className="mt-2 text-xs text-slate-500">
+                  <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
                     Not logged in. Run{" "}
-                    <code className="rounded bg-slate-100 px-1">npm run x:login</code>{" "}
+                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run x:login</code>{" "}
                     (a browser opens — log in to X), then restart the worker.
                   </p>
                 )}
 
                 {state === "disconnected" && p !== "x" && (
-                  <p className="mt-2 text-xs text-slate-500">
+                  <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
                     Connection dropped. Restart the sync worker to reconnect.
                   </p>
                 )}
 
                 {state === "disabled" && data?.workerRunning && p === "x" && (
-                  <p className="mt-2 text-xs text-slate-500">
-                    Set <code className="rounded bg-slate-100 px-1">X_ENABLED=1</code>{" "}
+                  <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
+                    Set <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_ENABLED=1</code>{" "}
                     in <code>.env</code>, run{" "}
-                    <code className="rounded bg-slate-100 px-1">npm run x:login</code>,
+                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run x:login</code>,
                     then restart <code>npm run sync</code>.
                   </p>
                 )}
@@ -149,8 +161,8 @@ export function ConnectionsModal({
                 {state === "disabled" &&
                   data?.workerRunning &&
                   p === "whatsapp" && (
-                    <p className="mt-2 text-xs text-slate-500">
-                      Set <code className="rounded bg-slate-100 px-1">WHATSAPP_ENABLED=1</code>{" "}
+                    <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
+                      Set <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">WHATSAPP_ENABLED=1</code>{" "}
                       in <code>.env</code> and restart <code>npm run sync</code>.
                     </p>
                   )}
@@ -159,6 +171,12 @@ export function ConnectionsModal({
           })}
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {connectingTelegram && (
+          <TelegramConnect onClose={() => setConnectingTelegram(false)} />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

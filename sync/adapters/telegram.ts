@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { TelegramClient } from "telegram";
+import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
 import { existingAvatar, saveAvatarBuffer } from "../avatars";
@@ -9,6 +9,7 @@ import type {
   AdapterStatus,
   InboundMessage,
   MediaType,
+  OutboundMedia,
   SentMessage,
 } from "./types";
 
@@ -156,7 +157,10 @@ export class TelegramAdapter implements Adapter {
     return { platform: "telegram", state: this.state, detail: this.detail };
   }
 
-  async start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void> {
+  async start(
+    onMessage: (m: InboundMessage) => Promise<void>,
+    onRead?: (chatExternalId: string) => Promise<void>
+  ): Promise<void> {
     await this.client.connect();
     this.state = "ready";
 
@@ -177,6 +181,17 @@ export class TelegramAdapter implements Adapter {
         console.error("[telegram] handler error:", e);
       }
     }, new NewMessage({}));
+
+    // Read-state sync: Telegram pushes UpdateReadHistoryInbox when you read a
+    // chat on another device, so we can clear the unread badge here.
+    if (onRead) {
+      this.client.addEventHandler((update: any) => {
+        if (update?.className !== "UpdateReadHistoryInbox") return;
+        const peer = update.peer;
+        const uid = peer?.userId ?? peer?.chatId ?? peer?.channelId;
+        if (uid != null) onRead(String(uid)).catch(() => {});
+      });
+    }
 
     const me: any = await this.client.getMe();
     this.detail = me?.username ? "@" + me.username : "account";
@@ -207,14 +222,36 @@ export class TelegramAdapter implements Adapter {
     );
   }
 
-  async send(chatExternalId: string, body: string): Promise<SentMessage> {
+  async send(
+    chatExternalId: string,
+    body: string,
+    media?: OutboundMedia
+  ): Promise<SentMessage> {
     // Telegram user ids are well within Number's safe-integer range.
     const peer = await this.client.getInputEntity(Number(chatExternalId));
-    const sent: any = await this.client.sendMessage(peer, { message: body });
+    let sent: any;
+    if (media) {
+      // forceDocument keeps arbitrary files as documents instead of trying to
+      // render them as photos/videos.
+      sent = await this.client.sendFile(peer, {
+        file: media.path,
+        caption: body || undefined,
+        forceDocument: media.type === "file",
+      });
+    } else {
+      sent = await this.client.sendMessage(peer, { message: body });
+    }
     return {
       messageExternalId: `telegram:${chatExternalId}:${sent.id}`,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async markRead(chatExternalId: string): Promise<void> {
+    const peer = await this.client.getInputEntity(Number(chatExternalId));
+    await this.client.invoke(
+      new Api.messages.ReadHistory({ peer, maxId: 0 })
+    );
   }
 
   async stop(): Promise<void> {

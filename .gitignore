@@ -13,4 +13,16 @@ public/media
 .wwebjs_cache
 .x_auth
 .x_profile
+.x_fingerprint.json
 public/avatars
+
+# databases (may contain real synced DMs)
+*.db
+*.sqlite
+*.sqlite-journal
+prisma/dev.db
+
+# local tooling / build artifacts / design scratch
+.claude
+.lazyweb
+*.tsbuildinfo

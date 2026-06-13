@@ -38,7 +38,7 @@ export function Avatar({
         </div>
       )}
       <span
-        className={`${s.badge} absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full text-white ring-2 ring-white`}
+        className={`${s.badge} absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full text-white ring-2 ring-white dark:ring-neutral-900`}
         style={{ backgroundColor: p.bg }}
         title={p.label}
       >
