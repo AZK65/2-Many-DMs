@@ -13,6 +13,9 @@ html,
 body {
   height: 100%;
 }
+html {
+  scroll-behavior: smooth;
+}
 
 body {
   @apply bg-slate-100 text-slate-900 antialiased transition-colors duration-300;

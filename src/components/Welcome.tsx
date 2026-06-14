@@ -99,6 +99,12 @@ export function Welcome() {
             {/* ── Step 0: intro ── */}
             {step === 0 && (
               <div className="text-center">
+                <div className="mb-7 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/brand/lockup-light.png" alt="2 Many DMs" className="h-9 w-auto dark:hidden" />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/brand/lockup-dark.png" alt="2 Many DMs" className="hidden h-9 w-auto dark:block" />
+                </div>
                 <div className="mb-8 flex items-center justify-center gap-3">
                   {PLATFORM_ORDER.map((p, i) => (
                     <motion.span
