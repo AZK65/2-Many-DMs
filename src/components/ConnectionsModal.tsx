@@ -107,7 +107,7 @@ export function ConnectionsModal({
                   {p === "telegram" && (
                     <button
                       onClick={() => setConnectingTelegram(true)}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                      className="rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
                     >
                       {state === "ready" ? "Re-link" : "Connect"}
                     </button>

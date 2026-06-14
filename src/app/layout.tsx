@@ -3,7 +3,7 @@ import "./globals.css";
 import { SupportBubble } from "@/components/SupportBubble";
 
 export const metadata: Metadata = {
-  title: "Unified Inbox",
+  title: "2 Many DMs",
   description: "One inbox for X, WhatsApp, and Telegram with built-in CRM tags.",
 };
 

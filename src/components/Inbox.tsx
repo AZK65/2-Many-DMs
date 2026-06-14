@@ -545,7 +545,7 @@ export function Inbox() {
                   active={inFolder}
                   trailing={
                     inFolder ? (
-                      <CheckIcon className="h-4 w-4 text-blue-600" />
+                      <CheckIcon className="h-4 w-4 text-[#0e9f63]" />
                     ) : undefined
                   }
                   onClick={() => toggleFolder(c, f.id)}
@@ -556,7 +556,7 @@ export function Inbox() {
             })}
             <MenuRow
               icon={<PlusIcon className="h-4 w-4" />}
-              className="text-blue-600 dark:text-blue-400"
+              className="text-[#0e9f63] dark:text-[#1FE88A]"
               onClick={() => {
                 openNewFolder(c.id);
                 setMenuId(null);
@@ -581,7 +581,7 @@ export function Inbox() {
             title={showContact ? "Hide contact info" : "Show contact info"}
             className={`grid h-9 w-9 place-items-center rounded-xl border transition-colors ${
               showContact
-                ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-400"
+                ? "border-[#1FE88A]/40 bg-[#1FE88A]/15 text-[#0e9f63] dark:border-[#1FE88A]/30 dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]"
                 : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
             }`}
           >
@@ -596,6 +596,10 @@ export function Inbox() {
         <div className="border-b border-slate-200 px-4 pb-3 pt-4 dark:border-neutral-800">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
               <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
                 <span className="rounded-md bg-white px-2.5 py-1 text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100">
                   Inbox
@@ -722,13 +726,13 @@ export function Inbox() {
                 title="Filter by platform & tag"
                 className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                   activeFilters || showFilters
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400"
+                    ? "bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]"
                     : "text-slate-500 hover:bg-slate-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
                 }`}
               >
                 <FunnelIcon className="h-3.5 w-3.5" />
                 {activeFilters > 0 && (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold text-white">
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#1FE88A] px-1 text-[10px] font-bold text-[#04140d]">
                     {activeFilters}
                   </span>
                 )}
@@ -758,7 +762,7 @@ export function Inbox() {
                             setPlatformFilter("all");
                             setTagFilter("all");
                           }}
-                          className="text-[11px] font-medium text-blue-600 hover:underline"
+                          className="text-[11px] font-medium text-[#0e9f63] hover:underline"
                         >
                           Clear
                         </button>
@@ -884,7 +888,7 @@ export function Inbox() {
                     <span
                       className={`relative rounded-full transition ${
                         c.id === selectedId
-                          ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-neutral-900"
+                          ? "ring-2 ring-[#1FE88A] ring-offset-2 ring-offset-white dark:ring-offset-neutral-900"
                           : ""
                       }`}
                     >
@@ -895,7 +899,7 @@ export function Inbox() {
                         src={c.contact.avatarUrl}
                       />
                       {c.unread > 0 && (
-                        <span className="absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold text-white ring-2 ring-white dark:ring-neutral-900">
+                        <span className="absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#1FE88A] px-1.5 text-[11px] font-semibold text-[#04140d] ring-2 ring-white dark:ring-neutral-900">
                           {c.unread}
                         </span>
                       )}
@@ -930,7 +934,7 @@ export function Inbox() {
               onClick={() => selectConversation(c.id)}
               className={`group relative flex w-full cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors dark:border-neutral-800/70 ${
                 c.id === selectedId
-                  ? "bg-blue-50 dark:bg-blue-500/10"
+                  ? "bg-[#1FE88A]/15 dark:bg-[#1FE88A]/10"
                   : "hover:bg-slate-50 dark:hover:bg-neutral-800/60"
               }`}
             >
@@ -961,7 +965,7 @@ export function Inbox() {
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-[11px] text-slate-400 group-hover:hidden dark:text-neutral-500">
                     {isSnoozed(c) && (
-                      <span className="flex items-center gap-0.5 text-violet-500 dark:text-violet-400">
+                      <span className="flex items-center gap-0.5 text-[#0e9f63] dark:text-[#1FE88A]">
                         <ClockIcon className="h-3 w-3" />
                         {snoozeLabel(c.snoozedUntil!)}
                       </span>
@@ -986,7 +990,7 @@ export function Inbox() {
                         </span>
                       )}
                     {c.unread > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold text-white">
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#1FE88A] px-1.5 text-[11px] font-semibold text-[#04140d]">
                         {c.unread}
                       </span>
                     )}
@@ -1116,7 +1120,7 @@ export function Inbox() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
                   <FolderIcon className="h-4 w-4" />
                 </span>
                 <div>
@@ -1137,7 +1141,7 @@ export function Inbox() {
                   if (e.key === "Escape") setNewFolderOpen(false);
                 }}
                 placeholder="e.g. Clients, Leads, Partners…"
-                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-200 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-blue-500/40"
+                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-[#1FE88A]/40"
               />
               <div className="mt-4 flex justify-end gap-2">
                 <button
@@ -1150,7 +1154,7 @@ export function Inbox() {
                   whileTap={{ scale: 0.96 }}
                   onClick={submitNewFolder}
                   disabled={!newFolderName.trim()}
-                  className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-40"
+                  className="rounded-lg bg-[#1FE88A] px-3.5 py-1.5 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
                 >
                   Create
                 </motion.button>

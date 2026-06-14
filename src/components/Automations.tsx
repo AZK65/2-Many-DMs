@@ -267,6 +267,11 @@ export function Automations() {
   return (
     <div className="flex h-screen flex-col bg-slate-100 dark:bg-neutral-950">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
         <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
           <Link
             href="/"
@@ -284,6 +289,7 @@ export function Automations() {
             Automations
           </span>
         </nav>
+        </div>
         <ThemeToggle />
       </header>
 
@@ -302,7 +308,7 @@ export function Automations() {
             <motion.button
               whileTap={{ scale: 0.97 }}
               onClick={() => setPicking(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+              className="flex items-center gap-1.5 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579]"
             >
               <ZapIcon className="h-4 w-4" />
               New automation
@@ -317,7 +323,7 @@ export function Automations() {
 
           {!loading && autos.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center dark:border-neutral-800">
-              <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+              <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
                 <ZapIcon className="h-5 w-5" />
               </div>
               <p className="text-sm font-medium text-slate-700 dark:text-neutral-200">
@@ -348,7 +354,7 @@ export function Automations() {
                       title={a.enabled ? "Enabled" : "Disabled"}
                       className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition ${
                         a.enabled
-                          ? "bg-blue-600"
+                          ? "bg-[#1FE88A]"
                           : "bg-slate-300 dark:bg-neutral-700"
                       }`}
                     >
@@ -494,10 +500,10 @@ function TemplatePicker({
             <button
               key={t.name}
               onClick={() => onPick(t.draft())}
-              className="rounded-xl border border-slate-200 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-neutral-800 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
+              className="rounded-xl border border-slate-200 p-3 text-left transition hover:border-[#1FE88A]/50 hover:bg-[#1FE88A]/40 dark:border-neutral-800 dark:hover:border-[#1FE88A]/40 dark:hover:bg-[#1FE88A]/5"
             >
               <div className="flex items-center gap-2">
-                <span className="grid h-6 w-6 place-items-center rounded-md bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+                <span className="grid h-6 w-6 place-items-center rounded-md bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
                   <ZapIcon className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-sm font-semibold text-slate-800 dark:text-neutral-100">
@@ -743,13 +749,13 @@ function Builder({
                   ? {
                       label: "Send message",
                       icon: <SendIcon className="h-3.5 w-3.5" />,
-                      chip: "bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400",
+                      chip: "bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]",
                     }
                   : a.type === "tag"
                   ? {
                       label: "Add tag",
                       icon: <FolderIcon className="h-3.5 w-3.5" />,
-                      chip: "bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400",
+                      chip: "bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]",
                     }
                   : {
                       label: "Set status",
@@ -915,7 +921,7 @@ function Builder({
               <span className="text-slate-500 dark:text-neutral-400">
                 Targets right now
               </span>
-              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+              <span className="rounded-full bg-[#1FE88A]/15 px-2 py-0.5 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
                 {preview ? preview.total : "…"} chat
                 {preview && preview.total === 1 ? "" : "s"}
               </span>
@@ -962,7 +968,7 @@ function Builder({
             whileTap={{ scale: 0.97 }}
             onClick={save}
             disabled={saving || d.actions.length === 0}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-40"
+            className="rounded-lg bg-[#1FE88A] px-4 py-2 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
           >
             {saving ? "Saving…" : d.id ? "Save" : "Create"}
           </motion.button>
@@ -973,7 +979,7 @@ function Builder({
 }
 
 const inputCls =
-  "w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-200 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-blue-500/40";
+  "w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-[#1FE88A]/40";
 
 function Labeled({
   label,
