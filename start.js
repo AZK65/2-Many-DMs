@@ -34,7 +34,13 @@ function startWorker() {
     setTimeout(startWorker, 10000);
   });
 }
-startWorker();
+// MARKETING_ONLY deploys (e.g. the public 2manydms.com site) serve just the
+// landing page — no channels are connected, so don't run the sync worker.
+if (process.env.MARKETING_ONLY === "1") {
+  console.log("[start] MARKETING_ONLY=1 — landing-only mode, sync worker disabled");
+} else {
+  startWorker();
+}
 
 function shutdown(code) {
   if (dying) return;

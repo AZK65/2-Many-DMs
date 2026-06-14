@@ -39,6 +39,28 @@ body {
 .animate-fade-in-2 { animation: fade-in 0.5s ease-out 0.12s both; }
 .animate-fade-in-3 { animation: fade-in 0.5s ease-out 0.2s both; }
 
+/* "Copied to clipboard" toast + checkmark draw. */
+@keyframes copy-pop {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(0.92); }
+  55% { transform: translate(-50%, 0) scale(1.04); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.animate-copy-pop { animation: copy-pop 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes check-draw {
+  from { stroke-dashoffset: 26; }
+  to { stroke-dashoffset: 0; }
+}
+.animate-check-draw {
+  stroke-dasharray: 26;
+  animation: check-draw 0.4s ease-out 0.06s both;
+}
+@keyframes icon-pop {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.animate-icon-pop { animation: icon-pop 0.3s ease-out both; }
+
 /* Landing page atmosphere: faint blueprint grid + soft top mask. */
 .lp-grid {
   background-image:

@@ -30,6 +30,16 @@ export function Landing() {
         <div className="absolute left-1/2 top-[-40px] h-[360px] w-[560px] -translate-x-1/2 rounded-full bg-violet-400/15 blur-[130px] dark:bg-violet-600/20" />
       </div>
 
+      {/* Copied-to-clipboard toast */}
+      {copied && (
+        <div className="animate-copy-pop fixed left-1/2 top-5 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xl">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-emerald-400">
+            <path d="M20 6 9 17l-5-5" className="animate-check-draw" />
+          </svg>
+          Prompt copied — paste it into your agent
+        </div>
+      )}
+
       {/* Nav */}
       <header className="sticky top-0 z-40 border-b border-slate-200/60 bg-white/70 backdrop-blur-xl dark:border-neutral-800/60 dark:bg-black/50">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
@@ -106,15 +116,15 @@ export function Landing() {
             onClick={() => copy("claude")}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#d97757] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#d97757]/25 transition hover:brightness-105 sm:w-auto"
           >
-            <span className="text-base leading-none">✳</span>
-            {copied === "claude" ? "Prompt copied ✓" : "Deploy with Claude Code"}
+            <CopyIcon active={copied === "claude"} glyph="✳" />
+            {copied === "claude" ? "Copied!" : "Deploy with Claude Code"}
           </button>
           <button
             onClick={() => copy("codex")}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-900 backdrop-blur transition hover:bg-white sm:w-auto dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-white dark:hover:bg-neutral-800"
           >
-            <span className="text-base leading-none">◇</span>
-            {copied === "codex" ? "Prompt copied ✓" : "Deploy with Codex"}
+            <CopyIcon active={copied === "codex"} glyph="◇" />
+            {copied === "codex" ? "Copied!" : "Deploy with Codex"}
           </button>
         </div>
         <p className="animate-fade-in-2 mt-3 text-xs text-slate-400 dark:text-neutral-500">
@@ -271,15 +281,15 @@ export function Landing() {
                   onClick={() => copy("claude2")}
                   className="flex items-center justify-center gap-2 rounded-xl bg-[#d97757] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#d97757]/25 transition hover:brightness-105"
                 >
-                  <span className="text-base leading-none">✳</span>
-                  {copied === "claude2" ? "Prompt copied ✓" : "Deploy with Claude Code"}
+                  <CopyIcon active={copied === "claude2"} glyph="✳" />
+                  {copied === "claude2" ? "Copied!" : "Deploy with Claude Code"}
                 </button>
                 <button
                   onClick={() => copy("codex2")}
                   className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:hover:bg-neutral-800"
                 >
-                  <span className="text-base leading-none">◇</span>
-                  {copied === "codex2" ? "Prompt copied ✓" : "Deploy with Codex"}
+                  <CopyIcon active={copied === "codex2"} glyph="◇" />
+                  {copied === "codex2" ? "Copied!" : "Deploy with Codex"}
                 </button>
                 <a
                   href={GITHUB_URL}
@@ -289,6 +299,18 @@ export function Landing() {
                 >
                   View on GitHub ↗
                 </a>
+              </div>
+
+              <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-300/70 bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200/90">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0">
+                  <path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                </svg>
+                <span>
+                  <strong className="font-semibold">Run it on your own machine for the healthiest accounts.</strong>{" "}
+                  WhatsApp and X flag logins from datacenter / cloud IPs — a home,
+                  residential, or 5G connection (or a residential proxy) is much safer
+                  than a bare server. Telegram is fine either way.
+                </span>
               </div>
             </div>
 
@@ -376,6 +398,17 @@ export function Landing() {
       </footer>
     </div>
   );
+}
+
+function CopyIcon({ active, glyph }: { active: boolean; glyph: string }) {
+  if (active) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="animate-icon-pop h-4 w-4">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+  }
+  return <span className="text-base leading-none">{glyph}</span>;
 }
 
 function SectionLabel({ n, label }: { n: string; label: string }) {
