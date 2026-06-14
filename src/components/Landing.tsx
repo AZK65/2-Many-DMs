@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
@@ -69,12 +68,12 @@ export function Landing() {
             >
               Support
             </a>
-            <Link
-              href="/"
-              className="rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+            <a
+              href="#deploy"
+              className="rounded-lg bg-[#1FE88A] px-3.5 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
             >
-              Open app →
-            </Link>
+              Deploy
+            </a>
             <ThemeToggle />
           </div>
         </div>
@@ -250,7 +249,7 @@ export function Landing() {
       </section>
 
       {/* Deploy */}
-      <section className="mx-auto max-w-6xl px-5 py-20">
+      <section id="deploy" className="mx-auto max-w-6xl px-5 py-20">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 dark:border-neutral-800 dark:bg-neutral-950">
           <div className="grid gap-8 p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
             <div>
@@ -376,12 +375,12 @@ export function Landing() {
             your box.
           </p>
           <div className="mt-6 flex items-center justify-center gap-3">
-            <Link
-              href="/"
-              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+            <a
+              href="#deploy"
+              className="rounded-xl bg-[#1FE88A] px-5 py-2.5 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
             >
-              Open the app →
-            </Link>
+              Deploy it yourself →
+            </a>
             <a
               href={TG_LINK}
               target="_blank"
