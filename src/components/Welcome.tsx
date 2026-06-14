@@ -83,7 +83,7 @@ export function Welcome() {
             key={i}
             className={`h-2 rounded-full transition-all duration-300 ${
               i === step ? "w-6" : "w-2"
-            } ${i <= step ? "bg-blue-600" : "bg-slate-300 dark:bg-neutral-700"}`}
+            } ${i <= step ? "bg-[#1FE88A]" : "bg-slate-300 dark:bg-neutral-700"}`}
           />
         ))}
       </div>
@@ -149,7 +149,7 @@ export function Welcome() {
                   transition={{ delay: 0.74 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => go(1)}
-                  className="mt-8 w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  className="mt-8 w-full rounded-xl bg-[#1FE88A] py-3 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
                 >
                   Get started →
                 </motion.button>
@@ -286,7 +286,7 @@ export function Welcome() {
                     href={TG_LINK}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3.5 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-neutral-700 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/5"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3.5 transition hover:border-[#1FE88A]/50 hover:bg-[#1FE88A]/40 dark:border-neutral-700 dark:hover:border-[#1FE88A]/40 dark:hover:bg-[#1FE88A]/5"
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-slate-800 dark:text-neutral-100">
@@ -297,7 +297,7 @@ export function Welcome() {
                         developer can build it for you.
                       </div>
                     </div>
-                    <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">
+                    <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#1FE88A] px-3 py-2 text-xs font-semibold text-[#04140d]">
                       Contact
                       <span className="rounded bg-white/20 px-1 text-[10px]">
                         Paid
@@ -316,7 +316,7 @@ export function Welcome() {
                   <motion.button
                     whileTap={{ scale: 0.97 }}
                     onClick={() => go(2)}
-                    className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                    className="rounded-xl bg-[#1FE88A] px-5 py-2.5 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
                   >
                     {anyConnected ? "Continue →" : "I’ll connect later →"}
                   </motion.button>
@@ -369,7 +369,7 @@ export function Welcome() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={finish}
-                  className="mt-7 w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  className="mt-7 w-full rounded-xl bg-[#1FE88A] py-3 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
                 >
                   Go to my inbox →
                 </motion.button>
@@ -436,7 +436,7 @@ function ConnectCard({
       ) : (
         <button
           onClick={onConnect}
-          className="shrink-0 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
+          className="shrink-0 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
         >
           Connect
         </button>

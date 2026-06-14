@@ -126,6 +126,10 @@ export function Board() {
       {/* Header / nav */}
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
           <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
             <Link
               href="/"
@@ -193,7 +197,7 @@ export function Board() {
                 }}
                 className={`flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-50 transition dark:bg-neutral-900 ${
                   overCol === col.id
-                    ? "border-blue-400 ring-2 ring-blue-300 dark:border-blue-500 dark:ring-blue-500/40"
+                    ? "border-[#1FE88A]/50 ring-2 ring-[#1FE88A]/50 dark:border-[#1FE88A] dark:ring-[#1FE88A]/40"
                     : "border-slate-200 dark:border-neutral-800"
                 }`}
               >

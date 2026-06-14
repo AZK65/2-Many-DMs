@@ -233,7 +233,7 @@ export function CommandPalette({
                     <span
                       className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border transition ${
                         isSel
-                          ? "border-blue-600 bg-blue-600 text-white"
+                          ? "border-[#1FE88A] bg-[#1FE88A] text-[#04140d]"
                           : "border-slate-300 dark:border-neutral-600"
                       }`}
                     >
@@ -278,7 +278,7 @@ export function CommandPalette({
                   <motion.button
                     whileTap={{ scale: 0.97 }}
                     onClick={() => setMode("folder")}
-                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                    className="flex items-center gap-1.5 rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
                   >
                     <FolderIcon className="h-3.5 w-3.5" />
                     Add to folder
@@ -335,7 +335,7 @@ export function CommandPalette({
                   disabled={busy}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-neutral-800"
                 >
-                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
                     <PlusIcon className="h-4 w-4" />
                   </span>
                   <span className="text-sm text-slate-700 dark:text-neutral-200">
