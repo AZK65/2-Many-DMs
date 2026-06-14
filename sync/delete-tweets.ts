@@ -259,6 +259,21 @@ async function main() {
     ],
   });
 
+  // Always close the browser on Ctrl+C / kill. Otherwise an interrupted run
+  // leaves the automation Chrome alive, and because it's the real Chrome binary
+  // (just a separate profile), macOS then focuses that orphan instead of
+  // opening your normal Chrome with your profiles.
+  const cleanup = async () => {
+    try {
+      await browser.close();
+    } catch {
+      /* already gone */
+    }
+    process.exit(130);
+  };
+  process.once("SIGINT", cleanup);
+  process.once("SIGTERM", cleanup);
+
   try {
     const page = (await browser.pages())[0] || (await browser.newPage());
     // Inject a consistent realistic fingerprint (UA, navigator/WebGL overrides)
