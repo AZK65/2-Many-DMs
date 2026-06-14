@@ -43,11 +43,11 @@ export function Landing() {
       {/* Nav */}
       <header className="sticky top-0 z-40 border-b border-slate-200/60 bg-white/70 backdrop-blur-xl dark:border-neutral-800/60 dark:bg-black/50">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#1FE88A] text-sm font-bold text-[#04140d] shadow-sm">
-              ⌘
-            </span>
-            <span className="text-sm font-semibold tracking-tight">Unified Inbox</span>
+          <div className="flex items-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/lockup-light.png" alt="2 Many DMs" className="h-7 w-auto dark:hidden" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/lockup-dark.png" alt="2 Many DMs" className="hidden h-7 w-auto dark:block" />
           </div>
           <div className="flex items-center gap-1.5">
             <a
@@ -392,7 +392,7 @@ export function Landing() {
             </a>
           </div>
           <p className="mt-10 text-xs text-slate-400 dark:text-neutral-600">
-            Unified Inbox · a self-hostable DM CRM
+            2 Many DMs · a self-hostable DM CRM
           </p>
         </div>
       </footer>
@@ -514,7 +514,7 @@ function BrowserFrame({ children }: { children: React.ReactNode }) {
             <rect x="5" y="11" width="14" height="9" rx="2" />
             <path d="M8 11V7a4 4 0 0 1 8 0v4" />
           </svg>
-          app.unifiedinbox.dev
+          app.2manydms.com
         </span>
       </div>
       {children}

@@ -1,6 +1,9 @@
 <div align="center">
 
-# 2 Many DM's
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/brand/lockup-dark.png" />
+  <img alt="2 Many DMs" src="public/brand/lockup-light.png" width="440" />
+</picture>
 
 ### One inbox for every DM — with a CRM built in.
 
