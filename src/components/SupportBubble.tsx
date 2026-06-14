@@ -26,7 +26,7 @@ export function SupportBubble() {
         </span>
         <span className="block text-[11px] text-slate-400 dark:text-neutral-500">
           Message me on Telegram ·{" "}
-          <span className="font-medium text-blue-600 dark:text-blue-400">
+          <span className="font-medium text-[#0e9f63] dark:text-[#1FE88A]">
             paid
           </span>
         </span>
