@@ -1,0 +1,35 @@
+{
+  "current": "0.4.0",
+  "entries": [
+    {
+      "version": "0.4.0",
+      "date": "2026-06-16",
+      "title": "Multi-account + browser-free sync",
+      "notes": [
+        "Run multiple accounts per platform (Telegram, WhatsApp, X)",
+        "Browser-free drivers: WhatsApp via Baileys, X via the cookie API",
+        "\"via @account\" indicator shows which account a chat is on",
+        "Connections + onboarding redesigned for multiple accounts"
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-06-10",
+      "title": "Automations & pipeline",
+      "notes": [
+        "Outreach automations with triggers, templates, and scheduling",
+        "Pipeline board with deal stages",
+        "Follow-ups, snooze, and going-cold surfacing"
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-06-05",
+      "title": "Multi-platform inbox",
+      "notes": [
+        "Unified inbox across Telegram, WhatsApp, and X DMs",
+        "Contact profiles, tags, folders, and pinning"
+      ]
+    }
+  ]
+}
