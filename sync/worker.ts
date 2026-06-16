@@ -82,8 +82,22 @@ async function startAdapters() {
   const ordered = [...accounts].sort(
     (a, b) => Number(isHeavy(a)) - Number(isHeavy(b))
   );
+  // Telegram/X without their own stored session fall back to the shared env
+  // credentials — running several would duplicate ingestion under different
+  // accountIds (and trip AUTH_KEY_DUPLICATED on Telegram). Allow only the first
+  // such account per platform; the rest need their own session to run.
+  const envUsed = new Set<string>();
   for (const acc of ordered) {
     try {
+      if ((acc.platform === "telegram" || acc.platform === "x") && !acc.session) {
+        if (envUsed.has(acc.platform)) {
+          console.warn(
+            `[sync] skipping ${acc.platform} "${acc.label || acc.id}" — no stored session (env credentials already in use by another account). Connect it to run it.`
+          );
+          continue;
+        }
+        envUsed.add(acc.platform);
+      }
       const adapter = buildAdapter(acc);
       if (!adapter) continue;
       adapters.set(acc.id, adapter);
