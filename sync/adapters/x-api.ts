@@ -111,22 +111,16 @@ export class XApiAdapter implements Adapter {
       return;
     }
     try {
-      const me = await this.api(
-        "https://x.com/i/api/1.1/account/verify_credentials.json"
-      );
-      this.myId = String(me.id_str || me.id || "");
-      this.detail = me.screen_name ? "@" + me.screen_name : undefined;
-      this.state = "ready";
-      console.log("[x:api] live", this.detail || "");
+      // The inbox fetch doubles as the connectivity + identity check — there's
+      // no working verify_credentials endpoint for cookie auth, so we derive
+      // "me" from the inbox itself.
+      await this.backfill();
     } catch (e) {
       this.state = "disconnected";
       console.error("[x:api] connect failed:", e);
       return;
     }
 
-    if (process.env.SYNC_BACKFILL !== "0") {
-      await this.backfill().catch((e) => console.error("[x:api] backfill error:", e));
-    }
     const everyMs = Number(process.env.X_POLL_MS || 20000);
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => {
@@ -134,7 +128,7 @@ export class XApiAdapter implements Adapter {
     }, everyMs);
   }
 
-  private async backfill(): Promise<void> {
+  private async fetchInbox(): Promise<any> {
     const url =
       `${API}/dm/inbox_initial_state.json?` +
       [
@@ -147,24 +141,32 @@ export class XApiAdapter implements Adapter {
         "include_conversation_info=true",
       ].join("&");
     const data = await this.api(url);
-    const st = data.inbox_initial_state || data.user_events || {};
-    await this.ingest(st);
-    if (st.cursor) this.cursor = st.cursor;
-    console.log(`[x:api] backfilled inbox (cursor=${this.cursor ? "set" : "none"})`);
+    return data.inbox_initial_state || {};
   }
 
+  private async backfill(): Promise<void> {
+    const block = await this.fetchInbox();
+    this.myId = deriveMyId(block.conversations || {});
+    const me = (block.users || {})[this.myId];
+    this.detail = me?.screen_name ? "@" + me.screen_name : undefined;
+    this.state = "ready";
+    console.log(
+      `[x:api] live ${this.detail || "(id " + this.myId + ")"} — ${
+        Object.keys(block.conversations || {}).length
+      } conversations`
+    );
+    await this.ingest(block);
+    if (block.cursor) this.cursor = block.cursor;
+  }
+
+  // user_updates.json is retired; re-poll the inbox (dedupe handles repeats).
   private async poll(): Promise<void> {
     if (this.busy || this.state !== "ready") return;
     this.busy = true;
     try {
-      const url =
-        `${API}/dm/user_updates.json?` +
-        (this.cursor ? `cursor=${encodeURIComponent(this.cursor)}&` : "") +
-        "dm_users=true&include_groups=true&supports_reactions=true";
-      const data = await this.api(url);
-      const ue = data.user_events || data.inbox_initial_state || {};
-      await this.ingest(ue);
-      if (ue.cursor) this.cursor = ue.cursor;
+      const block = await this.fetchInbox();
+      await this.ingest(block);
+      if (block.cursor) this.cursor = block.cursor;
     } finally {
       this.busy = false;
     }
@@ -347,4 +349,29 @@ function mediaTypeFromAttachment(att: any): MediaType | null {
   if (att.video) return "video";
   if (att.animated_gif) return "video";
   return null;
+}
+
+// "me" is the user present in (almost) every 1:1 conversation. Count user-id
+// frequency across ONE_TO_ONE conversations; the most common is us. (There's no
+// working cookie-auth verify_credentials endpoint to ask X directly.)
+function deriveMyId(conversations: Record<string, any>): string {
+  const freq = new Map<string, number>();
+  for (const conv of Object.values(conversations)) {
+    if (conv?.type && conv.type !== "ONE_TO_ONE") continue;
+    let ids: string[] = [];
+    if (Array.isArray(conv?.participants))
+      ids = conv.participants.map((p: any) => String(p.user_id)).filter(Boolean);
+    else if (typeof conv?.conversation_id === "string")
+      ids = conv.conversation_id.split("-");
+    for (const id of ids) freq.set(id, (freq.get(id) || 0) + 1);
+  }
+  let me = "";
+  let best = -1;
+  for (const [id, c] of freq) {
+    if (c > best) {
+      best = c;
+      me = id;
+    }
+  }
+  return me;
 }
