@@ -21,6 +21,13 @@ import { ChatThread } from "./ChatThread";
 import { ContactPanel } from "./ContactPanel";
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
+import { SettingsModal } from "./SettingsModal";
+import {
+  loadSettings,
+  applySettings,
+  DEFAULT_SETTINGS,
+  type Settings,
+} from "@/lib/settings";
 import { SnippetsModal } from "./SnippetsModal";
 import { CommandPalette } from "./CommandPalette";
 import {
@@ -44,7 +51,6 @@ import {
   SearchIcon,
 } from "./icons";
 
-const COLD_DAYS = 7;
 type InboxView = "all" | "needsreply" | "cold" | "snoozed" | "done";
 
 function isSnoozed(c: ConversationDTO): boolean {
@@ -87,6 +93,19 @@ export function Inbox() {
   const [folderFilter, setFolderFilter] = useState<string | "all">("all");
   const [showHidden, setShowHidden] = useState(false);
   const [view, setView] = useState<InboxView>("needsreply");
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Load + apply saved preferences on mount; re-read when they change.
+  useEffect(() => {
+    const s = loadSettings();
+    setSettings(s);
+    applySettings(s);
+    setView(s.defaultView);
+    const onChange = () => setSettings(loadSettings());
+    window.addEventListener("tmd-settings", onChange);
+    return () => window.removeEventListener("tmd-settings", onChange);
+  }, []);
   const [showFilters, setShowFilters] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -604,6 +623,25 @@ export function Inbox() {
             <InfoIcon className="h-[18px] w-[18px]" />
           </motion.button>
         )}
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={() => setShowSettings(true)}
+          title="Settings"
+          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-[18px] w-[18px]"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </motion.button>
         <ThemeToggle />
       </div>
 
@@ -1005,7 +1043,7 @@ export function Inbox() {
                   <div className="flex shrink-0 items-center gap-1.5">
                     {c.status !== "done" &&
                       !isSnoozed(c) &&
-                      coldDays(c) >= COLD_DAYS && (
+                      coldDays(c) >= settings.coldDays && (
                         <span
                           title={`Untouched for ${coldDays(c)} days`}
                           className="flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold leading-none text-amber-700 dark:border-amber-400/50 dark:bg-amber-400/15 dark:text-amber-300"
@@ -1098,6 +1136,10 @@ export function Inbox() {
             onClose={() => setShowConnections(false)}
           />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       </AnimatePresence>
 
       <AnimatePresence>
