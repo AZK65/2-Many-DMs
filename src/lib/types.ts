@@ -89,6 +89,9 @@ export interface ConversationDTO {
   lastOpenedAt: string | null;
   lastDirection: "in" | "out" | null;
   folderIds: string[];
+  // Which of your connected accounts this chat is on (multi-account routing) —
+  // lets the UI show "via …" so the same person on two accounts is distinct.
+  account: { id: string; label: string | null } | null;
   contact: ContactDTO;
 }
 

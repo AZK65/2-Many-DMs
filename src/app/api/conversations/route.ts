@@ -12,6 +12,7 @@ export async function GET() {
       contact: { include: { tags: { include: { tag: true } } } },
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
       folders: { select: { folderId: true } },
+      account: { select: { id: true, label: true } },
     },
   });
 
@@ -34,6 +35,9 @@ export async function GET() {
       lastOpenedAt: c.lastOpenedAt ? c.lastOpenedAt.toISOString() : null,
       lastDirection: last ? (last.direction as "in" | "out") : null,
       folderIds: c.folders.map((f) => f.folderId),
+      account: c.account
+        ? { id: c.account.id, label: c.account.label }
+        : null,
       contact: {
         id: c.contact.id,
         name: c.contact.name,
