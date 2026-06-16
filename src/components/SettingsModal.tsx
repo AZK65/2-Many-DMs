@@ -5,8 +5,12 @@ import { motion } from "motion/react";
 import {
   loadSettings,
   saveSettings,
+  currentTheme,
+  applyTheme,
+  DEFAULT_SETTINGS,
   type Settings,
   type ScrollbarPref,
+  type ThemePref,
 } from "@/lib/settings";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
@@ -30,10 +34,17 @@ const DRIVER_LABEL: Record<string, string> = {
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<Settings>(loadSettings());
+  const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
 
+  function setTheme(t: ThemePref) {
+    setThemeState(t);
+    applyTheme(t);
+  }
+
   useEffect(() => {
+    setThemeState(currentTheme());
     fetch("/api/accounts").then((r) => r.json()).then(setAccounts).catch(() => {});
     fetch("/api/connections")
       .then((r) => r.json())
@@ -78,6 +89,33 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">
           {/* Appearance */}
           <Section title="Appearance">
+            <Row label="Theme" hint="Light, dark, or follow your system">
+              <Segmented<ThemePref>
+                value={theme}
+                onChange={setTheme}
+                options={[
+                  ["light", "Light"],
+                  ["dark", "Dark"],
+                  ["system", "Auto"],
+                ]}
+              />
+            </Row>
+            <Row label="Accent · light" hint="Buttons & highlights in light mode">
+              <input
+                type="color"
+                value={s.accentLight}
+                onChange={(e) => update({ accentLight: e.target.value })}
+                className="h-7 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
+              />
+            </Row>
+            <Row label="Accent · dark" hint="Buttons & highlights in dark mode">
+              <input
+                type="color"
+                value={s.accentDark}
+                onChange={(e) => update({ accentDark: e.target.value })}
+                className="h-7 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
+              />
+            </Row>
             <Row label="Scrollbar" hint="The thin slider on scrollable lists">
               <Segmented<ScrollbarPref>
                 value={s.scrollbar}
@@ -89,6 +127,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 ]}
               />
             </Row>
+            <button
+              onClick={() =>
+                update({
+                  accentLight: DEFAULT_SETTINGS.accentLight,
+                  accentDark: DEFAULT_SETTINGS.accentDark,
+                })
+              }
+              className="text-[11px] text-slate-400 transition hover:text-slate-600 dark:text-neutral-500 dark:hover:text-neutral-300"
+            >
+              Reset accent to default
+            </button>
           </Section>
 
           {/* Inbox */}

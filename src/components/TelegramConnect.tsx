@@ -231,7 +231,7 @@ function Field({
         onKeyDown={(e) => {
           if (e.key === "Enter") onEnter?.();
         }}
-        className="w-full rounded-lg bg-slate-100 px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-[#1FE88A]/40"
+        className="w-full rounded-lg bg-slate-100 px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-accent/40"
       />
       {hint && (
         <span className="mt-1.5 block text-[11px] text-slate-400 dark:text-neutral-500">
@@ -258,7 +258,7 @@ function Primary({
       whileTap={{ scale: 0.97 }}
       onClick={onClick}
       disabled={busy || disabled}
-      className="rounded-lg bg-[#1FE88A] px-4 py-2 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
+      className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent disabled:opacity-40"
     >
       {busy ? "…" : children}
     </motion.button>

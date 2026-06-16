@@ -197,7 +197,7 @@ export function Board() {
                 }}
                 className={`flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-50 transition dark:bg-neutral-900 ${
                   overCol === col.id
-                    ? "border-[#1FE88A]/50 ring-2 ring-[#1FE88A]/50 dark:border-[#1FE88A] dark:ring-[#1FE88A]/40"
+                    ? "border-accent/50 ring-2 ring-accent/50 dark:border-accent dark:ring-accent/40"
                     : "border-slate-200 dark:border-neutral-800"
                 }`}
               >

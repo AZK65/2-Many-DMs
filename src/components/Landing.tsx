@@ -25,14 +25,14 @@ export function Landing() {
       {/* Background atmosphere */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[820px]">
         <div className="lp-grid lp-grid-mask absolute inset-0" />
-        <div className="absolute left-1/2 top-[-160px] h-[440px] w-[860px] -translate-x-1/2 rounded-full bg-[#1FE88A]/20 blur-[130px] dark:bg-[#1FE88A]/25" />
-        <div className="absolute left-1/2 top-[-40px] h-[360px] w-[560px] -translate-x-1/2 rounded-full bg-[#1FE88A]/12 blur-[130px] dark:bg-[#1FE88A]/16" />
+        <div className="absolute left-1/2 top-[-160px] h-[440px] w-[860px] -translate-x-1/2 rounded-full bg-accent/20 blur-[130px] dark:bg-accent/25" />
+        <div className="absolute left-1/2 top-[-40px] h-[360px] w-[560px] -translate-x-1/2 rounded-full bg-accent/12 blur-[130px] dark:bg-accent/16" />
       </div>
 
       {/* Copied-to-clipboard toast */}
       {copied && (
         <div className="animate-copy-pop fixed left-1/2 top-5 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xl">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-[#1FE88A]">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-accent">
             <path d="M20 6 9 17l-5-5" className="animate-check-draw" />
           </svg>
           Prompt copied — paste it into your agent
@@ -70,7 +70,7 @@ export function Landing() {
             </a>
             <a
               href="#deploy"
-              className="rounded-lg bg-[#1FE88A] px-3.5 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+              className="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent"
             >
               Deploy
             </a>
@@ -99,7 +99,7 @@ export function Landing() {
         <h1 className="animate-fade-in-1 mx-auto max-w-3xl text-[2.6rem] font-bold leading-[1.05] tracking-tight sm:text-[4.2rem]">
           One inbox for every DM.
           <br />
-          <span className="text-[#0e9f63] dark:text-[#1FE88A]">
+          <span className="text-accent dark:text-accent">
             A CRM that lives in your chats.
           </span>
         </h1>
@@ -113,7 +113,7 @@ export function Landing() {
         <div className="animate-fade-in-2 mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <button
             onClick={() => copy("claude")}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1FE88A] px-5 py-3 text-sm font-semibold text-[#04140d] shadow-lg shadow-[#1FE88A]/30 transition hover:bg-[#16d579] sm:w-auto"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-accent-fg shadow-lg shadow-accent/30 transition hover:bg-accent sm:w-auto"
           >
             <CopyIcon active={copied === "claude"} glyph="✳" />
             {copied === "claude" ? "Copied!" : "Deploy with Claude Code"}
@@ -152,7 +152,7 @@ export function Landing() {
 
         {/* Product centerpiece */}
         <div className="animate-fade-in-3 relative mx-auto mt-16 max-w-4xl">
-          <div className="absolute -inset-x-8 -top-8 bottom-0 -z-10 rounded-[2rem] bg-gradient-to-b from-[#1FE88A]/18 to-transparent blur-2xl" />
+          <div className="absolute -inset-x-8 -top-8 bottom-0 -z-10 rounded-[2rem] bg-gradient-to-b from-accent/18 to-transparent blur-2xl" />
           <BrowserFrame>
             <AppMock />
           </BrowserFrame>
@@ -183,7 +183,7 @@ export function Landing() {
                   key={t}
                   className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
                     i === 0
-                      ? "bg-[#1FE88A] text-[#04140d]"
+                      ? "bg-accent text-accent-fg"
                       : i === 1
                         ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
                         : "bg-slate-100 text-slate-500 dark:bg-neutral-800 dark:text-neutral-400"
@@ -268,7 +268,7 @@ export function Landing() {
                   "It clones, sets env, and ships to Railway",
                 ].map((s, i) => (
                   <li key={s} className="flex items-center gap-3">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#1FE88A] text-xs font-bold text-[#04140d]">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-accent-fg">
                       {i + 1}
                     </span>
                     <span className="text-slate-600 dark:text-neutral-300">{s}</span>
@@ -278,7 +278,7 @@ export function Landing() {
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <button
                   onClick={() => copy("claude2")}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-[#1FE88A] px-5 py-3 text-sm font-semibold text-[#04140d] shadow-lg shadow-[#1FE88A]/30 transition hover:bg-[#16d579]"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-accent-fg shadow-lg shadow-accent/30 transition hover:bg-accent"
                 >
                   <CopyIcon active={copied === "claude2"} glyph="✳" />
                   {copied === "claude2" ? "Copied!" : "Deploy with Claude Code"}
@@ -332,7 +332,7 @@ export function Landing() {
       {/* Custom integrations / paid support */}
       <section className="mx-auto max-w-6xl px-5 pb-20">
         <div className="relative flex flex-col items-center justify-between gap-5 overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 to-neutral-900 p-8 text-white sm:flex-row sm:p-10">
-          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#1FE88A]/20 blur-3xl" />
+          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-accent/20 blur-3xl" />
           <div className="relative flex items-center gap-4">
             <span
               className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-white shadow-lg"
@@ -377,7 +377,7 @@ export function Landing() {
           <div className="mt-6 flex items-center justify-center gap-3">
             <a
               href="#deploy"
-              className="rounded-xl bg-[#1FE88A] px-5 py-2.5 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+              className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent"
             >
               Deploy it yourself →
             </a>
@@ -412,9 +412,9 @@ function CopyIcon({ active, glyph }: { active: boolean; glyph: string }) {
 
 function SectionLabel({ n, label }: { n: string; label: string }) {
   return (
-    <div className="flex items-center gap-3 font-mono text-xs font-medium uppercase tracking-widest text-[#0e9f63] dark:text-[#1FE88A]">
+    <div className="flex items-center gap-3 font-mono text-xs font-medium uppercase tracking-widest text-accent dark:text-accent">
       <span>{n}</span>
-      <span className="h-px w-8 bg-[#1FE88A]/50 dark:bg-[#1FE88A]/40" />
+      <span className="h-px w-8 bg-accent/50 dark:bg-accent/40" />
       <span className="text-slate-400 dark:text-neutral-500">{label}</span>
     </div>
   );
@@ -437,7 +437,7 @@ function Bento({
     <div
       className={`group flex flex-col rounded-2xl border border-slate-200 bg-white p-6 transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700 ${className}`}
     >
-      <span className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#1FE88A]/18 to-[#1FE88A]/10 text-[#0e9f63] ring-1 ring-inset ring-[#1FE88A]/25 dark:text-[#1FE88A]">
+      <span className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-accent/18 to-accent/10 text-accent ring-1 ring-inset ring-accent/25 dark:text-accent">
         {ICONS[icon]}
       </span>
       <div className="text-base font-semibold">{title}</div>
@@ -577,7 +577,7 @@ function AppMock() {
     <div className="flex h-80 bg-white text-left text-slate-900 dark:bg-neutral-950 dark:text-neutral-100 sm:h-[23rem]">
       {/* Left nav rail */}
       <div className="flex w-16 shrink-0 flex-col items-center gap-1.5 border-r border-slate-100 py-3 dark:border-neutral-800">
-        <span className="mb-2 grid h-7 w-7 place-items-center rounded-lg bg-[#1FE88A] text-xs font-bold text-[#04140d]">
+        <span className="mb-2 grid h-7 w-7 place-items-center rounded-lg bg-accent text-xs font-bold text-accent-fg">
           ⌘
         </span>
         {nav.map((n) => {
@@ -589,7 +589,7 @@ function AppMock() {
               onClick={() => setView(n.id)}
               className={`flex w-12 flex-col items-center gap-1 rounded-lg py-2 text-[9px] font-medium transition ${
                 active
-                  ? "bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]"
+                  ? "bg-accent/15 text-accent dark:bg-accent/15 dark:text-accent"
                   : "text-slate-400 hover:bg-slate-50 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-900 dark:hover:text-neutral-300"
               }`}
             >
@@ -625,7 +625,7 @@ function InboxView() {
             <span
               key={t}
               className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                i === 0 ? "bg-[#1FE88A] text-[#04140d]" : "text-slate-400 dark:text-neutral-500"
+                i === 0 ? "bg-accent text-accent-fg" : "text-slate-400 dark:text-neutral-500"
               }`}
             >
               {t}
@@ -654,7 +654,7 @@ function InboxView() {
         <div className="flex items-center gap-2.5 border-b border-slate-100 p-3 dark:border-neutral-800">
           <MockAvatar p="telegram" size={7} />
           <span className="text-[13px] font-semibold">Mx</span>
-          <span className="ml-auto rounded-md bg-[#1FE88A]/15 px-2 py-0.5 text-[10px] font-medium text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
+          <span className="ml-auto rounded-md bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent dark:bg-accent/15 dark:text-accent">
             Lead
           </span>
         </div>
@@ -662,7 +662,7 @@ function InboxView() {
           <div className="max-w-[82%] self-start rounded-2xl rounded-bl-md bg-slate-100 px-3 py-2 text-[12px] dark:bg-neutral-800">
             can you send me the repo?
           </div>
-          <div className="max-w-[82%] self-end rounded-2xl rounded-br-md bg-[#1FE88A] px-3 py-2 text-[12px] text-[#04140d]">
+          <div className="max-w-[82%] self-end rounded-2xl rounded-br-md bg-accent px-3 py-2 text-[12px] text-accent-fg">
             Yeah — deploying it now ⚡
           </div>
           <div className="mt-1 flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-[11px] text-slate-400 dark:border-neutral-800 dark:text-neutral-500">
@@ -712,7 +712,7 @@ function BoardView() {
                     <MockAvatar p={c.p} size={6} />
                     <span className="text-[12px] font-semibold">{c.n}</span>
                   </div>
-                  <span className="mt-1.5 inline-block rounded bg-[#1FE88A]/15 px-1.5 py-0.5 text-[9px] font-medium text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
+                  <span className="mt-1.5 inline-block rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent dark:bg-accent/15 dark:text-accent">
                     {c.tag}
                   </span>
                 </div>
@@ -749,7 +749,7 @@ function FlowNode({ kind, title, body }: { kind: "when" | "then"; title: string;
   const accent =
     kind === "when"
       ? "border-l-slate-400 text-slate-500 dark:border-l-neutral-500 dark:text-neutral-400"
-      : "border-l-[#1FE88A] text-[#0e9f63] dark:text-[#1FE88A]";
+      : "border-l-accent text-accent dark:text-accent";
   return (
     <div className={`w-full max-w-[16rem] rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-950 ${accent}`} style={{ borderLeftWidth: 3 }}>
       <div className="text-[10px] font-bold uppercase tracking-wide">{title}</div>

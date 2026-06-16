@@ -4,9 +4,16 @@
 
 :root {
   color-scheme: light;
+  /* Accent (space-separated RGB). Light/dark defaults below; Settings overrides
+     --accent-light-rgb / --accent-dark-rgb at runtime. */
+  --accent-light-rgb: 14 159 99; /* #0e9f63 — readable green for light mode */
+  --accent-dark-rgb: 31 232 138; /* #1FE88A — bright green for dark mode */
+  --accent-fg-rgb: 4 20 13; /* text on accent fills */
+  --accent-rgb: var(--accent-light-rgb);
 }
 .dark {
   color-scheme: dark;
+  --accent-rgb: var(--accent-dark-rgb);
 }
 
 html,

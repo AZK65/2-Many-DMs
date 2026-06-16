@@ -580,7 +580,7 @@ export function Inbox() {
                   active={inFolder}
                   trailing={
                     inFolder ? (
-                      <CheckIcon className="h-4 w-4 text-[#0e9f63]" />
+                      <CheckIcon className="h-4 w-4 text-accent" />
                     ) : undefined
                   }
                   onClick={() => toggleFolder(c, f.id)}
@@ -591,7 +591,7 @@ export function Inbox() {
             })}
             <MenuRow
               icon={<PlusIcon className="h-4 w-4" />}
-              className="text-[#0e9f63] dark:text-[#1FE88A]"
+              className="text-accent dark:text-accent"
               onClick={() => {
                 openNewFolder(c.id);
                 setMenuId(null);
@@ -616,32 +616,13 @@ export function Inbox() {
             title={showContact ? "Hide contact info" : "Show contact info"}
             className={`grid h-9 w-9 place-items-center rounded-xl border transition-colors ${
               showContact
-                ? "border-[#1FE88A]/40 bg-[#1FE88A]/15 text-[#0e9f63] dark:border-[#1FE88A]/30 dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]"
+                ? "border-accent/40 bg-accent/15 text-accent dark:border-accent/30 dark:bg-accent/15 dark:text-accent"
                 : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
             }`}
           >
             <InfoIcon className="h-[18px] w-[18px]" />
           </motion.button>
         )}
-        <motion.button
-          whileTap={{ scale: 0.9 }}
-          onClick={() => setShowSettings(true)}
-          title="Settings"
-          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-[18px] w-[18px]"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </motion.button>
         <ThemeToggle />
       </div>
 
@@ -650,10 +631,16 @@ export function Inbox() {
         <div className="border-b border-slate-200 px-4 pb-3 pt-4 dark:border-neutral-800">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
+              <button
+                onClick={() => setShowSettings(true)}
+                title="Settings"
+                className="rounded-lg transition hover:opacity-75"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/icon-light.png" alt="Settings" className="h-6 w-6 dark:hidden" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/icon-dark.png" alt="Settings" className="hidden h-6 w-6 dark:block" />
+              </button>
               <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
                 <span className="rounded-md bg-white px-2.5 py-1 text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100">
                   Inbox
@@ -781,13 +768,13 @@ export function Inbox() {
                 title="Filter by platform & tag"
                 className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                   activeFilters || showFilters
-                    ? "bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]"
+                    ? "bg-accent/15 text-accent dark:bg-accent/15 dark:text-accent"
                     : "text-slate-500 hover:bg-slate-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
                 }`}
               >
                 <FunnelIcon className="h-3.5 w-3.5" />
                 {activeFilters > 0 && (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#1FE88A] px-1 text-[10px] font-bold text-[#04140d]">
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
                     {activeFilters}
                   </span>
                 )}
@@ -817,7 +804,7 @@ export function Inbox() {
                             setPlatformFilter("all");
                             setTagFilter("all");
                           }}
-                          className="text-[11px] font-medium text-[#0e9f63] hover:underline"
+                          className="text-[11px] font-medium text-accent hover:underline"
                         >
                           Clear
                         </button>
@@ -943,7 +930,7 @@ export function Inbox() {
                     <span
                       className={`relative rounded-full transition ${
                         c.id === selectedId
-                          ? "ring-2 ring-[#1FE88A] ring-offset-2 ring-offset-white dark:ring-offset-neutral-900"
+                          ? "ring-2 ring-accent ring-offset-2 ring-offset-white dark:ring-offset-neutral-900"
                           : ""
                       }`}
                     >
@@ -954,7 +941,7 @@ export function Inbox() {
                         src={c.contact.avatarUrl}
                       />
                       {c.unread > 0 && (
-                        <span className="absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#1FE88A] px-1.5 text-[11px] font-semibold text-[#04140d] ring-2 ring-white dark:ring-neutral-900">
+                        <span className="absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-fg ring-2 ring-white dark:ring-neutral-900">
                           {c.unread}
                         </span>
                       )}
@@ -989,7 +976,7 @@ export function Inbox() {
               onClick={() => selectConversation(c.id)}
               className={`group relative flex w-full cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors dark:border-neutral-800/70 ${
                 c.id === selectedId
-                  ? "bg-[#1FE88A]/15 dark:bg-[#1FE88A]/10"
+                  ? "bg-accent/15 dark:bg-accent/10"
                   : "hover:bg-slate-50 dark:hover:bg-neutral-800/60"
               }`}
             >
@@ -1020,7 +1007,7 @@ export function Inbox() {
                     {dupAccountTag(c) && (
                       <span
                         title={`via ${c.account?.label}`}
-                        className="shrink-0 rounded bg-[#1FE88A]/15 px-1 text-[10px] font-medium text-[#0e9f63] dark:text-[#1FE88A]"
+                        className="shrink-0 rounded bg-accent/15 px-1 text-[10px] font-medium text-accent dark:text-accent"
                       >
                         {dupAccountTag(c)}
                       </span>
@@ -1028,7 +1015,7 @@ export function Inbox() {
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-[11px] text-slate-400 group-hover:hidden dark:text-neutral-500">
                     {isSnoozed(c) && (
-                      <span className="flex items-center gap-0.5 text-[#0e9f63] dark:text-[#1FE88A]">
+                      <span className="flex items-center gap-0.5 text-accent dark:text-accent">
                         <ClockIcon className="h-3 w-3" />
                         {snoozeLabel(c.snoozedUntil!)}
                       </span>
@@ -1053,7 +1040,7 @@ export function Inbox() {
                         </span>
                       )}
                     {c.unread > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#1FE88A] px-1.5 text-[11px] font-semibold text-[#04140d]">
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-fg">
                         {c.unread}
                       </span>
                     )}
@@ -1187,7 +1174,7 @@ export function Inbox() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/15 text-accent dark:bg-accent/15 dark:text-accent">
                   <FolderIcon className="h-4 w-4" />
                 </span>
                 <div>
@@ -1208,7 +1195,7 @@ export function Inbox() {
                   if (e.key === "Escape") setNewFolderOpen(false);
                 }}
                 placeholder="e.g. Clients, Leads, Partners…"
-                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-[#1FE88A]/40"
+                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-accent/40"
               />
               <div className="mt-4 flex justify-end gap-2">
                 <button
@@ -1221,7 +1208,7 @@ export function Inbox() {
                   whileTap={{ scale: 0.96 }}
                   onClick={submitNewFolder}
                   disabled={!newFolderName.trim()}
-                  className="rounded-lg bg-[#1FE88A] px-3.5 py-1.5 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
+                  className="rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-accent-fg transition hover:bg-accent disabled:opacity-40"
                 >
                   Create
                 </motion.button>

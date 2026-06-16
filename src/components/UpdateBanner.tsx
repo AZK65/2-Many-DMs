@@ -116,7 +116,7 @@ export function UpdateBanner() {
   return (
     <div className="fixed bottom-4 right-4 z-50 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
       <div className="flex items-start gap-3 px-4 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#1FE88A]/20 text-base">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent/20 text-base">
           ✨
         </span>
         <div className="min-w-0 flex-1">
@@ -125,7 +125,7 @@ export function UpdateBanner() {
           </div>
           <div className="text-xs text-slate-500 dark:text-neutral-400">
             v{data.current} →{" "}
-            <b className="text-[#0e9f63] dark:text-[#1FE88A]">v{data.latest}</b>
+            <b className="text-accent dark:text-accent">v{data.latest}</b>
           </div>
         </div>
         <button
@@ -157,7 +157,7 @@ export function UpdateBanner() {
                     key={i}
                     className="flex gap-1.5 text-xs text-slate-600 dark:text-neutral-300"
                   >
-                    <span className="text-[#0e9f63] dark:text-[#1FE88A]">•</span>
+                    <span className="text-accent dark:text-accent">•</span>
                     <span>{n}</span>
                   </li>
                 ))}
@@ -182,7 +182,7 @@ export function UpdateBanner() {
                   href={data.repoUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[#0e9f63] hover:underline dark:text-[#1FE88A]"
+                  className="text-accent hover:underline dark:text-accent"
                 >
                   View on GitHub →
                 </a>
@@ -217,7 +217,7 @@ export function UpdateBanner() {
             if (data.selfUpdate) pull();
           }}
           disabled={applying}
-          className="rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-60"
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent disabled:opacity-60"
         >
           {data.selfUpdate ? (applying ? "Pulling…" : "Update now") : "Update"}
         </button>

@@ -216,7 +216,7 @@ export function ChatThread({
             {conversation.account?.label && (
               <span
                 title="The account you're messaging from"
-                className="ml-1 max-w-[12rem] truncate rounded bg-[#1FE88A]/15 px-1.5 py-0.5 text-[11px] font-medium text-[#0e9f63] dark:text-[#1FE88A]"
+                className="ml-1 max-w-[12rem] truncate rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent dark:text-accent"
               >
                 via {conversation.account.label}
               </span>
@@ -256,7 +256,7 @@ export function ChatThread({
                   <div
                     className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
                       m.direction === "out"
-                        ? "rounded-br-md bg-[#1FE88A] text-[#04140d]"
+                        ? "rounded-br-md bg-accent text-accent-fg"
                         : "rounded-bl-md bg-white text-slate-800 dark:bg-neutral-800 dark:text-neutral-100"
                     }`}
                   >
@@ -301,7 +301,7 @@ export function ChatThread({
                     e.preventDefault();
                     onManageSnippets();
                   }}
-                  className="text-[11px] font-medium text-[#0e9f63] hover:underline dark:text-[#1FE88A]"
+                  className="text-[11px] font-medium text-accent hover:underline dark:text-accent"
                 >
                   Manage
                 </button>
@@ -324,7 +324,7 @@ export function ChatThread({
                     }}
                     className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
                       i === slashIndex
-                        ? "bg-[#1FE88A]/15 dark:bg-[#1FE88A]/15"
+                        ? "bg-accent/15 dark:bg-accent/15"
                         : "hover:bg-slate-100 dark:hover:bg-neutral-700/60"
                     }`}
                   >
@@ -488,14 +488,14 @@ export function ChatThread({
             }}
             rows={1}
             placeholder={`Message on ${platform.label}…  ( / for snippets )`}
-            className="max-h-32 flex-1 resize-none rounded-2xl bg-slate-100 px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-[#1FE88A]/40"
+            className="max-h-32 flex-1 resize-none rounded-2xl bg-slate-100 px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-accent/40"
           />
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={send}
             disabled={(!draft.trim() && !attachment) || sending}
             title="Send"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1FE88A] text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg transition hover:bg-accent disabled:opacity-40"
           >
             <SendIcon className="h-[18px] w-[18px]" />
           </motion.button>
