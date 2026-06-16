@@ -6,7 +6,9 @@ import { decrypt } from "../src/lib/crypto";
    "env" account (label "default") draws its session from env vars; additional
    accounts added later store their own encrypted session on the row. */
 
-const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@localhost";
+// Must match the web's getCurrentUser() demo user so the worker and the UI
+// share the same accounts.
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "you@omni-crm.local";
 
 export interface RunnableAccount {
   id: string;
@@ -17,10 +19,10 @@ export interface RunnableAccount {
 }
 
 async function defaultUserId(): Promise<string> {
-  const existing = await prisma.user.findFirst();
-  if (existing) return existing.id;
-  const u = await prisma.user.create({
-    data: { email: OWNER_EMAIL, name: "Owner" },
+  const u = await prisma.user.upsert({
+    where: { email: OWNER_EMAIL },
+    create: { email: OWNER_EMAIL, name: "You" },
+    update: {},
   });
   return u.id;
 }

@@ -18,6 +18,50 @@ export function OPTIONS() {
   return new NextResponse(null, { headers: CORS });
 }
 
+const X_BEARER =
+  "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+// Derive the @handle from the cookies so each X account is a distinct, named
+// row (lets you connect several). Falls back to a short token hash.
+async function xHandle(authToken: string, ct0: string): Promise<string> {
+  try {
+    const res = await fetch(
+      "https://x.com/i/api/1.1/dm/inbox_initial_state.json?dm_users=true",
+      {
+        headers: {
+          authorization: X_BEARER,
+          "x-csrf-token": ct0,
+          "x-twitter-auth-type": "OAuth2Session",
+          "x-twitter-active-user": "yes",
+          cookie: `auth_token=${authToken}; ct0=${ct0}`,
+        },
+      }
+    );
+    if (res.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const st = ((await res.json()) as any).inbox_initial_state || {};
+      const freq = new Map<string, number>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const c of Object.values<any>(st.conversations || {})) {
+        if (c?.type && c.type !== "ONE_TO_ONE") continue;
+        const ps = Array.isArray(c?.participants)
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            c.participants.map((p: any) => String(p.user_id))
+          : [];
+        for (const id of ps) freq.set(id, (freq.get(id) || 0) + 1);
+      }
+      let me = "";
+      let best = -1;
+      for (const [id, n] of freq) if (n > best) { best = n; me = id; }
+      const sn = (st.users || {})[me]?.screen_name;
+      if (sn) return "@" + sn;
+    }
+  } catch {
+    /* fall through to hash */
+  }
+  return "X · " + authToken.slice(-6);
+}
+
 // Receives the user's X session cookies from the browser extension, verified by
 // the one-time pairing code, and stores them encrypted on an X Account.
 export async function POST(req: NextRequest) {
@@ -47,19 +91,20 @@ export async function POST(req: NextRequest) {
 
   const proxy = await assignProxy(user).catch(() => null);
   const session = encrypt(JSON.stringify({ authToken, ct0 }));
+  const label = await xHandle(String(authToken), String(ct0));
 
   const account = await prisma.account.upsert({
     where: {
       userId_platform_label: {
         userId: user.id,
         platform: "x",
-        label: "X account",
+        label,
       },
     },
     create: {
       userId: user.id,
       platform: "x",
-      label: "X account",
+      label,
       status: "connected",
       session,
       proxyId: proxy?.id,
