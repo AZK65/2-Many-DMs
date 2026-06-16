@@ -203,11 +203,12 @@ export function ConnectionsModal({
                   p === "x" &&
                   !/lock/i.test(status?.detail || "") && (
                     <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
-                      Not logged in. Run{" "}
-                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">
-                        npm run x:login
-                      </code>{" "}
-                      (a browser opens — log in to X), then restart the worker.
+                      No X session. Connect the <b>Chrome extension</b> (it hands
+                      off your cookies), or set{" "}
+                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_AUTH_TOKEN</code>{" "}
+                      +{" "}
+                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_CT0</code>{" "}
+                      in <code>.env</code>, then restart the worker.
                     </p>
                   )}
 
@@ -219,10 +220,14 @@ export function ConnectionsModal({
 
                 {state === "disabled" && data?.workerRunning && p === "x" && (
                   <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
-                    Set <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_ENABLED=1</code>{" "}
-                    in <code>.env</code>, run{" "}
-                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run x:login</code>,
-                    then restart <code>npm run sync</code>.
+                    Set <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_ENABLED=1</code>.
+                    For the lightweight browser-free driver (classic DMs, no
+                    passcode) add{" "}
+                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_DRIVER=api</code>{" "}
+                    + your{" "}
+                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_AUTH_TOKEN</code>/<code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">X_CT0</code>{" "}
+                    cookies (the extension fills these in), then restart{" "}
+                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run sync</code>.
                   </p>
                 )}
 
@@ -231,7 +236,10 @@ export function ConnectionsModal({
                   p === "whatsapp" && (
                     <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
                       Set <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">WHATSAPP_ENABLED=1</code>{" "}
-                      in <code>.env</code> and restart <code>npm run sync</code>.
+                      (add{" "}
+                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">WHATSAPP_DRIVER=baileys</code>{" "}
+                      for the lightweight browser-free driver), restart{" "}
+                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run sync</code>, then scan the QR here.
                     </p>
                   )}
               </div>
