@@ -37,24 +37,80 @@ export function UpdateBanner() {
     setHidden(true);
   }
 
+  // Wait for the server to come back after its restart, then reload into the
+  // new build.
+  function waitForRestart() {
+    setApplyMsg("Restarting…");
+    const iv = setInterval(async () => {
+      try {
+        const r = await fetch("/api/updates/check", { cache: "no-store" });
+        if (r.ok) {
+          clearInterval(iv);
+          location.reload();
+        }
+      } catch {
+        /* still down */
+      }
+    }, 3000);
+  }
+
+  function poll() {
+    const iv = setInterval(async () => {
+      let s: {
+        phase?: string;
+        error?: string | null;
+        done?: boolean;
+        restarting?: boolean;
+      } | null = null;
+      try {
+        s = await fetch("/api/updates/apply", { cache: "no-store" }).then((r) =>
+          r.json()
+        );
+      } catch {
+        // request failed → the process is likely restarting after the build
+        clearInterval(iv);
+        waitForRestart();
+        return;
+      }
+      if (s?.error) {
+        clearInterval(iv);
+        setApplying(false);
+        setApplyMsg(`Update failed: ${s.error}`);
+        return;
+      }
+      if (s?.done || s?.restarting) {
+        clearInterval(iv);
+        waitForRestart();
+        return;
+      }
+      setApplyMsg(`${s?.phase || "Working"}…`);
+    }, 2000);
+  }
+
   async function pull() {
     setApplying(true);
-    setApplyMsg(null);
+    setApplyMsg("Starting…");
+    let start: { started?: boolean; reason?: string; error?: string } | null =
+      null;
     try {
-      const r = await fetch("/api/updates/apply", { method: "POST" });
-      const d = await r.json();
-      setApplyMsg(
-        d.applied
-          ? `✓ Pulled latest. ${d.next || ""}`
-          : d.reason === "self-update-disabled"
-            ? "One-click update is off — run the commands above, then restart."
-            : d.error || "Update failed."
+      start = await fetch("/api/updates/apply", { method: "POST" }).then((r) =>
+        r.json()
       );
     } catch {
-      setApplyMsg("Couldn't reach the server.");
-    } finally {
       setApplying(false);
+      setApplyMsg("Couldn't reach the server.");
+      return;
     }
+    if (!start?.started) {
+      setApplying(false);
+      setApplyMsg(
+        start?.reason === "self-update-disabled"
+          ? "One-click update is off — set ALLOW_SELF_UPDATE=1, or run the commands above."
+          : start?.error || "Couldn't start the update."
+      );
+      return;
+    }
+    poll();
   }
 
   return (
@@ -117,7 +173,10 @@ export function UpdateBanner() {
               git pull{"\n"}npm install{"\n"}npm run build
             </code>
             <div className="mt-1 text-[10px] text-slate-400 dark:text-neutral-500">
-              then restart the app + sync worker.{" "}
+              then restart the app + sync worker.
+              {!data.selfUpdate && (
+                <span> One-click: set <code>ALLOW_SELF_UPDATE=1</code>.</span>
+              )}{" "}
               {data.repoUrl && (
                 <a
                   href={data.repoUrl}
