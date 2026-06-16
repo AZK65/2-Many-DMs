@@ -3,7 +3,9 @@ import http from "node:http";
 import path from "node:path";
 import { TelegramAdapter } from "./adapters/telegram";
 import { WhatsAppAdapter } from "./adapters/whatsapp";
+import { WhatsAppBaileysAdapter } from "./adapters/whatsapp-baileys";
 import { XAdapter } from "./adapters/x";
+import { XApiAdapter } from "./adapters/x-api";
 import { persistInbound, persistRead, prisma } from "./store";
 import type { Adapter } from "./adapters/types";
 
@@ -35,44 +37,54 @@ async function startAdapters() {
     );
   }
 
-  let wa: WhatsAppAdapter | undefined;
+  // WHATSAPP_DRIVER=baileys → browser-free WebSocket adapter (cheap, multi-account
+  // friendly). Default = whatsapp-web.js (Chromium).
+  const waBaileys = process.env.WHATSAPP_DRIVER === "baileys";
+  let wa: Adapter | undefined;
   if (process.env.WHATSAPP_ENABLED === "1") {
-    wa = new WhatsAppAdapter();
+    wa = waBaileys ? new WhatsAppBaileysAdapter() : new WhatsAppAdapter();
     adapters.set("whatsapp", wa);
-    // Not awaited: initialize() blocks until the QR is scanned / session loads.
+    // Not awaited: start() blocks until the QR is scanned / session loads.
     wa.start(persistInbound, (id) => persistRead("whatsapp", id)).catch((e) =>
       console.error("[whatsapp] start error:", e)
     );
-    console.log("[sync] whatsapp adapter starting (scan the QR if prompted)");
+    console.log(
+      `[sync] whatsapp adapter starting (${waBaileys ? "baileys / browser-free" : "web / chromium"}) — scan the QR if prompted`
+    );
   } else {
     console.log("[sync] whatsapp disabled — set WHATSAPP_ENABLED=1 to connect.");
   }
 
-  // Stagger the browsers: WhatsApp Web and XChat are both heavy Chrome SPAs;
-  // starting them at once starves each other (WhatsApp stalls). Wait for
-  // WhatsApp to settle (ready, or a cap) before launching X.
+  // X_DRIVER=api → browser-free classic-DM adapter (cheap). Default = browser
+  // (XChat, encrypted). The API driver needs no browser, so it starts at once;
+  // the browser driver is staggered after WhatsApp's Chromium settles (both are
+  // heavy Chrome SPAs that starve each other if launched together).
   if (process.env.X_ENABLED === "1") {
-    if (wa) {
-      const capMs = Number(process.env.X_START_AFTER_WA_MS || 120000);
-      const start = Date.now();
-      while (
-        wa.getStatus().state !== "ready" &&
-        Date.now() - start < capMs
-      ) {
-        await new Promise((r) => setTimeout(r, 2000));
+    if (process.env.X_DRIVER === "api") {
+      const x = new XApiAdapter();
+      adapters.set("x", x);
+      x.start(persistInbound).catch((e) => console.error("[x] start error:", e));
+      console.log("[sync] x adapter starting (api / classic DMs, browser-free)");
+    } else {
+      if (wa && !waBaileys) {
+        const capMs = Number(process.env.X_START_AFTER_WA_MS || 120000);
+        const start = Date.now();
+        while (wa.getStatus().state !== "ready" && Date.now() - start < capMs) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        console.log(
+          `[sync] whatsapp ${wa.getStatus().state} after ${Math.round(
+            (Date.now() - start) / 1000
+          )}s — starting x`
+        );
       }
-      console.log(
-        `[sync] whatsapp ${wa.getStatus().state} after ${Math.round(
-          (Date.now() - start) / 1000
-        )}s — starting x`
-      );
+      const x = new XAdapter();
+      adapters.set("x", x);
+      x.start(persistInbound).catch((e) => console.error("[x] start error:", e));
+      console.log("[sync] x adapter starting (browser / XChat)");
     }
-    const x = new XAdapter();
-    adapters.set("x", x);
-    x.start(persistInbound).catch((e) => console.error("[x] start error:", e));
-    console.log("[sync] x adapter starting");
   } else {
-    console.log("[sync] x disabled — set X_ENABLED=1 and run `npm run x:login`.");
+    console.log("[sync] x disabled — set X_ENABLED=1.");
   }
 }
 

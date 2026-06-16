@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
+    "@whiskeysockets/baileys": "^6.7.23",
     "dotenv": "^17.4.2",
     "fingerprint-generator": "^2.1.82",
     "fingerprint-injector": "^2.1.82",
