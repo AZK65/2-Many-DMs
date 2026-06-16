@@ -83,7 +83,8 @@ body {
 
 /* Thin, unobtrusive scrollbars so every platform thread looks identical */
 .scroll-thin::-webkit-scrollbar {
-  width: 8px;
+  width: var(--scrollbar-size, 7px);
+  height: var(--scrollbar-size, 7px);
 }
 .scroll-thin::-webkit-scrollbar-thumb {
   @apply bg-slate-300 rounded-full;

@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
       label: a.label,
       status: a.status,
       detail: a.detail,
+      driver: a.driver,
       proxyRegion: a.proxy?.region ?? null,
     }))
   );
