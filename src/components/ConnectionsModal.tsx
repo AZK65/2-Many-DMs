@@ -54,6 +54,48 @@ export function ConnectionsModal({
   const [accounts, setAccounts] = useState<Acct[]>([]);
   const [busyAcct, setBusyAcct] = useState(false);
   const [xCode, setXCode] = useState<string | null>(null);
+  const [startingWorker, setStartingWorker] = useState(false);
+  const [workerMsg, setWorkerMsg] = useState<string | null>(null);
+
+  const isLocal =
+    typeof window !== "undefined" &&
+    /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
+
+  async function startWorker() {
+    setStartingWorker(true);
+    setWorkerMsg("Starting sync…");
+    try {
+      const d = await fetch("/api/worker/start", { method: "POST" }).then((r) =>
+        r.json()
+      );
+      if (!d.ok) {
+        setWorkerMsg(d.error || "Couldn't start the worker.");
+        setStartingWorker(false);
+        return;
+      }
+      // Poll until the worker's control server answers.
+      let tries = 0;
+      const iv = setInterval(async () => {
+        tries++;
+        const up = await fetch("/api/worker/start")
+          .then((r) => r.json())
+          .then((j) => j.running)
+          .catch(() => false);
+        if (up) {
+          clearInterval(iv);
+          setWorkerMsg("✓ Sync running — connecting your accounts…");
+          setStartingWorker(false);
+        } else if (tries > 20) {
+          clearInterval(iv);
+          setWorkerMsg("Started — still coming up. Check sync.log if nothing connects.");
+          setStartingWorker(false);
+        }
+      }, 1500);
+    } catch {
+      setWorkerMsg("Couldn't reach the server.");
+      setStartingWorker(false);
+    }
+  }
 
   function loadAccounts() {
     fetch("/api/accounts")
@@ -151,9 +193,30 @@ export function ConnectionsModal({
 
         {data && !data.workerRunning && (
           <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-            Sync worker isn&apos;t running. Start it with{" "}
-            <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">npm run sync</code> to
-            connect your accounts.
+            <div>
+              Sync worker isn&apos;t running.
+              {!isLocal && (
+                <>
+                  {" "}Start it with{" "}
+                  <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">npm run sync</code>{" "}
+                  to connect your accounts.
+                </>
+              )}
+            </div>
+            {isLocal && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={startWorker}
+                  disabled={startingWorker}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:opacity-60"
+                >
+                  {startingWorker ? "Starting…" : "▶ Start sync"}
+                </button>
+                <span className="text-xs text-amber-700/90 dark:text-amber-300/80">
+                  {workerMsg || "Runs npm run sync for you."}
+                </span>
+              </div>
+            )}
           </div>
         )}
 

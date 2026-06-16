@@ -29,3 +29,6 @@ prisma/dev.db
 
 # db backups
 *.db.bak*
+
+# worker log (started from the app)
+sync.log
