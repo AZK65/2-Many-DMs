@@ -69,7 +69,7 @@ export function SnippetsModal({
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-neutral-700">
           <div className="flex items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#1FE88A]/15 text-[#0e9f63] dark:bg-[#1FE88A]/15 dark:text-[#1FE88A]">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-accent/15 text-accent dark:bg-accent/15 dark:text-accent">
               <ZapIcon className="h-4 w-4" />
             </span>
             <h2 className="text-base font-semibold dark:text-neutral-100">
@@ -141,7 +141,7 @@ export function SnippetsModal({
                         }
                         onBlur={(e) => update(s.id, { shortcut: e.target.value })}
                         placeholder="–"
-                        className="h-6 w-7 rounded border border-slate-200 bg-slate-50 text-center text-xs font-medium uppercase text-slate-700 outline-none focus:border-[#1FE88A]/50 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200"
+                        className="h-6 w-7 rounded border border-slate-200 bg-slate-50 text-center text-xs font-medium uppercase text-slate-700 outline-none focus:border-accent/50 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200"
                       />
                     </div>
                     <button
@@ -163,7 +163,7 @@ export function SnippetsModal({
                       )
                     }
                     onBlur={(e) => update(s.id, { text: e.target.value })}
-                    className="w-full resize-none rounded-lg bg-slate-100 p-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:ring-[#1FE88A]/40"
+                    className="w-full resize-none rounded-lg bg-slate-100 p-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:ring-accent/40"
                   />
                 </motion.div>
               ))}
@@ -183,7 +183,7 @@ export function SnippetsModal({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Title (e.g. Pricing)"
-              className="min-w-0 flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-[#1FE88A]/40"
+              className="min-w-0 flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-accent/40"
             />
             <div className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 text-xs text-slate-400 dark:bg-neutral-700 dark:text-neutral-500">
               {MOD}+
@@ -201,14 +201,14 @@ export function SnippetsModal({
             onChange={(e) => setText(e.target.value)}
             rows={2}
             placeholder="The phrase to insert…"
-            className="mb-2 w-full resize-none rounded-lg bg-slate-100 p-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1FE88A]/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-[#1FE88A]/40"
+            className="mb-2 w-full resize-none rounded-lg bg-slate-100 p-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-accent/40"
           />
           <div className="flex justify-end">
             <motion.button
               whileTap={{ scale: 0.96 }}
               onClick={create}
               disabled={!title.trim() || !text.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-sm font-medium text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent disabled:opacity-40"
             >
               <PlusIcon className="h-4 w-4" />
               Add snippet

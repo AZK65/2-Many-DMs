@@ -108,7 +108,7 @@ export function Welcome() {
             key={i}
             className={`h-2 rounded-full transition-all duration-300 ${
               i === step ? "w-6" : "w-2"
-            } ${i <= step ? "bg-[#1FE88A]" : "bg-slate-300 dark:bg-neutral-700"}`}
+            } ${i <= step ? "bg-accent" : "bg-slate-300 dark:bg-neutral-700"}`}
           />
         ))}
       </div>
@@ -180,7 +180,7 @@ export function Welcome() {
                   transition={{ delay: 0.74 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => go(1)}
-                  className="mt-8 w-full rounded-xl bg-[#1FE88A] py-3 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+                  className="mt-8 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-accent-fg transition hover:bg-accent"
                 >
                   Get started →
                 </motion.button>
@@ -319,7 +319,7 @@ export function Welcome() {
                     href={TG_LINK}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3.5 transition hover:border-[#1FE88A]/50 hover:bg-[#1FE88A]/40 dark:border-neutral-700 dark:hover:border-[#1FE88A]/40 dark:hover:bg-[#1FE88A]/5"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3.5 transition hover:border-accent/50 hover:bg-accent/40 dark:border-neutral-700 dark:hover:border-accent/40 dark:hover:bg-accent/5"
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-slate-800 dark:text-neutral-100">
@@ -330,7 +330,7 @@ export function Welcome() {
                         developer can build it for you.
                       </div>
                     </div>
-                    <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#1FE88A] px-3 py-2 text-xs font-semibold text-[#04140d]">
+                    <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-fg">
                       Contact
                       <span className="rounded bg-white/20 px-1 text-[10px]">
                         Paid
@@ -349,7 +349,7 @@ export function Welcome() {
                   <motion.button
                     whileTap={{ scale: 0.97 }}
                     onClick={() => go(2)}
-                    className="rounded-xl bg-[#1FE88A] px-5 py-2.5 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+                    className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent"
                   >
                     {anyConnected ? "Continue →" : "I’ll connect later →"}
                   </motion.button>
@@ -402,7 +402,7 @@ export function Welcome() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={finish}
-                  className="mt-7 w-full rounded-xl bg-[#1FE88A] py-3 text-sm font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+                  className="mt-7 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-accent-fg transition hover:bg-accent"
                 >
                   Go to my inbox →
                 </motion.button>
@@ -475,7 +475,7 @@ function ConnectCard({
         ) : (
           <button
             onClick={onConnect}
-            className="shrink-0 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+            className="shrink-0 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-fg transition hover:bg-accent"
           >
             Connect
           </button>
@@ -501,7 +501,7 @@ function ConnectCard({
           ))}
           <button
             onClick={onAdd}
-            className="rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-[#0e9f63] transition hover:border-[#1FE88A]/60 hover:bg-[#1FE88A]/10 dark:border-neutral-700 dark:text-[#1FE88A]"
+            className="rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-accent transition hover:border-accent/60 hover:bg-accent/10 dark:border-neutral-700 dark:text-accent"
           >
             + Add
           </button>

@@ -329,10 +329,10 @@ export function ConnectionsModal({
           </div>
 
           {xCode && (
-            <div className="mt-3 rounded-xl border border-[#1FE88A]/30 bg-[#1FE88A]/10 p-3 text-xs text-slate-600 dark:text-neutral-300">
+            <div className="mt-3 rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs text-slate-600 dark:text-neutral-300">
               In the <b>2 Many DMs</b> Chrome extension (logged into the X account
               you want), paste this pairing code:
-              <div className="mt-1.5 font-mono text-lg font-bold tracking-[0.3em] text-[#0e9f63] dark:text-[#1FE88A]">
+              <div className="mt-1.5 font-mono text-lg font-bold tracking-[0.3em] text-accent dark:text-accent">
                 {xCode}
               </div>
               <div className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">
@@ -376,7 +376,7 @@ export function ConnectionsModal({
                   {p === "telegram" && (
                     <button
                       onClick={() => setConnectingTelegram(true)}
-                      className="rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent"
                     >
                       {state === "ready" ? "Re-link" : "Connect"}
                     </button>
@@ -419,7 +419,7 @@ export function ConnectionsModal({
                             <button
                               onClick={unlockXChat}
                               disabled={unlocking}
-                              className="rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-60"
+                              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent disabled:opacity-60"
                             >
                               {unlocking ? "Opening…" : "Unlock XChat"}
                             </button>

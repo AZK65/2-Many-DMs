@@ -8,12 +8,16 @@ export interface Settings {
   scrollbar: ScrollbarPref;
   coldDays: number; // a chat is "cold" after this many untouched days
   defaultView: "all" | "needsreply" | "cold"; // inbox tab on load
+  accentLight: string; // hex — accent in light mode
+  accentDark: string; // hex — accent in dark mode
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   scrollbar: "default",
   coldDays: 7,
   defaultView: "needsreply",
+  accentLight: "#0e9f63",
+  accentDark: "#1fe88a",
 };
 
 const KEY = "tmd-settings";
@@ -34,9 +38,39 @@ export function saveSettings(s: Settings): void {
   window.dispatchEvent(new Event("tmd-settings")); // notify listeners (Inbox)
 }
 
+function hexToRgb(hex: string): string {
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n)) return "31 232 138";
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
 export function applySettings(s: Settings): void {
   if (typeof document === "undefined") return;
+  const root = document.documentElement;
   const size =
     s.scrollbar === "hidden" ? "0px" : s.scrollbar === "thin" ? "4px" : "7px";
-  document.documentElement.style.setProperty("--scrollbar-size", size);
+  root.style.setProperty("--scrollbar-size", size);
+  root.style.setProperty("--accent-light-rgb", hexToRgb(s.accentLight));
+  root.style.setProperty("--accent-dark-rgb", hexToRgb(s.accentDark));
+}
+
+// Theme lives in the existing "theme" key + the `dark` class (shared with the
+// header toggle). Exposed here so Settings can offer light/dark/system too.
+export type ThemePref = "light" | "dark" | "system";
+
+export function currentTheme(): ThemePref {
+  if (typeof window === "undefined") return "system";
+  const t = localStorage.getItem("theme");
+  return t === "light" || t === "dark" ? t : "system";
+}
+
+export function applyTheme(t: ThemePref): void {
+  if (typeof window === "undefined") return;
+  const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = t === "dark" || (t === "system" && sysDark);
+  document.documentElement.classList.toggle("dark", dark);
+  if (t === "system") localStorage.removeItem("theme");
+  else localStorage.setItem("theme", t);
 }
