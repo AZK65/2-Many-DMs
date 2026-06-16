@@ -45,7 +45,7 @@ import {
 } from "./icons";
 
 const COLD_DAYS = 7;
-type InboxView = "needsreply" | "cold" | "snoozed" | "done";
+type InboxView = "all" | "needsreply" | "cold" | "snoozed" | "done";
 
 function isSnoozed(c: ConversationDTO): boolean {
   return !!c.snoozedUntil && new Date(c.snoozedUntil).getTime() > Date.now();
@@ -188,6 +188,7 @@ export function Inbox() {
     if (v === "snoozed") return snoozed;
     if (v === "done") return c.status === "done";
     if (c.status === "done" || snoozed) return false;
+    if (v === "all") return true; // every active (non-done, non-snoozed) chat
     // Whose turn is it? Derived from the last message direction:
     //  - they messaged last (or no messages) → Needs reply (your turn)
     //  - you messaged last → Cold (you replied, waiting on them)
@@ -198,13 +199,14 @@ export function Inbox() {
 
   const viewCounts = useMemo(() => {
     const counts: Record<InboxView, number> = {
+      all: 0,
       needsreply: 0,
       cold: 0,
       snoozed: 0,
       done: 0,
     };
     for (const c of scoped)
-      for (const v of ["needsreply", "cold", "snoozed", "done"] as InboxView[])
+      for (const v of ["all", "needsreply", "cold", "snoozed", "done"] as InboxView[])
         if (matchesView(c, v)) counts[v]++;
     return counts;
   }, [scoped]);
@@ -664,6 +666,7 @@ export function Inbox() {
             <div className="scroll-thin mb-2.5 flex items-center gap-1 overflow-x-auto pb-0.5">
               {(
                 [
+                  ["all", "All"],
                   ["needsreply", "Needs reply"],
                   ["cold", "Cold"],
                   ["snoozed", "Snoozed"],
