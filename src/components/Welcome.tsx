@@ -470,7 +470,7 @@ function ConnectCard({
             animate={{ scale: 1, opacity: 1 }}
             className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
           >
-            Connected ✓
+            {accounts.length} connected ✓
           </motion.span>
         ) : (
           <button
@@ -483,26 +483,27 @@ function ConnectCard({
       </div>
 
       {has && (
-        <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 dark:border-neutral-800">
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3 dark:border-neutral-800">
           {accounts.map((a) => (
-            <div key={a.id} className="flex items-center justify-between gap-2">
-              <span className="truncate text-xs text-slate-600 dark:text-neutral-300">
-                {a.label || title}
-              </span>
+            <span
+              key={a.id}
+              className="flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1 text-xs text-slate-600 dark:bg-neutral-800 dark:text-neutral-300"
+            >
+              <span className="max-w-[10rem] truncate">{a.label || title}</span>
               <button
                 onClick={() => onRemove(a.id)}
                 title="Remove account"
-                className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[10px] text-slate-400 transition hover:bg-slate-200 hover:text-red-500 dark:text-neutral-500 dark:hover:bg-neutral-700"
               >
                 ✕
               </button>
-            </div>
+            </span>
           ))}
           <button
             onClick={onAdd}
-            className="text-xs font-medium text-[#0e9f63] transition hover:underline dark:text-[#1FE88A]"
+            className="rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-[#0e9f63] transition hover:border-[#1FE88A]/60 hover:bg-[#1FE88A]/10 dark:border-neutral-700 dark:text-[#1FE88A]"
           >
-            + Add another
+            + Add
           </button>
         </div>
       )}
