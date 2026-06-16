@@ -4,6 +4,7 @@ export type MediaType = "image" | "video" | "audio" | "sticker" | "file";
 
 export interface InboundMessage {
   platform: Platform;
+  accountId?: string; // which connected Account this message belongs to (injected by the worker)
   chatExternalId: string; // platform conversation/peer id (used to route replies)
   messageExternalId: string; // globally-unique message key, e.g. "telegram:<chat>:<id>"
   direction: "in" | "out";
