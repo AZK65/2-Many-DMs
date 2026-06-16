@@ -276,21 +276,23 @@ export class XApiAdapter implements Adapter {
 
     const reqId =
       Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const params = new URLSearchParams({
+    // new2.json wants a JSON body (form-urlencoded → 415 Unsupported Media Type).
+    const payload: Record<string, unknown> = {
       conversation_id: chatExternalId,
-      text: body || "",
+      recipient_ids: false,
       request_id: reqId,
+      text: body || "",
       cards_platform: "Web-12",
-      include_cards: "1",
-      include_quote_count: "true",
-      dm_users: "false",
-    });
-    if (mediaId) params.set("media_id", mediaId);
+      include_cards: 1,
+      include_quote_count: true,
+      dm_users: false,
+    };
+    if (mediaId) payload.media_id = mediaId;
 
     const data = await this.api(`${API}/dm/new2.json`, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
     });
     // Pull the created message id back out of the response when present.
     let id = reqId;
