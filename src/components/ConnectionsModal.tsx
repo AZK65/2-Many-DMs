@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
@@ -43,6 +43,65 @@ export function ConnectionsModal({
   const [connectingTelegram, setConnectingTelegram] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
+
+  type Acct = {
+    id: string;
+    platform: string;
+    label: string | null;
+    status: string;
+    detail: string | null;
+  };
+  const [accounts, setAccounts] = useState<Acct[]>([]);
+  const [busyAcct, setBusyAcct] = useState(false);
+  const [xCode, setXCode] = useState<string | null>(null);
+
+  function loadAccounts() {
+    fetch("/api/accounts")
+      .then((r) => r.json())
+      .then(setAccounts)
+      .catch(() => {});
+  }
+  useEffect(() => {
+    loadAccounts();
+    const t = setInterval(loadAccounts, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Live per-account state (state/qr/detail) from the worker, keyed by accountId.
+  const live: Record<string, ConnStatus & { qr?: string | null }> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const a of (((data?.platforms as any)?.accounts ?? []) as any[]))
+    if (a?.accountId) live[a.accountId] = a;
+
+  async function addAccount(platform: string) {
+    if (platform === "telegram") {
+      setConnectingTelegram(true);
+      return;
+    }
+    if (platform === "x") {
+      const r = await fetch("/api/accounts/pair", { method: "POST" })
+        .then((res) => res.json())
+        .catch(() => null);
+      setXCode(r?.code || "ERROR");
+      return;
+    }
+    // WhatsApp: create a pending account; the worker links it via QR on (re)start.
+    setBusyAcct(true);
+    await fetch("/api/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform }),
+    }).catch(() => {});
+    setBusyAcct(false);
+    loadAccounts();
+  }
+
+  async function removeAccount(id: string) {
+    setBusyAcct(true);
+    await fetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => {});
+    setBusyAcct(false);
+    loadAccounts();
+  }
 
   async function unlockXChat() {
     setUnlocking(true);
@@ -97,6 +156,115 @@ export function ConnectionsModal({
             connect your accounts.
           </div>
         )}
+
+        {/* Per-account management (multi-account) */}
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-neutral-700">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+            Your accounts
+          </h3>
+          <div className="space-y-2">
+            {accounts.length === 0 && (
+              <p className="text-xs text-slate-400 dark:text-neutral-500">
+                No accounts yet — add one below.
+              </p>
+            )}
+            {accounts.map((a) => {
+              const l = live[a.id];
+              const st: ConnState =
+                (l?.state as ConnState) ||
+                (a.status === "connected"
+                  ? "ready"
+                  : a.status === "pending"
+                    ? "starting"
+                    : "disconnected");
+              const meta = STATE_META[st] || STATE_META.disabled;
+              const detail = l?.detail || a.detail;
+              return (
+                <div
+                  key={a.id}
+                  className="rounded-xl border border-slate-200 px-3 py-2 dark:border-neutral-700"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white"
+                      style={{ backgroundColor: PLATFORMS[a.platform as Platform]?.bg }}
+                    >
+                      <PlatformGlyph platform={a.platform as Platform} className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium dark:text-neutral-100">
+                        {a.label || PLATFORMS[a.platform as Platform]?.label}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-neutral-400">
+                        <span
+                          className="inline-block h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: meta.color }}
+                        />
+                        {meta.label}
+                        {detail ? ` · ${detail}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeAccount(a.id)}
+                      disabled={busyAcct}
+                      title="Remove account"
+                      className="rounded-lg p-1.5 text-slate-300 transition hover:bg-slate-100 hover:text-red-500 disabled:opacity-50 dark:text-neutral-600 dark:hover:bg-neutral-700"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {l?.state === "qr" && l?.qr && (
+                    <div className="mt-2 flex flex-col items-center gap-1 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={l.qr} alt="WhatsApp QR" className="h-40 w-40 rounded bg-white" />
+                      <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                        WhatsApp → Linked Devices → Link a Device
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-slate-400 dark:text-neutral-500">Add another:</span>
+            {PLATFORM_ORDER.map((p) => (
+              <button
+                key={p}
+                onClick={() => addAccount(p)}
+                disabled={busyAcct}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-700"
+              >
+                <span
+                  className="grid h-4 w-4 place-items-center rounded-full text-white"
+                  style={{ backgroundColor: PLATFORMS[p].bg }}
+                >
+                  <PlatformGlyph platform={p} className="h-2.5 w-2.5" />
+                </span>
+                {PLATFORMS[p].label}
+              </button>
+            ))}
+          </div>
+
+          {xCode && (
+            <div className="mt-3 rounded-xl border border-[#1FE88A]/30 bg-[#1FE88A]/10 p-3 text-xs text-slate-600 dark:text-neutral-300">
+              In the <b>2 Many DMs</b> Chrome extension (logged into the X account
+              you want), paste this pairing code:
+              <div className="mt-1.5 font-mono text-lg font-bold tracking-[0.3em] text-[#0e9f63] dark:text-[#1FE88A]">
+                {xCode}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">
+                It hands off that account&apos;s cookies and adds it here.
+              </div>
+            </div>
+          )}
+
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-400 dark:text-neutral-500">
+            New accounts start syncing when the worker (re)starts. WhatsApp shows
+            its QR here once it does.
+          </p>
+        </div>
 
         <div className="divide-y divide-slate-100 dark:divide-neutral-700">
           {PLATFORM_ORDER.map((p) => {
