@@ -194,10 +194,12 @@ export class XAdapter implements Adapter {
     }
     if (/pin|passcode|recovery/i.test(url)) {
       this.state = "disconnected";
+      this.detail = "XChat locked";
       console.error("[x] XChat is locked — run `npm run x:unlock` and enter your passcode once.");
       return;
     }
     this.state = "ready";
+    this.detail = undefined; // clear any prior "XChat locked"
     console.log("[x] live (XChat loaded)");
 
     const onMessage = this.onMessage!;
@@ -242,6 +244,7 @@ export class XAdapter implements Adapter {
       await delay(4000);
       if (/pin|passcode|recovery/i.test(this.page.url())) {
         this.state = "disconnected";
+        this.detail = "XChat locked";
         console.error("[x] XChat locked — run `npm run x:unlock`.");
         return;
       }

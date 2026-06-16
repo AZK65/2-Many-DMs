@@ -41,6 +41,26 @@ export function ConnectionsModal({
   onClose: () => void;
 }) {
   const [connectingTelegram, setConnectingTelegram] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
+
+  async function unlockXChat() {
+    setUnlocking(true);
+    setUnlockMsg(null);
+    try {
+      const res = await fetch("/api/accounts/x/unlock", { method: "POST" });
+      const d = await res.json();
+      setUnlockMsg(
+        d.ok
+          ? "Opening an X window on this machine — type your passcode there, then it'll reconnect. (No window? You're on a headless server — use the terminal command below.)"
+          : `Couldn't start the unlock: ${d.error || "unknown error"}`,
+      );
+    } catch (e) {
+      setUnlockMsg(`Couldn't reach the server: ${String(e)}`);
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   return (
     <motion.div
@@ -135,13 +155,61 @@ export function ConnectionsModal({
                   </div>
                 )}
 
-                {state === "disconnected" && p === "x" && (
-                  <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
-                    Not logged in. Run{" "}
-                    <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run x:login</code>{" "}
-                    (a browser opens — log in to X), then restart the worker.
-                  </p>
-                )}
+                {state === "disconnected" &&
+                  p === "x" &&
+                  /lock/i.test(status?.detail || "") && (
+                    <div className="mt-3 rounded-xl border border-amber-300/70 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200/90">
+                      <div className="flex items-start gap-2">
+                        <span aria-hidden>🔒</span>
+                        <div className="flex-1">
+                          <span className="font-semibold">XChat is locked.</span>{" "}
+                          X&apos;s encrypted DMs need a one-time unlock — you&apos;ll
+                          type your passcode into X&apos;s own window (we never see
+                          it).
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={unlockXChat}
+                              disabled={unlocking}
+                              className="rounded-lg bg-[#1FE88A] px-3 py-1.5 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579] disabled:opacity-60"
+                            >
+                              {unlocking ? "Opening…" : "Unlock XChat"}
+                            </button>
+                            <span className="text-amber-700/80 dark:text-amber-200/70">
+                              or run{" "}
+                              <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                                npm run x:unlock
+                              </code>
+                            </span>
+                          </div>
+                          {unlockMsg && (
+                            <p className="mt-2 text-amber-700 dark:text-amber-200/80">
+                              {unlockMsg}
+                            </p>
+                          )}
+                          <p className="mt-2 text-amber-700/80 dark:text-amber-200/70">
+                            Tip: only <b>encrypted XChat</b> needs this. For classic
+                            DMs set{" "}
+                            <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                              X_DRIVER=api
+                            </code>{" "}
+                            — no passcode at all.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                {state === "disconnected" &&
+                  p === "x" &&
+                  !/lock/i.test(status?.detail || "") && (
+                    <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
+                      Not logged in. Run{" "}
+                      <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">
+                        npm run x:login
+                      </code>{" "}
+                      (a browser opens — log in to X), then restart the worker.
+                    </p>
+                  )}
 
                 {state === "disconnected" && p !== "x" && (
                   <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
