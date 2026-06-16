@@ -46,6 +46,7 @@ const API = "https://x.com/i/api/1.1";
 
 interface XApiOpts {
   proxyUrl?: string;
+  auth?: { authToken: string; ct0: string }; // per-account cookies (else env/file)
 }
 
 export class XApiAdapter implements Adapter {
@@ -61,10 +62,11 @@ export class XApiAdapter implements Adapter {
   // Last seen message id per conversation, for mark_read.
   private lastEvent = new Map<string, string>();
 
-  constructor(_opts: XApiOpts = {}) {
+  private optAuth?: { authToken: string; ct0: string };
+  constructor(opts: XApiOpts = {}) {
+    this.optAuth = opts.auth;
     // TODO(proxy): per-account proxy needs an undici ProxyAgent dispatcher on
     // fetch (global fetch ignores `agent`). Omitted for now.
-    void _opts;
   }
 
   getStatus(): AdapterStatus {
@@ -102,7 +104,7 @@ export class XApiAdapter implements Adapter {
 
   async start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void> {
     this.onMessage = onMessage;
-    this.auth = loadAuth() || undefined;
+    this.auth = this.optAuth || loadAuth() || undefined;
     if (!this.auth) {
       this.state = "disconnected";
       console.log(

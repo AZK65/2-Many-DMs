@@ -26,3 +26,6 @@ prisma/dev.db
 .claude
 .lazyweb
 *.tsbuildinfo
+
+# db backups
+*.db.bak*

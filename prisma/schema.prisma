@@ -31,8 +31,11 @@ model Account {
   proxyId   String?
   proxy     Proxy?   @relation(fields: [proxyId], references: [id])
   detail    String? // last status detail / error message
+  driver    String? // per-account driver override (baileys|web for WA, api|browser for X)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  conversations Conversation[]
 
   @@unique([userId, platform, label])
 }
@@ -99,6 +102,8 @@ model Conversation {
   id            String               @id @default(cuid())
   platform      String // 'x' | 'whatsapp' | 'telegram'
   externalId    String? // platform chat/peer id used to route replies
+  accountId     String? // which connected Account this chat belongs to (multi-account routing)
+  account       Account?             @relation(fields: [accountId], references: [id])
   contactId     String
   contact       Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
   lastMessageAt DateTime             @default(now())
@@ -112,7 +117,9 @@ model Conversation {
   folders       ConversationFolder[]
   relatedFrom   ContactRelation[]    @relation("ConversationToRelation")
 
-  @@unique([platform, externalId])
+  // Replies are routed by account, so a chat is unique per (account, peer) —
+  // two of your own accounts can each hold a chat with the same person.
+  @@unique([accountId, externalId])
 }
 
 model Folder {

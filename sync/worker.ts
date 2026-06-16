@@ -7,85 +7,120 @@ import { WhatsAppBaileysAdapter } from "./adapters/whatsapp-baileys";
 import { XAdapter } from "./adapters/x";
 import { XApiAdapter } from "./adapters/x-api";
 import { persistInbound, persistRead, prisma } from "./store";
-import type { Adapter } from "./adapters/types";
+import {
+  ensureAndBackfill,
+  listRunnableAccounts,
+  type RunnableAccount,
+} from "./accounts";
+import type { Adapter, InboundMessage } from "./adapters/types";
 
+// One adapter instance per connected account, keyed by accountId.
 const adapters = new Map<string, Adapter>();
+const accountMeta = new Map<string, { platform: string; label: string | null }>();
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function safeJson(s: string): { authToken: string; ct0: string } | undefined {
+  try {
+    const j = JSON.parse(s);
+    if (j.authToken && j.ct0) return j;
+  } catch {
+    /* not json */
+  }
+  return undefined;
+}
+
+// Heavy = a real browser (whatsapp-web.js or the XChat browser). Light = the
+// browser-free drivers (telegram MTProto, baileys, x-api).
+function isHeavy(acc: RunnableAccount): boolean {
+  return (
+    (acc.platform === "whatsapp" && acc.driver !== "baileys") ||
+    (acc.platform === "x" && acc.driver !== "api")
+  );
+}
+
+function buildAdapter(acc: RunnableAccount): Adapter | null {
+  if (acc.platform === "telegram") {
+    const { TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION } = process.env;
+    const session = acc.session || TELEGRAM_SESSION;
+    if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH || !session) {
+      console.log("[sync] telegram account skipped — missing api id/hash/session");
+      return null;
+    }
+    return new TelegramAdapter(Number(TELEGRAM_API_ID), TELEGRAM_API_HASH, session);
+  }
+  if (acc.platform === "whatsapp") {
+    // Per-account session dir via clientId so multiple numbers don't collide.
+    return acc.driver === "baileys"
+      ? new WhatsAppBaileysAdapter({ clientId: acc.id })
+      : new WhatsAppAdapter();
+  }
+  if (acc.platform === "x") {
+    if (acc.driver === "api") {
+      const auth = acc.session ? safeJson(acc.session) : undefined;
+      return new XApiAdapter(auth ? { auth } : {});
+    }
+    return new XAdapter();
+  }
+  return null;
+}
 
 async function startAdapters() {
-  const { TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION } = process.env;
-  if (TELEGRAM_API_ID && TELEGRAM_API_HASH && TELEGRAM_SESSION) {
-    // Non-fatal: a bad/duplicated session (AUTH_KEY_DUPLICATED) must not crash
-    // the whole worker and take down the other platforms + control server.
+  // Bridge env → Account rows and backfill conversation.accountId before any
+  // adapter runs (so new messages never create null-account duplicates).
+  await ensureAndBackfill();
+  const accounts = await listRunnableAccounts();
+  if (!accounts.length) {
+    console.log(
+      "[sync] no accounts to run — enable a platform in .env (TELEGRAM_*/WHATSAPP_ENABLED/X_ENABLED)."
+    );
+    return;
+  }
+
+  // Light adapters first; stagger heavy browser ones so two Chrome SPAs don't
+  // starve each other at boot.
+  const ordered = [...accounts].sort(
+    (a, b) => Number(isHeavy(a)) - Number(isHeavy(b))
+  );
+  for (const acc of ordered) {
     try {
-      const tg = new TelegramAdapter(
-        Number(TELEGRAM_API_ID),
-        TELEGRAM_API_HASH,
-        TELEGRAM_SESSION
-      );
-      await tg.start(persistInbound, (id) => persistRead("telegram", id));
-      adapters.set("telegram", tg);
-      console.log("[sync] telegram adapter started");
-    } catch (e) {
-      console.error(
-        "[telegram] start failed (continuing without it) — re-run `npm run tg:login` if the session is invalid:",
-        e
-      );
-    }
-  } else {
-    console.log(
-      "[sync] telegram not configured — set TELEGRAM_API_ID / TELEGRAM_API_HASH / TELEGRAM_SESSION (run `npm run tg:login`)."
-    );
-  }
-
-  // WHATSAPP_DRIVER=baileys → browser-free WebSocket adapter (cheap, multi-account
-  // friendly). Default = whatsapp-web.js (Chromium).
-  const waBaileys = process.env.WHATSAPP_DRIVER === "baileys";
-  let wa: Adapter | undefined;
-  if (process.env.WHATSAPP_ENABLED === "1") {
-    wa = waBaileys ? new WhatsAppBaileysAdapter() : new WhatsAppAdapter();
-    adapters.set("whatsapp", wa);
-    // Not awaited: start() blocks until the QR is scanned / session loads.
-    wa.start(persistInbound, (id) => persistRead("whatsapp", id)).catch((e) =>
-      console.error("[whatsapp] start error:", e)
-    );
-    console.log(
-      `[sync] whatsapp adapter starting (${waBaileys ? "baileys / browser-free" : "web / chromium"}) — scan the QR if prompted`
-    );
-  } else {
-    console.log("[sync] whatsapp disabled — set WHATSAPP_ENABLED=1 to connect.");
-  }
-
-  // X_DRIVER=api → browser-free classic-DM adapter (cheap). Default = browser
-  // (XChat, encrypted). The API driver needs no browser, so it starts at once;
-  // the browser driver is staggered after WhatsApp's Chromium settles (both are
-  // heavy Chrome SPAs that starve each other if launched together).
-  if (process.env.X_ENABLED === "1") {
-    if (process.env.X_DRIVER === "api") {
-      const x = new XApiAdapter();
-      adapters.set("x", x);
-      x.start(persistInbound).catch((e) => console.error("[x] start error:", e));
-      console.log("[sync] x adapter starting (api / classic DMs, browser-free)");
-    } else {
-      if (wa && !waBaileys) {
-        const capMs = Number(process.env.X_START_AFTER_WA_MS || 120000);
-        const start = Date.now();
-        while (wa.getStatus().state !== "ready" && Date.now() - start < capMs) {
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-        console.log(
-          `[sync] whatsapp ${wa.getStatus().state} after ${Math.round(
-            (Date.now() - start) / 1000
-          )}s — starting x`
+      const adapter = buildAdapter(acc);
+      if (!adapter) continue;
+      adapters.set(acc.id, adapter);
+      accountMeta.set(acc.id, { platform: acc.platform, label: acc.label });
+      // Inject this account's id into every inbound message + read event.
+      const onMessage = (m: InboundMessage) =>
+        persistInbound({ ...m, accountId: acc.id });
+      const onRead = (chatId: string) => persistRead(acc.id, chatId);
+      adapter
+        .start(onMessage, onRead)
+        .catch((e) =>
+          console.error(`[${acc.platform}:${acc.label || acc.id}] start error:`, e)
         );
-      }
-      const x = new XAdapter();
-      adapters.set("x", x);
-      x.start(persistInbound).catch((e) => console.error("[x] start error:", e));
-      console.log("[sync] x adapter starting (browser / XChat)");
+      console.log(
+        `[sync] started ${acc.platform} (${acc.driver || "default"}) — ${acc.label || acc.id}`
+      );
+      if (isHeavy(acc)) await delay(Number(process.env.HEAVY_START_GAP_MS || 8000));
+    } catch (e) {
+      console.error(`[sync] failed to start ${acc.platform} ${acc.label || acc.id}:`, e);
     }
-  } else {
-    console.log("[sync] x disabled — set X_ENABLED=1.");
   }
+}
+
+// Resolve the adapter for an outbound action: prefer the explicit accountId,
+// else the first adapter on that platform (back-compat with the single-account
+// web that only sends a platform).
+function resolveAdapter(body: {
+  accountId?: string;
+  platform?: string;
+}): Adapter | undefined {
+  if (body.accountId && adapters.has(body.accountId))
+    return adapters.get(body.accountId);
+  if (body.platform) {
+    for (const [id, meta] of accountMeta)
+      if (meta.platform === body.platform) return adapters.get(id);
+  }
+  return undefined;
 }
 
 function startControlServer() {
@@ -97,16 +132,17 @@ function startControlServer() {
         req.on("data", (c) => (body += c));
         req.on("end", async () => {
           try {
-            const { platform, chatExternalId, text, media } = JSON.parse(body);
-            const adapter = adapters.get(platform);
+            const { platform, accountId, chatExternalId, text, media } =
+              JSON.parse(body);
+            const adapter = resolveAdapter({ accountId, platform });
             if (!adapter) {
               res.writeHead(400, { "Content-Type": "application/json" });
               return res.end(
-                JSON.stringify({ error: `adapter '${platform}' not running` })
+                JSON.stringify({
+                  error: `no running adapter for account '${accountId || platform}'`,
+                })
               );
             }
-            // The web side passes a served path ("/media/x.jpg"); resolve it to
-            // the real file on the shared disk for the adapter to upload.
             const outMedia = media
               ? {
                   type: media.type,
@@ -133,9 +169,8 @@ function startControlServer() {
         req.on("data", (c) => (body += c));
         req.on("end", async () => {
           try {
-            const { platform, chatExternalId } = JSON.parse(body);
-            const adapter = adapters.get(platform);
-            // markRead is optional (X can't reliably mark read) — no-op then.
+            const { platform, accountId, chatExternalId } = JSON.parse(body);
+            const adapter = resolveAdapter({ accountId, platform });
             if (adapter?.markRead) await adapter.markRead(chatExternalId);
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
@@ -149,14 +184,23 @@ function startControlServer() {
       if (req.method === "GET" && req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(
-          JSON.stringify({ ok: true, adapters: [...adapters.keys()] })
+          JSON.stringify({ ok: true, accounts: [...adapters.keys()] })
         );
       }
       if (req.method === "GET" && req.url === "/status") {
-        const platforms = ["telegram", "whatsapp", "x"] as const;
+        // Per-platform aggregate (back-compat with the current Connections UI),
+        // plus a per-account list for the multi-account UI.
         const status: Record<string, unknown> = {};
-        for (const p of platforms) status[p] = { platform: p, state: "disabled" };
-        for (const [key, adapter] of adapters) status[key] = adapter.getStatus();
+        for (const p of ["telegram", "whatsapp", "x"])
+          status[p] = { platform: p, state: "disabled" };
+        const accounts: unknown[] = [];
+        for (const [id, adapter] of adapters) {
+          const meta = accountMeta.get(id);
+          const s = adapter.getStatus();
+          if (meta) status[meta.platform] = s;
+          accounts.push({ accountId: id, label: meta?.label, ...s });
+        }
+        status.accounts = accounts;
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(status));
       }
@@ -198,18 +242,13 @@ function startAutomationScheduler() {
 }
 
 async function main() {
-  // Control server first so /status + /send respond during the (possibly slow,
-  // staggered) adapter startup.
   startControlServer();
   startAutomationScheduler();
   try {
     await startAdapters();
   } catch (e) {
-    // Keep the worker (and its control server) alive even if startup partially
-    // fails — a single platform error must not kill the process.
     console.error("[sync] startAdapters error (continuing):", e);
   }
 }
 
 main().catch((e) => console.error("[sync] error:", e));
-

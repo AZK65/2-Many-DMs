@@ -23,7 +23,7 @@ export async function GET(
   const conversation = await prisma.conversation.update({
     where: { id: params.id },
     data: { unread: 0, lastOpenedAt: new Date() },
-    select: { platform: true, externalId: true },
+    select: { platform: true, externalId: true, accountId: true },
   });
 
   // …and marks it read on the platform too (two-way sync), so it doesn't show
@@ -35,6 +35,7 @@ export async function GET(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         platform: conversation.platform,
+        accountId: conversation.accountId,
         chatExternalId: conversation.externalId,
       }),
     }).catch(() => {});
@@ -64,7 +65,7 @@ export async function POST(
 ) {
   const conversation = await prisma.conversation.findUnique({
     where: { id: params.id },
-    select: { id: true, platform: true, externalId: true },
+    select: { id: true, platform: true, externalId: true, accountId: true },
   });
   if (!conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -142,6 +143,7 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           platform: conversation.platform,
+          accountId: conversation.accountId,
           chatExternalId: conversation.externalId,
           text,
           media,

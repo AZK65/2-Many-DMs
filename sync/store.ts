@@ -6,11 +6,11 @@ export const prisma = new PrismaClient();
 // Clears the unread badge for a chat after it's been read on the platform
 // (e.g. you opened it on your phone). Idempotent.
 export async function persistRead(
-  platform: string,
+  accountId: string,
   chatExternalId: string
 ): Promise<void> {
   await prisma.conversation.updateMany({
-    where: { platform, externalId: chatExternalId },
+    where: { accountId, externalId: chatExternalId },
     data: { unread: 0 },
   });
 }
@@ -35,21 +35,32 @@ export async function persistInbound(m: InboundMessage): Promise<void> {
     },
   });
 
-  const conversation = await prisma.conversation.upsert({
-    where: {
-      platform_externalId: {
-        platform: m.platform,
-        externalId: m.chatExternalId,
-      },
-    },
-    create: {
-      platform: m.platform,
-      externalId: m.chatExternalId,
-      contactId: contact.id,
-      lastMessageAt: m.timestamp,
-    },
-    update: {},
+  // Routed per account so two of your own accounts can each hold a chat with
+  // the same peer. accountId is injected by the worker per instance. (Prisma
+  // can't upsert a compound unique with a nullable member, so find-then-create.)
+  const accountId = m.accountId ?? null;
+  let conversation = await prisma.conversation.findFirst({
+    where: { accountId, externalId: m.chatExternalId },
   });
+  if (!conversation) {
+    try {
+      conversation = await prisma.conversation.create({
+        data: {
+          platform: m.platform,
+          accountId,
+          externalId: m.chatExternalId,
+          contactId: contact.id,
+          lastMessageAt: m.timestamp,
+        },
+      });
+    } catch {
+      // Lost a race to a concurrent insert — the unique index held; re-read.
+      conversation = await prisma.conversation.findFirst({
+        where: { accountId, externalId: m.chatExternalId },
+      });
+    }
+  }
+  if (!conversation) throw new Error("could not resolve conversation");
 
   const existing = await prisma.message.findUnique({
     where: { externalKey: m.messageExternalId },
