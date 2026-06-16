@@ -162,66 +162,84 @@ export function ConnectionsModal({
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
             Your accounts
           </h3>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {accounts.length === 0 && (
               <p className="text-xs text-slate-400 dark:text-neutral-500">
                 No accounts yet — add one below.
               </p>
             )}
-            {accounts.map((a) => {
-              const l = live[a.id];
-              const st: ConnState =
-                (l?.state as ConnState) ||
-                (a.status === "connected"
-                  ? "ready"
-                  : a.status === "pending"
-                    ? "starting"
-                    : "disconnected");
-              const meta = STATE_META[st] || STATE_META.disabled;
-              const detail = l?.detail || a.detail;
+            {PLATFORM_ORDER.filter((p) =>
+              accounts.some((a) => a.platform === p)
+            ).map((p) => {
+              const group = accounts.filter((a) => a.platform === p);
               return (
-                <div
-                  key={a.id}
-                  className="rounded-xl border border-slate-200 px-3 py-2 dark:border-neutral-700"
-                >
-                  <div className="flex items-center gap-2.5">
+                <div key={p}>
+                  <div className="mb-1.5 flex items-center gap-2">
                     <span
-                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white"
-                      style={{ backgroundColor: PLATFORMS[a.platform as Platform]?.bg }}
+                      className="grid h-5 w-5 place-items-center rounded-full text-white"
+                      style={{ backgroundColor: PLATFORMS[p].bg }}
                     >
-                      <PlatformGlyph platform={a.platform as Platform} className="h-3.5 w-3.5" />
+                      <PlatformGlyph platform={p} className="h-3 w-3" />
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium dark:text-neutral-100">
-                        {a.label || PLATFORMS[a.platform as Platform]?.label}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-neutral-400">
-                        <span
-                          className="inline-block h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: meta.color }}
-                        />
-                        {meta.label}
-                        {detail ? ` · ${detail}` : ""}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => removeAccount(a.id)}
-                      disabled={busyAcct}
-                      title="Remove account"
-                      className="rounded-lg p-1.5 text-slate-300 transition hover:bg-slate-100 hover:text-red-500 disabled:opacity-50 dark:text-neutral-600 dark:hover:bg-neutral-700"
-                    >
-                      ✕
-                    </button>
+                    <span className="text-xs font-medium text-slate-600 dark:text-neutral-300">
+                      {PLATFORMS[p].label}
+                    </span>
+                    <span className="text-[11px] text-slate-400 dark:text-neutral-500">
+                      {group.length}
+                    </span>
                   </div>
-                  {l?.state === "qr" && l?.qr && (
-                    <div className="mt-2 flex flex-col items-center gap-1 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={l.qr} alt="WhatsApp QR" className="h-40 w-40 rounded bg-white" />
-                      <p className="text-[11px] text-slate-500 dark:text-neutral-400">
-                        WhatsApp → Linked Devices → Link a Device
-                      </p>
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.map((a) => {
+                      const l = live[a.id];
+                      const st: ConnState =
+                        (l?.state as ConnState) ||
+                        (a.status === "connected"
+                          ? "ready"
+                          : a.status === "pending"
+                            ? "starting"
+                            : "disconnected");
+                      const meta = STATE_META[st] || STATE_META.disabled;
+                      return (
+                        <span
+                          key={a.id}
+                          title={l?.detail || a.detail || meta.label}
+                          className="flex items-center gap-1.5 rounded-full bg-slate-100 py-1 pl-2 pr-1 text-xs text-slate-600 dark:bg-neutral-800 dark:text-neutral-300"
+                        >
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: meta.color }}
+                          />
+                          <span className="max-w-[10rem] truncate">
+                            {a.label || PLATFORMS[p].label}
+                          </span>
+                          <button
+                            onClick={() => removeAccount(a.id)}
+                            disabled={busyAcct}
+                            title="Remove account"
+                            className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[10px] text-slate-400 transition hover:bg-slate-200 hover:text-red-500 disabled:opacity-50 dark:text-neutral-500 dark:hover:bg-neutral-700"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {group.map((a) => {
+                    const l = live[a.id];
+                    if (l?.state !== "qr" || !l?.qr) return null;
+                    return (
+                      <div
+                        key={a.id + "-qr"}
+                        className="mt-2 flex flex-col items-center gap-1 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={l.qr} alt="WhatsApp QR" className="h-40 w-40 rounded bg-white" />
+                        <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                          {a.label || "WhatsApp"} → Linked Devices → Link a Device
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
