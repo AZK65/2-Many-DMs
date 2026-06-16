@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { STAGE_IDS } from "@/lib/pipeline";
 
 export async function PATCH(
   req: NextRequest,
@@ -20,9 +19,10 @@ export async function PATCH(
   if (typeof body.company === "string") data.company = body.company;
   if (typeof body.email === "string") data.email = body.email;
   if (typeof body.phone === "string") data.phone = body.phone;
+  // Stages are user-editable now, so accept any stage id (or null to clear).
   if (body.stage === null) data.stage = null;
-  else if (typeof body.stage === "string" && STAGE_IDS.includes(body.stage))
-    data.stage = body.stage;
+  else if (typeof body.stage === "string" && body.stage.trim())
+    data.stage = body.stage.trim();
 
   const contact = await prisma.contact.update({
     where: { id: params.id },
