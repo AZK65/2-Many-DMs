@@ -213,6 +213,14 @@ export function ChatThread({
               style={{ backgroundColor: platform.bg }}
             />
             {platform.label} · {conversation.contact.handle}
+            {conversation.account?.label && (
+              <span
+                title="The account you're messaging from"
+                className="ml-1 max-w-[12rem] truncate rounded bg-[#1FE88A]/15 px-1.5 py-0.5 text-[11px] font-medium text-[#0e9f63] dark:text-[#1FE88A]"
+              >
+                via {conversation.account.label}
+              </span>
+            )}
           </div>
         </div>
       </div>

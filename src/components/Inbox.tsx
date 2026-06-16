@@ -425,6 +425,20 @@ export function Inbox() {
   const pinned = filtered.filter((c) => c.pinned);
   const rest = filtered.filter((c) => !c.pinned);
 
+  // Contacts that appear on more than one account — those rows get a "via" tag
+  // so you can tell the same person's chats apart.
+  const nameCounts = new Map<string, number>();
+  for (const c of conversations) {
+    const k = c.contact.name.trim().toLowerCase();
+    nameCounts.set(k, (nameCounts.get(k) || 0) + 1);
+  }
+  const dupAccountTag = (c: ConversationDTO): string | null => {
+    if (!c.account?.label) return null;
+    if ((nameCounts.get(c.contact.name.trim().toLowerCase()) || 0) <= 1) return null;
+    const l = c.account.label;
+    return l.startsWith("@") ? l : "…" + (l.replace(/\D/g, "").slice(-4) || l);
+  };
+
   // The per-chat actions menu, reused by both the list rows and pinned tiles.
   function convActionsMenu(c: ConversationDTO, positionClass: string) {
     return (
@@ -962,6 +976,14 @@ export function Inbox() {
                       />
                     )}
                     <span className="truncate">{c.contact.name}</span>
+                    {dupAccountTag(c) && (
+                      <span
+                        title={`via ${c.account?.label}`}
+                        className="shrink-0 rounded bg-[#1FE88A]/15 px-1 text-[10px] font-medium text-[#0e9f63] dark:text-[#1FE88A]"
+                      >
+                        {dupAccountTag(c)}
+                      </span>
+                    )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-[11px] text-slate-400 group-hover:hidden dark:text-neutral-500">
                     {isSnoozed(c) && (
