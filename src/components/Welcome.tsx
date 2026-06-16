@@ -14,7 +14,12 @@ import { TelegramConnect } from "./TelegramConnect";
 import { ConnectionsModal, type ConnectionsData } from "./ConnectionsModal";
 import { TG_LINK } from "@/lib/links";
 
-type AccountRow = { platform: string; status: string };
+type AccountRow = {
+  id: string;
+  platform: string;
+  label: string | null;
+  status: string;
+};
 
 export function Welcome() {
   const router = useRouter();
@@ -39,9 +44,29 @@ export function Welcome() {
     return () => clearInterval(t);
   }, []);
 
-  const connected = (p: string) =>
-    accounts.some((a) => a.platform === p && a.status === "connected");
   const anyConnected = accounts.some((a) => a.status === "connected");
+  const accountsFor = (p: string) => accounts.filter((a) => a.platform === p);
+
+  // Re-trigger the connect flow for one more account of this platform.
+  function addAnother(p: string) {
+    if (p === "telegram") return setShowTelegram(true);
+    if (p === "x") {
+      setXStage("warning");
+      if (!pairCode) getPairCode();
+      return;
+    }
+    // WhatsApp: create a pending account; it links via QR (scan in Connections
+    // once the worker runs it).
+    fetch("/api/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform: p }),
+    }).catch(() => {});
+  }
+  function removeAccount(id: string) {
+    fetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => {});
+    setAccounts((a) => a.filter((x) => x.id !== id));
+  }
 
   function go(next: number) {
     setStep(next);
@@ -201,15 +226,17 @@ export function Welcome() {
                         platform={p}
                         title={title}
                         desc={desc}
-                        done={connected(p)}
+                        accounts={accountsFor(p)}
                         onConnect={onConnect}
+                        onAdd={() => addAnother(p)}
+                        onRemove={removeAccount}
                       />
                     </motion.div>
                   ))}
 
                   {/* X warning + steps */}
                   <AnimatePresence>
-                    {xStage !== "closed" && !connected("x") && (
+                    {xStage !== "closed" && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
@@ -406,46 +433,78 @@ function ConnectCard({
   platform,
   title,
   desc,
-  done,
+  accounts,
   onConnect,
+  onAdd,
+  onRemove,
 }: {
   platform: Platform;
   title: string;
   desc: string;
-  done: boolean;
+  accounts: { id: string; label: string | null }[];
   onConnect: () => void;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
 }) {
+  const has = accounts.length > 0;
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-      <span
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"
-        style={{ backgroundColor: PLATFORMS[platform].bg }}
-      >
-        <PlatformGlyph platform={platform} className="h-5 w-5" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="font-semibold text-slate-900 dark:text-neutral-100">
-          {title}
+    <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex items-center gap-3">
+        <span
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"
+          style={{ backgroundColor: PLATFORMS[platform].bg }}
+        >
+          <PlatformGlyph platform={platform} className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-slate-900 dark:text-neutral-100">
+            {title}
+          </div>
+          <div className="truncate text-xs text-slate-500 dark:text-neutral-400">
+            {desc}
+          </div>
         </div>
-        <div className="truncate text-xs text-slate-500 dark:text-neutral-400">
-          {desc}
-        </div>
+        {has ? (
+          <motion.span
+            initial={{ scale: 0.6, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
+          >
+            Connected ✓
+          </motion.span>
+        ) : (
+          <button
+            onClick={onConnect}
+            className="shrink-0 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
+          >
+            Connect
+          </button>
+        )}
       </div>
-      {done ? (
-        <motion.span
-          initial={{ scale: 0.6, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
-        >
-          Connected ✓
-        </motion.span>
-      ) : (
-        <button
-          onClick={onConnect}
-          className="shrink-0 rounded-lg bg-[#1FE88A] px-3.5 py-2 text-xs font-semibold text-[#04140d] transition hover:bg-[#16d579]"
-        >
-          Connect
-        </button>
+
+      {has && (
+        <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 dark:border-neutral-800">
+          {accounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between gap-2">
+              <span className="truncate text-xs text-slate-600 dark:text-neutral-300">
+                {a.label || title}
+              </span>
+              <button
+                onClick={() => onRemove(a.id)}
+                title="Remove account"
+                className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={onAdd}
+            className="text-xs font-medium text-[#0e9f63] transition hover:underline dark:text-[#1FE88A]"
+          >
+            + Add another
+          </button>
+        </div>
       )}
     </div>
   );
