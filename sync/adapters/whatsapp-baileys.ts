@@ -90,6 +90,9 @@ export class WhatsAppBaileysAdapter implements Adapter {
   private detail?: string;
   private onMessage?: (m: InboundMessage) => Promise<void>;
   private onRead?: (chatExternalId: string) => Promise<void>;
+  // jid -> display name, from WhatsApp's contacts store (names aren't on
+  // history/outbound messages, only the live contacts list).
+  private contacts = new Map<string, string>();
   private authDir: string;
   private proxyUrl?: string;
   private stopped = false;
@@ -198,8 +201,13 @@ export class WhatsAppBaileysAdapter implements Adapter {
       }
     });
 
+    // Names live in the contacts store, delivered separately from messages.
+    sock.ev.on("contacts.upsert", (cs: any[]) => this.rememberContacts(cs));
+    sock.ev.on("contacts.update", (cs: any[]) => this.rememberContacts(cs));
+
     // Initial history sync (backfill arrives as an event, not a pull).
-    sock.ev.on("messaging-history.set", async ({ messages }: any) => {
+    sock.ev.on("messaging-history.set", async ({ messages, contacts }: any) => {
+      this.rememberContacts(contacts);
       if (!messages?.length || !this.onMessage) return;
       let count = 0;
       for (const msg of messages) {
@@ -228,12 +236,24 @@ export class WhatsAppBaileysAdapter implements Adapter {
     });
   }
 
+  private rememberContacts(list?: any[]): void {
+    if (!Array.isArray(list)) return;
+    for (const c of list) {
+      const id = c?.id ? jidNormalizedUser(c.id) : "";
+      const name = c?.name || c?.verifiedName || c?.notify;
+      if (id && name) this.contacts.set(id, name);
+    }
+  }
+
   private async toInbound(msg: any): Promise<InboundMessage | null> {
     const jid: string | undefined = msg.key?.remoteJid;
     if (!jid || !isIndividual(jid)) return null; // skip groups, status@broadcast
     if (!msg.message) return null; // protocol/empty
     const norm = jidNormalizedUser(jid);
     const number = numberFromJid(norm);
+    // Cache the sender's display name from live inbound traffic — for @lid
+    // privacy chats and history (which lack names) this is the only source.
+    if (!msg.key?.fromMe && msg.pushName) this.contacts.set(norm, msg.pushName);
     const contentType = getContentType(msg.message);
     const body = extractText(msg.message);
 
@@ -266,7 +286,12 @@ export class WhatsAppBaileysAdapter implements Adapter {
       timestamp: new Date((tsNum || Math.floor(Date.now() / 1000)) * 1000),
       contact: {
         externalKey: `whatsapp:${norm}`,
-        name: msg.pushName || number,
+        // Prefer the contacts store; pushName is only valid for inbound (it's
+        // the sender) — for our own sends it'd be *our* name, so skip it.
+        name:
+          this.contacts.get(norm) ||
+          (msg.key?.fromMe ? "" : msg.pushName) ||
+          number,
         handle: "+" + number,
         avatarUrl,
       },
