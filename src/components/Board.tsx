@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion } from "motion/react";
 import { PLATFORMS } from "@/lib/platforms";
 import { PIPELINE } from "@/lib/pipeline";
+import { loadStages } from "@/lib/settings";
 import { listTime } from "@/lib/time";
 import { Avatar } from "./Avatar";
 import ThemeToggle from "./ThemeToggle";
@@ -30,7 +31,12 @@ export function Board() {
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
 
+  const [stages, setStages] = useState(PIPELINE);
+
   useEffect(() => {
+    setStages(loadStages());
+    const onChange = () => setStages(loadStages());
+    window.addEventListener("tmd-settings", onChange);
     Promise.all([
       fetch("/api/contacts").then((r) => r.json()),
       fetch("/api/tags").then((r) => r.json()),
@@ -39,6 +45,7 @@ export function Board() {
       setTags(tg);
       setLoading(false);
     });
+    return () => window.removeEventListener("tmd-settings", onChange);
   }, []);
 
   const columns: Column[] = useMemo(() => {
@@ -50,7 +57,7 @@ export function Board() {
           color: "#94a3b8",
           cards: contacts.filter((c) => !c.stage),
         },
-        ...PIPELINE.map((s) => ({
+        ...stages.map((s) => ({
           id: s.id,
           name: s.name,
           color: s.color,
@@ -69,7 +76,7 @@ export function Board() {
       { id: UNTAGGED, name: "Untagged", color: "#94a3b8", cards: untagged },
       ...tagged,
     ];
-  }, [groupBy, tags, contacts]);
+  }, [groupBy, tags, contacts, stages]);
 
   async function move(contactId: string, targetCol: string) {
     if (!dragSource || targetCol === dragSource) return;

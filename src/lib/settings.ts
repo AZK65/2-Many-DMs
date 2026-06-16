@@ -2,6 +2,8 @@
 // variables / read by components. Extend freely — add a field + default, render
 // a control in SettingsModal, and read it where it applies.
 
+import { PIPELINE, type Stage } from "./pipeline";
+
 export type ScrollbarPref = "thin" | "default" | "hidden";
 
 export interface Settings {
@@ -10,6 +12,7 @@ export interface Settings {
   defaultView: "all" | "needsreply" | "cold"; // inbox tab on load
   accentLight: string; // hex — accent in light mode
   accentDark: string; // hex — accent in dark mode
+  stages: Stage[]; // editable board pipeline stages
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,7 +21,14 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultView: "needsreply",
   accentLight: "#0e9f63",
   accentDark: "#1fe88a",
+  stages: PIPELINE,
 };
+
+// Board reads stages from here (falls back to the default pipeline).
+export function loadStages(): Stage[] {
+  const st = loadSettings().stages;
+  return Array.isArray(st) && st.length ? st : PIPELINE;
+}
 
 const KEY = "tmd-settings";
 

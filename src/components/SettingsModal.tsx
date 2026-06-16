@@ -37,14 +37,92 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
+  const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [newTag, setNewTag] = useState("");
+  const [newFolder, setNewFolder] = useState("");
 
   function setTheme(t: ThemePref) {
     setThemeState(t);
     applyTheme(t);
   }
 
+  // ── Tags (server) ──
+  async function addTag() {
+    const name = newTag.trim();
+    if (!name) return;
+    setNewTag("");
+    const t = await fetch("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => r.json());
+    if (t?.id) setTags((x) => [...x, t]);
+  }
+  async function patchTag(id: string, patch: { name?: string; color?: string }) {
+    setTags((x) => x.map((y) => (y.id === id ? { ...y, ...patch } : y)));
+    await fetch(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {});
+  }
+  async function delTag(id: string) {
+    setTags((x) => x.filter((y) => y.id !== id));
+    await fetch(`/api/tags/${id}`, { method: "DELETE" }).catch(() => {});
+  }
+
+  // ── Folders / tabs (server) ──
+  async function addFolder() {
+    const name = newFolder.trim();
+    if (!name) return;
+    setNewFolder("");
+    const f = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => r.json());
+    if (f?.id) setFolders((x) => [...x, f]);
+  }
+  async function renameFolder(id: string, name: string) {
+    setFolders((x) => x.map((y) => (y.id === id ? { ...y, name } : y)));
+    await fetch(`/api/folders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).catch(() => {});
+  }
+  async function delFolder(id: string) {
+    setFolders((x) => x.filter((y) => y.id !== id));
+    await fetch(`/api/folders/${id}`, { method: "DELETE" }).catch(() => {});
+  }
+
+  // ── Board stages (local) ──
+  function setStages(stages: Settings["stages"]) {
+    update({ stages });
+  }
+  function addStage() {
+    const id = "stage_" + Math.random().toString(36).slice(2, 7);
+    setStages([...s.stages, { id, name: "New stage", color: "#94a3b8" }]);
+  }
+  function patchStage(id: string, patch: { name?: string; color?: string }) {
+    setStages(s.stages.map((st) => (st.id === id ? { ...st, ...patch } : st)));
+  }
+  function delStage(id: string) {
+    setStages(s.stages.filter((st) => st.id !== id));
+  }
+  function moveStage(i: number, dir: -1 | 1) {
+    const next = [...s.stages];
+    const j = i + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    setStages(next);
+  }
+
   useEffect(() => {
     setThemeState(currentTheme());
+    fetch("/api/tags").then((r) => r.json()).then(setTags).catch(() => {});
+    fetch("/api/folders").then((r) => r.json()).then(setFolders).catch(() => {});
     fetch("/api/accounts").then((r) => r.json()).then(setAccounts).catch(() => {});
     fetch("/api/connections")
       .then((r) => r.json())
@@ -170,6 +248,136 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <span className="text-xs text-slate-400 dark:text-neutral-500">days</span>
               </div>
             </Row>
+          </Section>
+
+          {/* Tabs (folders) */}
+          <Section title="Tabs">
+            {folders.map((f) => (
+              <div key={f.id} className="flex items-center gap-2">
+                <input
+                  defaultValue={f.name}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== f.name) renameFolder(f.id, v);
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+                <button
+                  onClick={() => delFolder(f.id)}
+                  title="Delete tab"
+                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <input
+                value={newFolder}
+                onChange={(e) => setNewFolder(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addFolder()}
+                placeholder="New tab…"
+                className="min-w-0 flex-1 rounded-lg border border-dashed border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700 dark:text-neutral-200"
+              />
+              <button
+                onClick={addFolder}
+                className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg transition hover:opacity-90"
+              >
+                Add
+              </button>
+            </div>
+          </Section>
+
+          {/* Tags */}
+          <Section title="Tags">
+            {tags.map((t) => (
+              <div key={t.id} className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={t.color}
+                  onChange={(e) => patchTag(t.id, { color: e.target.value })}
+                  className="h-7 w-8 shrink-0 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
+                />
+                <input
+                  defaultValue={t.name}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== t.name) patchTag(t.id, { name: v });
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+                <button
+                  onClick={() => delTag(t.id)}
+                  title="Delete tag"
+                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <input
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addTag()}
+                placeholder="New tag…"
+                className="min-w-0 flex-1 rounded-lg border border-dashed border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700 dark:text-neutral-200"
+              />
+              <button
+                onClick={addTag}
+                className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg transition hover:opacity-90"
+              >
+                Add
+              </button>
+            </div>
+          </Section>
+
+          {/* Board stages */}
+          <Section title="Board stages">
+            {s.stages.map((st, i) => (
+              <div key={st.id} className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={st.color}
+                  onChange={(e) => patchStage(st.id, { color: e.target.value })}
+                  className="h-7 w-8 shrink-0 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
+                />
+                <input
+                  value={st.name}
+                  onChange={(e) => patchStage(st.id, { name: e.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+                <button
+                  onClick={() => moveStage(i, -1)}
+                  disabled={i === 0}
+                  title="Move up"
+                  className="rounded p-1 text-slate-400 transition disabled:opacity-30 dark:text-neutral-500"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => moveStage(i, 1)}
+                  disabled={i === s.stages.length - 1}
+                  title="Move down"
+                  className="rounded p-1 text-slate-400 transition disabled:opacity-30 dark:text-neutral-500"
+                >
+                  ↓
+                </button>
+                <button
+                  onClick={() => delStage(st.id)}
+                  title="Delete stage"
+                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={addStage}
+              className="rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/10 dark:border-neutral-700"
+            >
+              + Add stage
+            </button>
           </Section>
 
           {/* Connections */}
