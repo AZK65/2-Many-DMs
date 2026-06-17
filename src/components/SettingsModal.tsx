@@ -119,6 +119,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setStages(next);
   }
 
+  // ── Group macros (Cmd+G) ──
+  function patchMacro(id: string, patch: Partial<Settings["macros"][number]>) {
+    update({ macros: s.macros.map((m) => (m.id === id ? { ...m, ...patch } : m)) });
+  }
+  function delMacro(id: string) {
+    update({ macros: s.macros.filter((m) => m.id !== id) });
+  }
+
   useEffect(() => {
     setThemeState(currentTheme());
     fetch("/api/tags").then((r) => r.json()).then(setTags).catch(() => {});
@@ -429,6 +437,60 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <p className="text-[11px] text-slate-400 dark:text-neutral-500">
               More plugins coming — tell me which you want.
             </p>
+          </Section>
+
+          {/* Group macros */}
+          <Section title="Group macros (⌘G)">
+            {s.macros.length === 0 && (
+              <p className="text-xs text-slate-400 dark:text-neutral-500">
+                No macros yet — create one from ⌘G (New group chat) → Save as
+                macro.
+              </p>
+            )}
+            {s.macros.map((m) => (
+              <div
+                key={m.id}
+                className="space-y-1.5 rounded-xl border border-slate-200 p-2.5 dark:border-neutral-700"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    value={m.label}
+                    onChange={(e) => patchMacro(m.id, { label: e.target.value })}
+                    placeholder="Macro name"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+                  />
+                  <span className="shrink-0 text-[10px] text-slate-400 dark:text-neutral-500">
+                    {PLATFORMS[m.platform as Platform]?.label} ·{" "}
+                    {m.contactIds.length} ppl
+                  </span>
+                  <button
+                    onClick={() => delMacro(m.id)}
+                    title="Delete macro"
+                    className="shrink-0 rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  value={m.groupName}
+                  onChange={(e) => patchMacro(m.id, { groupName: e.target.value })}
+                  placeholder="Group name"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+                <textarea
+                  value={m.message}
+                  onChange={(e) => patchMacro(m.id, { message: e.target.value })}
+                  placeholder="Preset message"
+                  rows={2}
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+              </div>
+            ))}
+            {s.macros.length > 0 && (
+              <p className="text-[11px] text-slate-400 dark:text-neutral-500">
+                Members are chosen when you create the macro from ⌘G.
+              </p>
+            )}
           </Section>
 
           {/* Connections */}
