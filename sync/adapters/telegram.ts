@@ -40,6 +40,21 @@ function contactFrom(chat: any): InboundMessage["contact"] {
   return { externalKey: `telegram:${chat.id}`, name, handle };
 }
 
+// The forum topic a message belongs to (the topic's root message id).
+function topicIdOf(msg: any): number | undefined {
+  const rt = msg.replyTo;
+  if (!rt) return undefined;
+  const id = rt.replyToTopId ?? rt.replyToMsgId;
+  return typeof id === "number" ? id : undefined;
+}
+
+// Parse a chatExternalId that may encode a forum topic ("<chatId>__t<topicId>").
+function parseTarget(chatExternalId: string): { id: number; topicId?: number } {
+  const m = /^(-?\d+)__t(\d+)$/.exec(chatExternalId);
+  if (m) return { id: Number(m[1]), topicId: Number(m[2]) };
+  return { id: Number(chatExternalId) };
+}
+
 function resolveMedia(
   msg: any
 ): { type: MediaType; ext: string; name?: string; size: number; downloadable: boolean } | null {
@@ -85,6 +100,8 @@ export class TelegramAdapter implements Adapter {
   private client: TelegramClient;
   private state: AdapterStatus["state"] = "starting";
   private detail?: string;
+  // forum channel id -> (topicId -> title), fetched once per channel.
+  private forumTopics = new Map<string, Map<number, string>>();
 
   constructor(apiId: number, apiHash: string, session: string) {
     this.client = new TelegramClient(
@@ -124,6 +141,30 @@ export class TelegramAdapter implements Adapter {
     return undefined;
   }
 
+  // Fetch a forum channel's topic list (id → title), cached per channel.
+  private async ensureForumTopics(chat: any): Promise<void> {
+    const chatId = String(chat.id);
+    if (this.forumTopics.has(chatId)) return;
+    const map = new Map<number, string>();
+    this.forumTopics.set(chatId, map); // set first to avoid refetch storms
+    try {
+      const res: any = await this.client.invoke(
+        new Api.channels.GetForumTopics({
+          channel: chat,
+          limit: 100,
+          offsetDate: 0,
+          offsetId: 0,
+          offsetTopic: 0,
+        })
+      );
+      for (const t of res.topics || []) {
+        if (t.id != null && t.title) map.set(Number(t.id), String(t.title));
+      }
+    } catch {
+      /* not a forum / no access */
+    }
+  }
+
   private async buildMessage(chat: any, msg: any): Promise<InboundMessage> {
     const chatId = String(chat.id);
     const messageExternalId = `telegram:${chatId}:${msg.id}`;
@@ -133,9 +174,23 @@ export class TelegramAdapter implements Adapter {
     const contact = contactFrom(chat);
     contact.avatarUrl = await this.avatarFor(chat);
 
+    // Forum channels: split into one conversation per topic.
+    let chatExternalId = chatId;
+    if (chat.forum) {
+      const tid = topicIdOf(msg) ?? 1; // no topic info → General (id 1)
+      await this.ensureForumTopics(chat);
+      const tname =
+        this.forumTopics.get(chatId)?.get(tid) ||
+        (tid === 1 ? "General" : `Topic ${tid}`);
+      chatExternalId = `${chatId}__t${tid}`;
+      contact.externalKey = `telegram:${chatExternalId}`;
+      contact.name = `${chat.title} · ${tname}`;
+      contact.handle = "Topic";
+    }
+
     const base: InboundMessage = {
       platform: "telegram",
-      chatExternalId: chatId,
+      chatExternalId,
       messageExternalId,
       direction: msg.out ? "out" : "in",
       body: caption,
@@ -248,8 +303,11 @@ export class TelegramAdapter implements Adapter {
     body: string,
     media?: OutboundMedia
   ): Promise<SentMessage> {
-    // Telegram user ids are well within Number's safe-integer range.
-    const peer = await this.client.getInputEntity(Number(chatExternalId));
+    // Telegram ids are well within Number's safe-integer range. A forum topic
+    // target is "<chatId>__t<topicId>" — post into the topic via replyTo.
+    const { id, topicId } = parseTarget(chatExternalId);
+    const peer = await this.client.getInputEntity(id);
+    const replyTo = topicId && topicId !== 1 ? topicId : undefined;
     let sent: any;
     if (media) {
       // forceDocument keeps arbitrary files as documents instead of trying to
@@ -258,9 +316,10 @@ export class TelegramAdapter implements Adapter {
         file: media.path,
         caption: body || undefined,
         forceDocument: media.type === "file",
+        replyTo,
       });
     } else {
-      sent = await this.client.sendMessage(peer, { message: body });
+      sent = await this.client.sendMessage(peer, { message: body, replyTo });
     }
     return {
       messageExternalId: `telegram:${chatExternalId}:${sent.id}`,
@@ -269,7 +328,7 @@ export class TelegramAdapter implements Adapter {
   }
 
   async markRead(chatExternalId: string): Promise<void> {
-    const peer = await this.client.getInputEntity(Number(chatExternalId));
+    const peer = await this.client.getInputEntity(parseTarget(chatExternalId).id);
     await this.client.invoke(
       new Api.messages.ReadHistory({ peer, maxId: 0 })
     );
