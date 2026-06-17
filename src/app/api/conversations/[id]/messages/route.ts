@@ -48,6 +48,7 @@ export async function GET(
       senderContact: {
         select: {
           name: true,
+          avatarUrl: true,
           tags: { include: { tag: true } },
         },
       },
@@ -63,6 +64,7 @@ export async function GET(
     mediaName: m.mediaName ?? null,
     createdAt: m.createdAt.toISOString(),
     senderName: m.senderContact?.name ?? null,
+    senderAvatarUrl: m.senderContact?.avatarUrl ?? null,
     senderTags: (m.senderContact?.tags ?? []).map((ct) => ({
       id: ct.tag.id,
       name: ct.tag.name,
@@ -231,6 +233,7 @@ export async function POST(
     mediaName: message.mediaName ?? null,
     createdAt: message.createdAt.toISOString(),
     senderName: null,
+    senderAvatarUrl: null,
     senderTags: [],
   };
 

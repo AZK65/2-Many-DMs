@@ -121,6 +121,7 @@ export interface MessageDTO {
   createdAt: string;
   // For group messages: who sent it + their tags (so the UI can show them).
   senderName: string | null;
+  senderAvatarUrl: string | null;
   senderTags: TagDTO[];
 }
 
