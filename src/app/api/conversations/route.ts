@@ -39,6 +39,9 @@ export async function GET() {
         ? { id: c.account.id, label: c.account.label }
         : null,
       isGroup: c.contact.isGroup,
+      topicOf: /__t\d+$/.test(c.externalId ?? "")
+        ? (c.externalId as string).replace(/__t\d+$/, "")
+        : null,
       contact: {
         id: c.contact.id,
         name: c.contact.name,

@@ -93,6 +93,9 @@ export interface ConversationDTO {
   // lets the UI show "via …" so the same person on two accounts is distinct.
   account: { id: string; label: string | null } | null;
   isGroup: boolean;
+  // For forum topics: the parent channel's externalId (so the inbox can nest
+  // topics as subchats). Null for everything else.
+  topicOf: string | null;
   contact: ContactDTO;
 }
 
