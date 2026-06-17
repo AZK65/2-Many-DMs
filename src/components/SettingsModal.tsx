@@ -126,6 +126,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   function delMacro(id: string) {
     update({ macros: s.macros.filter((m) => m.id !== id) });
   }
+  function patchTemplate(
+    id: string,
+    patch: Partial<Settings["templates"][number]>
+  ) {
+    update({
+      templates: s.templates.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    });
+  }
+  function delTemplate(id: string) {
+    update({ templates: s.templates.filter((t) => t.id !== id) });
+  }
 
   useEffect(() => {
     setThemeState(currentTheme());
@@ -491,6 +502,54 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 Members are chosen when you create the macro from ⌘G.
               </p>
             )}
+          </Section>
+
+          {/* Group templates */}
+          <Section title="Group templates">
+            {s.templates.length === 0 && (
+              <p className="text-xs text-slate-400 dark:text-neutral-500">
+                No templates yet — save one from ⌘G (what the group is for).
+              </p>
+            )}
+            {s.templates.map((t) => (
+              <div
+                key={t.id}
+                className="space-y-1.5 rounded-xl border border-slate-200 p-2.5 dark:border-neutral-700"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    value={t.label}
+                    onChange={(e) => patchTemplate(t.id, { label: e.target.value })}
+                    placeholder="What the group is for"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+                  />
+                  <button
+                    onClick={() => delTemplate(t.id)}
+                    title="Delete template"
+                    className="shrink-0 rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  value={t.groupName}
+                  onChange={(e) =>
+                    patchTemplate(t.id, { groupName: e.target.value })
+                  }
+                  placeholder="Default group name"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+                <textarea
+                  value={t.message}
+                  onChange={(e) =>
+                    patchTemplate(t.id, { message: e.target.value })
+                  }
+                  placeholder="First message"
+                  rows={2}
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+              </div>
+            ))}
           </Section>
 
           {/* Connections */}

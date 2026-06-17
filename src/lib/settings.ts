@@ -15,6 +15,7 @@ export interface Settings {
   stages: Stage[]; // editable board pipeline stages
   plugins: PluginSettings;
   macros: GroupMacro[]; // saved "create group" macros (Cmd+G)
+  templates: GroupTemplate[]; // reusable "what the group is for" presets
 }
 
 // A reusable "create a group" preset: members + a first message.
@@ -24,6 +25,15 @@ export interface GroupMacro {
   platform: string;
   groupName: string;
   contactIds: string[];
+  message: string;
+}
+
+// A template captures the *purpose* (name + first message) without fixed people
+// — apply it, then pick whoever the group is for.
+export interface GroupTemplate {
+  id: string;
+  label: string; // what the group is for, e.g. "Client kickoff"
+  groupName: string;
   message: string;
 }
 
@@ -42,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stages: PIPELINE,
   plugins: { calcom: { enabled: false, link: "" } },
   macros: [],
+  templates: [],
 };
 
 // Build a Cal.com booking URL with the contact pre-filled as a guest.
