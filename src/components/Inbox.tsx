@@ -122,9 +122,6 @@ export function Inbox() {
   const [showSnippets, setShowSnippets] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const [expandedChannels, setExpandedChannels] = useState<Set<string>>(
-    new Set()
-  );
 
   // First-run: send new users to the onboarding screen.
   useEffect(() => {
@@ -256,6 +253,23 @@ export function Inbox() {
   }, [scoped, view, showHidden]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
+
+  // Sibling topics of the open forum channel, shown as tabs in the thread.
+  const selectedTopics = useMemo(() => {
+    if (!selected?.topicOf) return undefined;
+    return conversations
+      .filter((c) => c.topicOf === selected.topicOf)
+      .sort(
+        (a, b) =>
+          new Date(b.lastMessageAt).getTime() -
+          new Date(a.lastMessageAt).getTime()
+      )
+      .map((c) => ({
+        id: c.id,
+        name: c.contact.name.split(" · ").slice(1).join(" · ") || c.contact.name,
+        unread: c.unread,
+      }));
+  }, [conversations, selected]);
 
   function selectConversation(id: string) {
     setSelectedId(id);
@@ -495,13 +509,6 @@ export function Inbox() {
     }
     return [...singles, ...channels.values()].sort((a, b) => b.at - a.at);
   }, [rest]);
-  function toggleChannel(id: string) {
-    setExpandedChannels((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  }
 
   // Contacts that appear on more than one account — those rows get a "via" tag
   // so you can tell the same person's chats apart.
@@ -1144,11 +1151,22 @@ export function Inbox() {
               {convActionsMenu(c, "right-2 top-9 origin-top-right")}
             </motion.div>
             );
-            const renderChannel = (g: ChannelItem) => (
-              <div key={"ch_" + g.id}>
+            const renderChannel = (g: ChannelItem) => {
+              const recent = [...g.topics].sort(
+                (a, b) =>
+                  new Date(b.lastMessageAt).getTime() -
+                  new Date(a.lastMessageAt).getTime()
+              )[0];
+              const active = selected?.topicOf === g.id;
+              return (
                 <button
-                  onClick={() => toggleChannel(g.id)}
-                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/60"
+                  key={"ch_" + g.id}
+                  onClick={() => recent && selectConversation(recent.id)}
+                  className={`group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors dark:border-neutral-800/70 ${
+                    active
+                      ? "bg-accent/15 dark:bg-accent/10"
+                      : "hover:bg-slate-50 dark:hover:bg-neutral-800/60"
+                  }`}
                 >
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-200 text-slate-500 dark:bg-neutral-700 dark:text-neutral-300">
                     <ChatTypeIcon isGroup handle="Channel" className="h-5 w-5" />
@@ -1162,8 +1180,8 @@ export function Inbox() {
                         {g.topics.length} topics
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400 dark:text-neutral-500">
-                      {expandedChannels.has(g.id) ? "Hide topics" : "Show topics"}
+                    <div className="truncate text-xs text-slate-400 dark:text-neutral-500">
+                      Open — switch topics with the tabs inside
                     </div>
                   </div>
                   {g.unread > 0 && (
@@ -1171,18 +1189,9 @@ export function Inbox() {
                       {g.unread}
                     </span>
                   )}
-                  <span
-                    className={`shrink-0 text-lg text-slate-400 transition-transform ${
-                      expandedChannels.has(g.id) ? "rotate-90" : ""
-                    }`}
-                  >
-                    ›
-                  </span>
                 </button>
-                {expandedChannels.has(g.id) &&
-                  g.topics.map((t) => renderRow(t, true))}
-              </div>
-            );
+              );
+            };
             return listItems.map((item) =>
               item.kind === "conv"
                 ? renderRow(item.conv)
@@ -1201,6 +1210,8 @@ export function Inbox() {
             snippets={snippets}
             onManageSnippets={() => setShowSnippets(true)}
             onSent={(preview) => handleSent(selected.id, preview)}
+            topics={selectedTopics}
+            onSelectTopic={selectConversation}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-400 dark:text-neutral-500">
