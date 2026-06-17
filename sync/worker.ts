@@ -86,13 +86,20 @@ async function startAdapters() {
   // credentials — running several would duplicate ingestion under different
   // accountIds (and trip AUTH_KEY_DUPLICATED on Telegram). Allow only the first
   // such account per platform; the rest need their own session to run.
+  // Also: if a platform already has an account WITH its own stored session, the
+  // env-credential fallback is almost certainly the same login — starting both
+  // deadlocks Telegram on AUTH_KEY_DUPLICATED and leaves a zombie adapter that
+  // hangs every send/group-create routed to it. Skip the env fallback entirely.
+  const platformHasOwnSession = new Set(
+    ordered.filter((a) => a.session).map((a) => a.platform)
+  );
   const envUsed = new Set<string>();
   for (const acc of ordered) {
     try {
       if ((acc.platform === "telegram" || acc.platform === "x") && !acc.session) {
-        if (envUsed.has(acc.platform)) {
+        if (envUsed.has(acc.platform) || platformHasOwnSession.has(acc.platform)) {
           console.warn(
-            `[sync] skipping ${acc.platform} "${acc.label || acc.id}" — no stored session (env credentials already in use by another account). Connect it to run it.`
+            `[sync] skipping ${acc.platform} "${acc.label || acc.id}" — no stored session (env credentials already in use by a connected account). Connect it to run it.`
           );
           continue;
         }
@@ -131,8 +138,19 @@ function resolveAdapter(body: {
   if (body.accountId && adapters.has(body.accountId))
     return adapters.get(body.accountId);
   if (body.platform) {
-    for (const [id, meta] of accountMeta)
-      if (meta.platform === body.platform) return adapters.get(id);
+    // Prefer a *ready* adapter — a platform can have several accounts and the
+    // first one might be a half-dead duplicate (e.g. an env-session telegram
+    // client that lost the AUTH_KEY_DUPLICATED race and sits in "starting").
+    // Routing a send/group-create to that zombie hangs forever.
+    let fallback: Adapter | undefined;
+    for (const [id, meta] of accountMeta) {
+      if (meta.platform !== body.platform) continue;
+      const a = adapters.get(id);
+      if (!a) continue;
+      if (!fallback) fallback = a;
+      if (a.getStatus().state === "ready") return a;
+    }
+    return fallback;
   }
   return undefined;
 }
