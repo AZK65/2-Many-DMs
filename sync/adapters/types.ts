@@ -21,6 +21,14 @@ export interface InboundMessage {
     handle: string;
     avatarUrl?: string; // served path like "/avatars/telegram_123.jpg"
   };
+  isGroup?: boolean; // the `contact` is a group chat
+  // For inbound group messages: the member who actually sent it (so their tags
+  // can show). Their externalKey matches their 1:1 contact when one exists.
+  sender?: {
+    externalKey: string;
+    name: string;
+    avatarUrl?: string;
+  };
 }
 
 export interface SentMessage {

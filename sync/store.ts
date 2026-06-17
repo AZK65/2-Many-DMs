@@ -26,14 +26,33 @@ export async function persistInbound(m: InboundMessage): Promise<void> {
       handle: m.contact.handle,
       externalKey: m.contact.externalKey,
       avatarUrl: m.contact.avatarUrl,
+      isGroup: !!m.isGroup,
     },
     update: {
       name: m.contact.name,
       handle: m.contact.handle,
+      ...(m.isGroup ? { isGroup: true } : {}),
       // Only overwrite the avatar when we actually fetched one.
       ...(m.contact.avatarUrl ? { avatarUrl: m.contact.avatarUrl } : {}),
     },
   });
+
+  // For group messages, resolve the member who sent it (their externalKey
+  // matches their 1:1 contact when one exists, so tags are shared).
+  let senderContactId: string | undefined;
+  if (m.sender) {
+    const sc = await prisma.contact.upsert({
+      where: { externalKey: m.sender.externalKey },
+      create: {
+        name: m.sender.name,
+        handle: m.sender.name,
+        externalKey: m.sender.externalKey,
+        avatarUrl: m.sender.avatarUrl,
+      },
+      update: m.sender.avatarUrl ? { avatarUrl: m.sender.avatarUrl } : {},
+    });
+    senderContactId = sc.id;
+  }
 
   // Routed per account so two of your own accounts can each hold a chat with
   // the same peer. accountId is injected by the worker per instance. (Prisma
@@ -66,18 +85,18 @@ export async function persistInbound(m: InboundMessage): Promise<void> {
     where: { externalKey: m.messageExternalId },
   });
   if (existing) {
-    // Enrich a previously-synced row that predates media support.
+    // Enrich a previously-synced row (media support, or group-sender backfill).
+    const patch: Record<string, unknown> = {};
     if (m.media && !existing.mediaType) {
-      await prisma.message.update({
-        where: { id: existing.id },
-        data: {
-          body: m.body,
-          mediaType: m.media.type,
-          mediaUrl: m.media.url,
-          mediaName: m.media.name,
-        },
-      });
+      patch.body = m.body;
+      patch.mediaType = m.media.type;
+      patch.mediaUrl = m.media.url;
+      patch.mediaName = m.media.name;
     }
+    if (senderContactId && !existing.senderContactId)
+      patch.senderContactId = senderContactId;
+    if (Object.keys(patch).length)
+      await prisma.message.update({ where: { id: existing.id }, data: patch });
     return;
   }
 
@@ -86,6 +105,7 @@ export async function persistInbound(m: InboundMessage): Promise<void> {
       conversationId: conversation.id,
       body: m.body,
       direction: m.direction,
+      senderContactId,
       mediaType: m.media?.type,
       mediaUrl: m.media?.url ?? undefined,
       mediaName: m.media?.name,

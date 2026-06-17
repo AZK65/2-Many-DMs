@@ -61,11 +61,13 @@ model Contact {
   phone         String?
   notes         String?
   stage         String? // CRM pipeline stage: lead | contacted | negotiating | won | lost
+  isGroup       Boolean           @default(false) // this "contact" is a group chat
   externalKey   String?           @unique // e.g. "telegram:123456789" — for sync dedupe
   createdAt     DateTime          @default(now())
   conversations Conversation[]
   tags          ContactTag[]
   relations     ContactRelation[] @relation("ContactToRelation")
+  sentMessages  Message[]         @relation("MessageSender") // group messages this person sent
 }
 
 // A directed link from a contact to another conversation (a colleague's chat,
@@ -188,6 +190,10 @@ model Message {
   id             String       @id @default(cuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // In group chats, the member who sent this message (so the UI can show their
+  // tags). Null for 1:1 and your own sends.
+  senderContactId String?
+  senderContact   Contact?    @relation("MessageSender", fields: [senderContactId], references: [id])
   body           String
   direction      String // 'in' | 'out'
   mediaType      String? // 'image' | 'video' | 'audio' | 'sticker' | 'file'

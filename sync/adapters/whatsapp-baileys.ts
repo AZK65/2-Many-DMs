@@ -276,10 +276,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
       }
     }
     const contentType = getContentType(msg.message);
-    let body = extractText(msg.message);
-    // In groups, prefix who said it (pushName is the sender's display name).
-    if (group && !msg.key?.fromMe && msg.pushName && body)
-      body = `${msg.pushName}: ${body}`;
+    const body = extractText(msg.message);
 
     const avatarKey = `whatsapp_${norm}`;
     let avatarUrl = existingAvatar(avatarKey) || undefined;
@@ -321,7 +318,21 @@ export class WhatsAppBaileysAdapter implements Adapter {
         handle: group ? "Group" : "+" + number,
         avatarUrl,
       },
+      isGroup: group,
     };
+
+    // Attribute group messages to the member who sent them (for member tags).
+    if (group && !msg.key?.fromMe) {
+      const participant: string | undefined =
+        msg.key?.participant || msg.participant;
+      if (participant) {
+        const pnorm = jidNormalizedUser(participant);
+        base.sender = {
+          externalKey: `whatsapp:${pnorm}`,
+          name: msg.pushName || numberFromJid(pnorm),
+        };
+      }
+    }
 
     const mt = mediaTypeFromContent(contentType);
     if (mt) {

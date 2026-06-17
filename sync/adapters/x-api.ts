@@ -197,16 +197,20 @@ export class XApiAdapter implements Adapter {
       let name: string;
       let handle: string;
       let pic: string | undefined;
-      let body = typeof md.text === "string" ? md.text : "";
+      const body = typeof md.text === "string" ? md.text : "";
+      let senderInfo: InboundMessage["sender"];
 
       if (isGroup) {
         name = conv?.name || "Group chat";
         handle = "Group";
         pic = conv?.avatar_image_https;
-        // Prefix who said it.
-        const s = users[senderId] || {};
-        const sname = s.name || s.screen_name;
-        if (direction === "in" && sname && body) body = `${sname}: ${body}`;
+        if (direction === "in" && senderId) {
+          const su = users[senderId] || {};
+          senderInfo = {
+            externalKey: `x:user:${senderId}`,
+            name: su.name || su.screen_name || "Member",
+          };
+        }
       } else {
         // 1:1 — the other participant drives the contact identity.
         let otherId = "";
@@ -239,6 +243,8 @@ export class XApiAdapter implements Adapter {
         body,
         timestamp: new Date(Number(md.time || m.time || Date.now())),
         contact: { externalKey: `x:${convId}`, name, handle, avatarUrl },
+        isGroup,
+        sender: senderInfo,
       };
 
       const att = md.attachment;

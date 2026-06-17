@@ -92,6 +92,7 @@ export interface ConversationDTO {
   // Which of your connected accounts this chat is on (multi-account routing) —
   // lets the UI show "via …" so the same person on two accounts is distinct.
   account: { id: string; label: string | null } | null;
+  isGroup: boolean;
   contact: ContactDTO;
 }
 
@@ -118,6 +119,9 @@ export interface MessageDTO {
   mediaUrl: string | null;
   mediaName: string | null;
   createdAt: string;
+  // For group messages: who sent it + their tags (so the UI can show them).
+  senderName: string | null;
+  senderTags: TagDTO[];
 }
 
 export const MEDIA_LABEL: Record<MediaType, string> = {

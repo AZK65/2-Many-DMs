@@ -204,8 +204,20 @@ export function ChatThread({
           src={conversation.contact.avatarUrl}
         />
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-slate-900 dark:text-neutral-100">
-            {conversation.contact.name}
+          <div className="flex items-center gap-1.5">
+            {conversation.isGroup && (
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-neutral-500"
+                aria-label="Group"
+              >
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+              </svg>
+            )}
+            <span className="truncate text-sm font-semibold text-slate-900 dark:text-neutral-100">
+              {conversation.contact.name}
+            </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-neutral-500">
             <span
@@ -260,6 +272,22 @@ export function ChatThread({
                         : "rounded-bl-md bg-white text-slate-800 dark:bg-neutral-800 dark:text-neutral-100"
                     }`}
                   >
+                    {m.direction !== "out" && m.senderName && (
+                      <div className="mb-0.5 flex flex-wrap items-center gap-1">
+                        <span className="text-[11px] font-semibold text-accent">
+                          {m.senderName}
+                        </span>
+                        {m.senderTags.map((t) => (
+                          <span
+                            key={t.id}
+                            className="rounded px-1 text-[9px] font-medium text-white"
+                            style={{ backgroundColor: t.color }}
+                          >
+                            {t.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <MediaContent message={m} />
                     {m.body && <div className="whitespace-pre-wrap">{m.body}</div>}
                     <div
