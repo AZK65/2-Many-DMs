@@ -46,6 +46,13 @@ const silent: any = {
 function isIndividual(jid?: string): boolean {
   return !!jid && /@(s\.whatsapp\.net|lid)$/.test(jid);
 }
+function isGroup(jid?: string): boolean {
+  return !!jid && /@g\.us$/.test(jid);
+}
+// Status updates, broadcast lists and newsletters/channels aren't real chats.
+function isSkippable(jid?: string): boolean {
+  return !jid || /@(broadcast|newsletter)$/.test(jid);
+}
 
 function numberFromJid(jid: string): string {
   return jid.replace(/@.*$/, "").replace(/:\d+$/, "");
@@ -93,6 +100,8 @@ export class WhatsAppBaileysAdapter implements Adapter {
   // jid -> display name, from WhatsApp's contacts store (names aren't on
   // history/outbound messages, only the live contacts list).
   private contacts = new Map<string, string>();
+  // group jid -> subject (fetched once, cached)
+  private groupSubjects = new Map<string, string>();
   private authDir: string;
   private proxyUrl?: string;
   private stopped = false;
@@ -247,15 +256,30 @@ export class WhatsAppBaileysAdapter implements Adapter {
 
   private async toInbound(msg: any): Promise<InboundMessage | null> {
     const jid: string | undefined = msg.key?.remoteJid;
-    if (!jid || !isIndividual(jid)) return null; // skip groups, status@broadcast
+    if (isSkippable(jid) || (!isIndividual(jid) && !isGroup(jid))) return null;
     if (!msg.message) return null; // protocol/empty
-    const norm = jidNormalizedUser(jid);
+    const group = isGroup(jid);
+    const norm = jidNormalizedUser(jid!);
     const number = numberFromJid(norm);
-    // Cache the sender's display name from live inbound traffic — for @lid
-    // privacy chats and history (which lack names) this is the only source.
-    if (!msg.key?.fromMe && msg.pushName) this.contacts.set(norm, msg.pushName);
+    // Cache the sender's display name from live 1:1 traffic — for @lid privacy
+    // chats and history (which lack names) this is the only source. In groups
+    // pushName is the sender (not the chat), so don't cache it as the name.
+    if (!group && !msg.key?.fromMe && msg.pushName)
+      this.contacts.set(norm, msg.pushName);
+    // Group subject, fetched once and cached.
+    if (group && !this.groupSubjects.has(norm)) {
+      try {
+        const md = await this.sock!.groupMetadata(norm);
+        if (md?.subject) this.groupSubjects.set(norm, md.subject);
+      } catch {
+        /* no access / left the group */
+      }
+    }
     const contentType = getContentType(msg.message);
-    const body = extractText(msg.message);
+    let body = extractText(msg.message);
+    // In groups, prefix who said it (pushName is the sender's display name).
+    if (group && !msg.key?.fromMe && msg.pushName && body)
+      body = `${msg.pushName}: ${body}`;
 
     const avatarKey = `whatsapp_${norm}`;
     let avatarUrl = existingAvatar(avatarKey) || undefined;
@@ -286,13 +310,15 @@ export class WhatsAppBaileysAdapter implements Adapter {
       timestamp: new Date((tsNum || Math.floor(Date.now() / 1000)) * 1000),
       contact: {
         externalKey: `whatsapp:${norm}`,
-        // Prefer the contacts store; pushName is only valid for inbound (it's
-        // the sender) — for our own sends it'd be *our* name, so skip it.
-        name:
-          this.contacts.get(norm) ||
-          (msg.key?.fromMe ? "" : msg.pushName) ||
-          number,
-        handle: "+" + number,
+        // Groups are named by subject. For 1:1, prefer the contacts store;
+        // pushName is only valid for inbound (the sender) — for our own sends
+        // it'd be *our* name, so skip it.
+        name: group
+          ? this.groupSubjects.get(norm) || "Group chat"
+          : this.contacts.get(norm) ||
+            (msg.key?.fromMe ? "" : msg.pushName) ||
+            number,
+        handle: group ? "Group" : "+" + number,
         avatarUrl,
       },
     };

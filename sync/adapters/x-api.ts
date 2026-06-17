@@ -190,25 +190,41 @@ export class XApiAdapter implements Adapter {
       const convId: string = m.conversation_id || md.conversation_id;
       if (!convId) continue;
       const conv = conversations[convId];
-      // 1:1 only — skip group DMs for now.
-      if (conv && conv.type && conv.type !== "ONE_TO_ONE") continue;
+      const isGroup = conv?.type === "GROUP_DM";
       const senderId = String(md.sender_id || "");
       const direction: "in" | "out" = senderId === this.myId ? "out" : "in";
 
-      // The other participant drives the contact identity.
-      let otherId = "";
-      if (conv?.participants?.length) {
-        const other = conv.participants.find(
-          (p: any) => String(p.user_id) !== this.myId
-        );
-        otherId = String(other?.user_id || "");
+      let name: string;
+      let handle: string;
+      let pic: string | undefined;
+      let body = typeof md.text === "string" ? md.text : "";
+
+      if (isGroup) {
+        name = conv?.name || "Group chat";
+        handle = "Group";
+        pic = conv?.avatar_image_https;
+        // Prefix who said it.
+        const s = users[senderId] || {};
+        const sname = s.name || s.screen_name;
+        if (direction === "in" && sname && body) body = `${sname}: ${body}`;
+      } else {
+        // 1:1 — the other participant drives the contact identity.
+        let otherId = "";
+        if (conv?.participants?.length) {
+          const other = conv.participants.find(
+            (p: any) => String(p.user_id) !== this.myId
+          );
+          otherId = String(other?.user_id || "");
+        }
+        if (!otherId) otherId = direction === "in" ? senderId : String(md.recipient_id || "");
+        const u = users[otherId] || {};
+        name = u.name || u.screen_name || "X user";
+        handle = u.screen_name ? "@" + u.screen_name : convId;
+        pic = u.profile_image_url_https;
       }
-      if (!otherId) otherId = direction === "in" ? senderId : String(md.recipient_id || "");
-      const u = users[otherId] || {};
 
       const avatarKey = `x_${convId}`;
       let avatarUrl = existingAvatar(avatarKey) || undefined;
-      const pic = u.profile_image_url_https;
       if (!avatarUrl && pic) {
         avatarUrl =
           (await saveAvatarFromUrl(avatarKey, pic.replace("_normal", "_400x400"))) ||
@@ -220,14 +236,9 @@ export class XApiAdapter implements Adapter {
         chatExternalId: convId,
         messageExternalId: `x:${md.id || m.id}`,
         direction,
-        body: typeof md.text === "string" ? md.text : "",
+        body,
         timestamp: new Date(Number(md.time || m.time || Date.now())),
-        contact: {
-          externalKey: `x:${convId}`,
-          name: u.name || u.screen_name || "X user",
-          handle: u.screen_name ? "@" + u.screen_name : convId,
-          avatarUrl,
-        },
+        contact: { externalKey: `x:${convId}`, name, handle, avatarUrl },
       };
 
       const att = md.attachment;
