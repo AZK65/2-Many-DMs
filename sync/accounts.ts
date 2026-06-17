@@ -31,7 +31,14 @@ async function defaultUserId(): Promise<string> {
 function envPlatforms(): { platform: string; driver: string }[] {
   const out: { platform: string; driver: string }[] = [];
   const { TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION } = process.env;
-  if (TELEGRAM_API_ID && TELEGRAM_API_HASH && TELEGRAM_SESSION)
+  // TELEGRAM_ENABLED=0 skips Telegram (e.g. when testing locally while a prod
+  // worker holds the same session, which would otherwise trip AUTH_KEY_DUPLICATED).
+  if (
+    process.env.TELEGRAM_ENABLED !== "0" &&
+    TELEGRAM_API_ID &&
+    TELEGRAM_API_HASH &&
+    TELEGRAM_SESSION
+  )
     out.push({ platform: "telegram", driver: "mtproto" });
   if (process.env.WHATSAPP_ENABLED === "1")
     out.push({

@@ -5,7 +5,12 @@ import { motion } from "motion/react";
 import type { ConversationDTO } from "@/lib/types";
 import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
-import { loadSettings, saveSettings, type GroupMacro } from "@/lib/settings";
+import {
+  loadSettings,
+  saveSettings,
+  type GroupMacro,
+  type GroupTemplate,
+} from "@/lib/settings";
 
 // X group-DM creation isn't wired up; Telegram + WhatsApp are.
 const GROUP_PLATFORMS: Platform[] = ["telegram", "whatsapp"];
@@ -33,9 +38,11 @@ export function CreateGroupModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<GroupMacro[]>([]);
+  const [templates, setTemplates] = useState<GroupTemplate[]>([]);
 
   useEffect(() => {
     setMacros(loadSettings().macros);
+    setTemplates(loadSettings().templates);
     fetch("/api/conversations")
       .then((r) => r.json())
       .then((cs: ConversationDTO[]) => {
@@ -94,6 +101,28 @@ export function CreateGroupModal({
         platform,
         groupName: groupName.trim(),
         contactIds: [...selected],
+        message,
+      },
+    ]);
+  }
+
+  // Templates = the group's purpose (name + message), no fixed people.
+  function persistTemplates(next: GroupTemplate[]) {
+    setTemplates(next);
+    saveSettings({ ...loadSettings(), templates: next });
+  }
+  function applyTemplate(t: GroupTemplate) {
+    setGroupName(t.groupName);
+    setMessage(t.message);
+  }
+  function saveTemplate() {
+    if (!groupName.trim()) return;
+    persistTemplates([
+      ...templates,
+      {
+        id: "t" + Math.random().toString(36).slice(2, 7),
+        label: groupName.trim(),
+        groupName: groupName.trim(),
         message,
       },
     ]);
@@ -162,6 +191,54 @@ export function CreateGroupModal({
         </div>
 
         <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">
+          {/* Templates — the group's purpose (name + message), pick people fresh */}
+          <div className="mb-3">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+                Templates
+              </span>
+              <button
+                onClick={saveTemplate}
+                disabled={!groupName.trim()}
+                className="text-[11px] font-medium text-accent transition disabled:opacity-40"
+              >
+                + Save current as template
+              </button>
+            </div>
+            {templates.length === 0 ? (
+              <p className="text-[11px] leading-relaxed text-slate-400 dark:text-neutral-500">
+                None yet. Set a group name + message and hit “Save current”, or
+                just make a new group below.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((t) => (
+                  <span
+                    key={t.id}
+                    className="flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1 text-xs text-slate-600 dark:bg-neutral-800 dark:text-neutral-300"
+                  >
+                    <button
+                      onClick={() => applyTemplate(t)}
+                      className="font-medium"
+                      title="Use this template"
+                    >
+                      {t.label}
+                    </button>
+                    <button
+                      onClick={() =>
+                        persistTemplates(templates.filter((x) => x.id !== t.id))
+                      }
+                      title="Delete template"
+                      className="grid h-4 w-4 place-items-center rounded-full text-slate-400 hover:bg-slate-200 dark:hover:bg-neutral-700"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Saved macros */}
           {macros.length > 0 && (
             <div className="mb-3">
