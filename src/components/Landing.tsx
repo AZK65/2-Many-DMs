@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
+import { ChangelogList } from "./ChangelogList";
 import { TG_LINK } from "@/lib/links";
 
 const GITHUB_URL = "https://github.com/AZK65/2-Many-DMs";
@@ -83,6 +84,12 @@ export function Landing() {
               Support
             </a>
             <a
+              href="/changelog"
+              className="hidden rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:text-slate-900 sm:block dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              Changelog
+            </a>
+            <a
               href="#deploy"
               className="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent"
             >
@@ -95,6 +102,20 @@ export function Landing() {
 
       {/* Hero */}
       <section className="relative mx-auto max-w-6xl px-5 pb-12 pt-20 text-center sm:pt-28">
+        {changelog[0] && (
+          <div className="flex justify-center">
+            <a
+              href="/changelog"
+              className="animate-fade-in mb-3 inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition hover:bg-accent/20"
+            >
+              <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-accent-fg">
+                NEW
+              </span>
+              v{changelog[0].version}
+              {changelog[0].title ? ` — ${changelog[0].title}` : ""} →
+            </a>
+          </div>
+        )}
         <div className="animate-fade-in mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-300">
           <span className="flex -space-x-1.5">
             {PLATFORM_ORDER.map((p) => (
@@ -354,38 +375,8 @@ export function Landing() {
           <p className="mt-3 text-slate-500 dark:text-neutral-400">
             Every release, in one place.
           </p>
-          <div className="mt-10 space-y-9 border-l border-slate-200 pl-6 dark:border-neutral-800">
-            {changelog.map((e) => (
-              <div key={e.version} className="relative">
-                <span className="absolute -left-[31px] top-1.5 h-3 w-3 rounded-full bg-accent ring-4 ring-white dark:ring-black" />
-                <div className="flex flex-wrap items-baseline gap-2.5">
-                  <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-sm font-bold text-accent">
-                    v{e.version}
-                  </span>
-                  {e.title && (
-                    <span className="font-semibold dark:text-neutral-100">
-                      {e.title}
-                    </span>
-                  )}
-                  {e.date && (
-                    <span className="text-xs text-slate-400 dark:text-neutral-500">
-                      {e.date}
-                    </span>
-                  )}
-                </div>
-                <ul className="mt-2.5 space-y-1.5">
-                  {(e.notes || []).map((n, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-2 text-sm text-slate-600 dark:text-neutral-300"
-                    >
-                      <span className="mt-px text-accent">•</span>
-                      <span>{n}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <div className="mt-10">
+            <ChangelogList entries={changelog} />
           </div>
         </section>
       )}
