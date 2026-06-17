@@ -28,7 +28,9 @@ function contactFrom(chat: any): InboundMessage["contact"] {
     [chat.firstName, chat.lastName].filter(Boolean).join(" ") ||
     chat.username ||
     "Telegram user";
-  const handle = isGroup
+  const handle = chat.broadcast
+    ? "Channel"
+    : isGroup
     ? "Group"
     : chat.username
     ? "@" + chat.username
@@ -143,7 +145,8 @@ export class TelegramAdapter implements Adapter {
     };
 
     // In groups, attribute inbound messages to their sender (for member tags).
-    if (isGroup && !msg.out) {
+    // Broadcast channels post as the channel itself, so no per-member sender.
+    if (isGroup && !msg.out && !chat.broadcast) {
       const s: any = msg.sender;
       if (s?.id != null) {
         const sname =
@@ -191,7 +194,7 @@ export class TelegramAdapter implements Adapter {
     this.client.addEventHandler(async (event: NewMessageEvent) => {
       try {
         const msg: any = event.message;
-        if (!msg.isPrivate && !msg.isGroup) return; // DMs + groups; skip broadcast channels
+        if (!msg.isPrivate && !msg.isGroup && !msg.isChannel) return; // DMs + groups + channels
         const chat = await msg.getChat();
         if (!chat) return;
         await onMessage(await this.buildMessage(chat, msg));
@@ -224,7 +227,7 @@ export class TelegramAdapter implements Adapter {
     const dialogs = await this.client.getDialogs({ limit: dialogLimit });
     let count = 0;
     for (const d of dialogs) {
-      if (!(d.isUser || d.isGroup) || !d.entity) continue;
+      if (!(d.isUser || d.isGroup || d.isChannel) || !d.entity) continue;
       const chat: any = d.entity;
       const messages = await this.client.getMessages(d.entity, {
         limit: msgLimit,
