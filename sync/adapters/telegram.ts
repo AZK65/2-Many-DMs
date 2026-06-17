@@ -355,17 +355,37 @@ export class TelegramAdapter implements Adapter {
       .map((k) => Number(k.replace(/^telegram:/, "")))
       .filter((n) => !Number.isNaN(n));
     if (!ids.length) throw new Error("no Telegram participants");
-    const users = await Promise.all(
-      ids.map((id) => this.client.getInputEntity(id))
-    );
-    const res: any = await this.client.invoke(
-      new Api.messages.CreateChat({ users, title: name })
-    );
-    const chat =
-      res?.updates?.chats?.[0] || res?.chats?.[0] || res?.chat || null;
-    const chatId = chat ? String(chat.id) : "";
-    if (!chatId) throw new Error("group created but its id is missing");
-    return { chatExternalId: chatId };
+    // Resolve each user; skip (don't fail) anyone we can't, so one bad entity
+    // doesn't kill the whole group.
+    const users: any[] = [];
+    for (const id of ids) {
+      try {
+        users.push(await this.client.getInputEntity(id));
+      } catch (e) {
+        console.error(`[telegram] createGroup: can't resolve user ${id}:`, e);
+      }
+    }
+    if (!users.length) throw new Error("couldn't resolve any participants");
+    let res: any;
+    try {
+      res = await this.client.invoke(
+        new Api.messages.CreateChat({ users, title: name })
+      );
+    } catch (e) {
+      console.error("[telegram] CreateChat failed:", e);
+      throw e;
+    }
+    // The new chat is in the returned updates; shapes vary across layers.
+    const chats: any[] = res?.updates?.chats || res?.chats || [];
+    const chat = chats.find((c) => c?.id != null);
+    if (!chat) {
+      console.error(
+        "[telegram] createGroup: no chat in response:",
+        JSON.stringify(res).slice(0, 400)
+      );
+      throw new Error("group created but its id wasn't in the response");
+    }
+    return { chatExternalId: String(chat.id) };
   }
 
   async markRead(chatExternalId: string): Promise<void> {

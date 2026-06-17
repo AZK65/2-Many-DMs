@@ -1,6 +1,20 @@
 {
-  "current": "0.4.0",
+  "current": "0.5.0",
   "entries": [
+    {
+      "version": "0.5.0",
+      "date": "2026-06-16",
+      "title": "Group chats, channels & a settings overhaul",
+      "notes": [
+        "Create group chats from the app (⌘G) on Telegram & WhatsApp, with saved macros and reusable templates",
+        "Telegram channels — including read-only ones — with a channel badge, plus forum topics as tabs inside the chat",
+        "Group messages show per-member avatars and name tags; forward any message across platforms",
+        "Cal.com plugin: when a chat mentions a date it offers to book a meeting and auto-fills known emails",
+        "Full Settings: editable theme with light/dark accent colors, tags, folders, board stages, macros & templates",
+        "Update notice + one-click self-update, and start the sync worker straight from the app on localhost",
+        "Fix: group creation no longer hangs — sends now route to a live account, never a duplicate session"
+      ]
+    },
     {
       "version": "0.4.0",
       "date": "2026-06-16",

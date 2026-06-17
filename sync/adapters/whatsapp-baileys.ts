@@ -411,11 +411,51 @@ export class WhatsAppBaileysAdapter implements Adapter {
     participantKeys: string[]
   ): Promise<{ chatExternalId: string }> {
     if (!this.sock) throw new Error("WhatsApp (baileys) not ready");
-    const jids = participantKeys
+    const sock = this.sock;
+    const raw = participantKeys
       .map((k) => k.replace(/^whatsapp:/, ""))
       .filter((j) => j.includes("@"));
-    if (!jids.length) throw new Error("no WhatsApp participants");
-    const res = await this.sock.groupCreate(name, jids);
+    if (!raw.length) throw new Error("no WhatsApp participants");
+
+    // WhatsApp's group API wants phone JIDs (<number>@s.whatsapp.net). Many
+    // contacts now arrive as privacy-hidden @lid addresses; groupCreate rejects
+    // those with a bare "bad-request". Resolve each to a phone JID — via the
+    // signal repo's lid map if this Baileys build has one, else onWhatsApp() —
+    // and report the ones we genuinely can't add instead of failing opaquely.
+    const repo: any = (sock as any).signalRepository;
+    const jids: string[] = [];
+    const unresolved: string[] = [];
+    for (const j of raw) {
+      const norm = jidNormalizedUser(j);
+      if (norm.endsWith("@s.whatsapp.net")) {
+        jids.push(norm);
+        continue;
+      }
+      // @lid → try to recover the phone JID.
+      let pn: string | undefined;
+      try {
+        pn =
+          (await repo?.lidMapping?.getPNForLID?.(norm)) ||
+          (await repo?.getPNForLID?.(norm)) ||
+          undefined;
+      } catch {
+        /* no mapping in this build */
+      }
+      if (pn && pn.includes("@")) jids.push(jidNormalizedUser(pn));
+      else unresolved.push(norm);
+    }
+    if (!jids.length) {
+      throw new Error(
+        unresolved.length
+          ? `can't add ${unresolved.length} contact(s) by their hidden WhatsApp id — need a phone number. Message them 1:1 first so WhatsApp shares it.`
+          : "no resolvable WhatsApp participants"
+      );
+    }
+    const res = await sock.groupCreate(name, jids);
+    if (unresolved.length)
+      console.warn(
+        `[whatsapp:baileys] createGroup: skipped ${unresolved.length} unresolvable @lid contact(s)`
+      );
     return { chatExternalId: res.id };
   }
 
