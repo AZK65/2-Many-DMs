@@ -18,8 +18,11 @@ export function middleware(req: NextRequest) {
   const isAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
-    /\.(png|jpe?g|svg|ico|webp|gif|txt|xml|woff2?|css|js|map)$/.test(pathname);
+    /\.(png|jpe?g|svg|ico|webp|gif|txt|xml|json|woff2?|css|js|map)$/.test(pathname);
   if (isAsset) return NextResponse.next();
+
+  // The public changelog page is part of the marketing site.
+  if (pathname === "/changelog") return NextResponse.next();
 
   // Serve the landing page at the root URL without a visible /landing path.
   if (pathname === "/") {
