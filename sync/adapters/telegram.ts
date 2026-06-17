@@ -22,11 +22,15 @@ const MEDIA_DIR = path.join(process.cwd(), "public", "media");
 const MAX_BYTES = Number(process.env.MEDIA_MAX_MB || 25) * 1024 * 1024;
 
 function contactFrom(chat: any): InboundMessage["contact"] {
+  const isGroup = !!chat.title; // groups/supergroups have a title; users don't
   const name =
+    chat.title ||
     [chat.firstName, chat.lastName].filter(Boolean).join(" ") ||
     chat.username ||
     "Telegram user";
-  const handle = chat.username
+  const handle = isGroup
+    ? "Group"
+    : chat.username
     ? "@" + chat.username
     : chat.phone
     ? "+" + chat.phone
@@ -121,10 +125,18 @@ export class TelegramAdapter implements Adapter {
   private async buildMessage(chat: any, msg: any): Promise<InboundMessage> {
     const chatId = String(chat.id);
     const messageExternalId = `telegram:${chatId}:${msg.id}`;
-    const caption = msg.message && msg.message.length ? msg.message : "";
+    let caption = msg.message && msg.message.length ? msg.message : "";
 
     const contact = contactFrom(chat);
     contact.avatarUrl = await this.avatarFor(chat);
+    // In group chats, prefix who sent it (best-effort — no extra network call).
+    if (chat.title && !msg.out && caption) {
+      const s: any = msg.sender;
+      const sname = s
+        ? [s.firstName, s.lastName].filter(Boolean).join(" ") || s.username || ""
+        : "";
+      if (sname) caption = `${sname}: ${caption}`;
+    }
 
     const base: InboundMessage = {
       platform: "telegram",
@@ -173,7 +185,7 @@ export class TelegramAdapter implements Adapter {
     this.client.addEventHandler(async (event: NewMessageEvent) => {
       try {
         const msg: any = event.message;
-        if (!msg.isPrivate) return; // DM inbox only — skip groups/channels
+        if (!msg.isPrivate && !msg.isGroup) return; // DMs + groups; skip broadcast channels
         const chat = await msg.getChat();
         if (!chat) return;
         await onMessage(await this.buildMessage(chat, msg));
@@ -206,7 +218,7 @@ export class TelegramAdapter implements Adapter {
     const dialogs = await this.client.getDialogs({ limit: dialogLimit });
     let count = 0;
     for (const d of dialogs) {
-      if (!d.isUser || !d.entity) continue;
+      if (!(d.isUser || d.isGroup) || !d.entity) continue;
       const chat: any = d.entity;
       const messages = await this.client.getMessages(d.entity, {
         limit: msgLimit,
