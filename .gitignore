@@ -32,3 +32,9 @@ prisma/dev.db
 
 # worker log (started from the app)
 sync.log
+
+# platform session dirs (NEVER commit — contain live credentials)
+.baileys_auth/
+.x_auth/
+.wwebjs_auth/
+.wwebjs_cache/
