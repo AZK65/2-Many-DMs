@@ -38,6 +38,7 @@ export async function GET() {
       account: c.account
         ? { id: c.account.id, label: c.account.label }
         : null,
+      isGroup: c.contact.isGroup,
       contact: {
         id: c.contact.id,
         name: c.contact.name,

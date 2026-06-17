@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types";
 import { PLATFORMS } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
+import { GroupMembers } from "./GroupMembers";
 import {
   BuildingIcon,
   MailIcon,
@@ -215,6 +216,16 @@ export function ContactPanel({
           {platform.label}
         </span>
       </div>
+
+      {conversation.isGroup && (
+        <Section title="Members">
+          <GroupMembers
+            conversationId={conversation.id}
+            platform={conversation.platform}
+            allTags={allTags}
+          />
+        </Section>
+      )}
 
       <Section
         title="Details"

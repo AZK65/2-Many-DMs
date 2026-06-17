@@ -125,18 +125,11 @@ export class TelegramAdapter implements Adapter {
   private async buildMessage(chat: any, msg: any): Promise<InboundMessage> {
     const chatId = String(chat.id);
     const messageExternalId = `telegram:${chatId}:${msg.id}`;
-    let caption = msg.message && msg.message.length ? msg.message : "";
+    const caption = msg.message && msg.message.length ? msg.message : "";
+    const isGroup = !!chat.title;
 
     const contact = contactFrom(chat);
     contact.avatarUrl = await this.avatarFor(chat);
-    // In group chats, prefix who sent it (best-effort — no extra network call).
-    if (chat.title && !msg.out && caption) {
-      const s: any = msg.sender;
-      const sname = s
-        ? [s.firstName, s.lastName].filter(Boolean).join(" ") || s.username || ""
-        : "";
-      if (sname) caption = `${sname}: ${caption}`;
-    }
 
     const base: InboundMessage = {
       platform: "telegram",
@@ -146,7 +139,20 @@ export class TelegramAdapter implements Adapter {
       body: caption,
       timestamp: new Date(Number(msg.date) * 1000),
       contact,
+      isGroup,
     };
+
+    // In groups, attribute inbound messages to their sender (for member tags).
+    if (isGroup && !msg.out) {
+      const s: any = msg.sender;
+      if (s?.id != null) {
+        const sname =
+          [s.firstName, s.lastName].filter(Boolean).join(" ") ||
+          s.username ||
+          "Member";
+        base.sender = { externalKey: `telegram:${s.id}`, name: sname };
+      }
+    }
 
     const resolved = resolveMedia(msg);
     if (resolved) {

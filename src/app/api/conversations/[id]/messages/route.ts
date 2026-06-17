@@ -44,6 +44,14 @@ export async function GET(
   const messages = await prisma.message.findMany({
     where: { conversationId: params.id },
     orderBy: { createdAt: "asc" },
+    include: {
+      senderContact: {
+        select: {
+          name: true,
+          tags: { include: { tag: true } },
+        },
+      },
+    },
   });
 
   const data: MessageDTO[] = messages.map((m) => ({
@@ -54,6 +62,12 @@ export async function GET(
     mediaUrl: m.mediaUrl ?? null,
     mediaName: m.mediaName ?? null,
     createdAt: m.createdAt.toISOString(),
+    senderName: m.senderContact?.name ?? null,
+    senderTags: (m.senderContact?.tags ?? []).map((ct) => ({
+      id: ct.tag.id,
+      name: ct.tag.name,
+      color: ct.tag.color,
+    })),
   }));
 
   return NextResponse.json(data);
@@ -216,6 +230,8 @@ export async function POST(
     mediaUrl: message.mediaUrl ?? null,
     mediaName: message.mediaName ?? null,
     createdAt: message.createdAt.toISOString(),
+    senderName: null,
+    senderTags: [],
   };
 
   return NextResponse.json(data);
