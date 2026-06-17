@@ -281,16 +281,36 @@ export class TelegramAdapter implements Adapter {
     const msgLimit = Number(process.env.SYNC_BACKFILL_MESSAGES || 20);
     const dialogs = await this.client.getDialogs({ limit: dialogLimit });
     let count = 0;
+    const topicMsgLimit = Number(process.env.SYNC_BACKFILL_TOPIC_MESSAGES || 15);
+    const topicCap = Number(process.env.SYNC_BACKFILL_TOPICS || 25);
     for (const d of dialogs) {
       if (!(d.isUser || d.isGroup || d.isChannel) || !d.entity) continue;
       const chat: any = d.entity;
-      const messages = await this.client.getMessages(d.entity, {
-        limit: msgLimit,
-      });
-      for (const msg of [...messages].reverse()) {
-        if (!msg) continue;
-        await onMessage(await this.buildMessage(chat, msg));
-        count++;
+      const ingest = async (msgs: any[]) => {
+        for (const msg of [...msgs].reverse()) {
+          if (!msg) continue;
+          await onMessage(await this.buildMessage(chat, msg));
+          count++;
+        }
+      };
+      if (chat.forum) {
+        // Forums: pull messages per topic so every topic appears (a flat fetch
+        // only catches whatever's most recent across the whole channel).
+        await this.ensureForumTopics(chat);
+        const topicIds = [...(this.forumTopics.get(String(chat.id))?.keys() ?? [])]
+          .slice(0, topicCap);
+        for (const tid of topicIds) {
+          const msgs = await this.client
+            .getMessages(chat, { limit: topicMsgLimit, replyTo: tid })
+            .catch(() => [] as any[]);
+          await ingest(msgs);
+        }
+        // …plus the main timeline (General + anything untopic'd).
+        await ingest(
+          await this.client.getMessages(chat, { limit: msgLimit }).catch(() => [])
+        );
+      } else {
+        await ingest(await this.client.getMessages(chat, { limit: msgLimit }));
       }
     }
     console.log(

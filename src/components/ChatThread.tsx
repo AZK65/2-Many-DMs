@@ -41,11 +41,16 @@ export function ChatThread({
   snippets,
   onManageSnippets,
   onSent,
+  topics,
+  onSelectTopic,
 }: {
   conversation: ConversationDTO;
   snippets: SnippetDTO[];
   onManageSnippets: () => void;
   onSent: (preview: string) => void;
+  // Sibling forum topics shown as tabs above the thread (for forum channels).
+  topics?: { id: string; name: string; unread: number }[];
+  onSelectTopic?: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<MessageDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,6 +274,36 @@ export function ChatThread({
           </div>
         </div>
       </div>
+
+      {/* Forum topic tabs */}
+      {topics && topics.length > 0 && (
+        <div className="scroll-thin flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 dark:border-neutral-800 dark:bg-neutral-900">
+          {topics.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelectTopic?.(t.id)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+                t.id === conversation.id
+                  ? "bg-accent text-accent-fg"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+              }`}
+            >
+              {t.name}
+              {t.unread > 0 && (
+                <span
+                  className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+                    t.id === conversation.id
+                      ? "bg-white/25"
+                      : "bg-accent text-accent-fg"
+                  }`}
+                >
+                  {t.unread}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="scroll-thin flex-1 space-y-2 overflow-y-auto px-5 py-4">
