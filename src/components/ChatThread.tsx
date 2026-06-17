@@ -14,6 +14,14 @@ import {
   mimeToMediaType,
 } from "@/lib/platforms";
 import { clockTime, dayLabel, sameDay } from "@/lib/time";
+import { loadSettings, calcomUrl } from "@/lib/settings";
+
+// Heuristic: does the text mention a date/time worth offering to book around?
+const DATE_RE =
+  /\b(today|tonight|tomorrow|tmrw|mon(day)?|tues?(day)?|wed(nesday)?|thur?s?(day)?|fri(day)?|sat(urday)?|sun(day)?|jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?|next week|this week|next month)\b|\b\d{1,2}\s?(am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\/\d{1,2}\b/i;
+function mentionsDate(text: string): boolean {
+  return !!text && DATE_RE.test(text);
+}
 import { Avatar } from "./Avatar";
 import { ChatTypeIcon } from "./ChatTypeIcon";
 import { ForwardModal } from "./ForwardModal";
@@ -48,6 +56,34 @@ export function ChatThread({
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [forwardMsg, setForwardMsg] = useState<MessageDTO | null>(null);
+  const [calcom, setCalcom] = useState<{ enabled: boolean; link: string }>({
+    enabled: false,
+    link: "",
+  });
+  const [calDismissed, setCalDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    const read = () => setCalcom(loadSettings().plugins.calcom);
+    read();
+    window.addEventListener("tmd-settings", read);
+    return () => window.removeEventListener("tmd-settings", read);
+  }, []);
+
+  // Most recent message that mentions a date — drives the Cal.com suggestion.
+  const dateMsg = useMemo(() => {
+    if (!calcom.enabled || !calcom.link.trim()) return null;
+    for (let i = messages.length - 1; i >= Math.max(0, messages.length - 12); i--) {
+      if (mentionsDate(messages[i].body)) return messages[i];
+    }
+    return null;
+  }, [messages, calcom]);
+
+  function insertCalLink() {
+    const url = calcomUrl(calcom.link, conversation.contact);
+    if (!url) return;
+    insertText(`Want to grab a time? Here's my calendar: ${url}`, true);
+    setCalDismissed(dateMsg?.id ?? null);
+  }
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -366,6 +402,30 @@ export function ChatThread({
 
       {/* Composer */}
       <div className="relative border-t border-slate-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+        {dateMsg && calDismissed !== dateMsg.id && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs">
+            <span className="text-base leading-none">📅</span>
+            <span className="flex-1 text-slate-600 dark:text-neutral-300">
+              Looks like a date came up — share your Cal.com link?
+              {conversation.contact.email
+                ? ` Invites ${conversation.contact.email}.`
+                : ""}
+            </span>
+            <button
+              onClick={insertCalLink}
+              className="shrink-0 rounded-md bg-accent px-2.5 py-1 font-semibold text-accent-fg transition hover:opacity-90"
+            >
+              Insert link
+            </button>
+            <button
+              onClick={() => setCalDismissed(dateMsg.id)}
+              className="shrink-0 text-slate-400 transition hover:text-slate-600 dark:hover:text-neutral-300"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {/* "/" snippet menu */}
         <AnimatePresence>
           {slashOpen && (
