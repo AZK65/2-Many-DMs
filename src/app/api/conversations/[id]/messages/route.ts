@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/lib/db";
-import type { MessageDTO } from "@/lib/types";
+import type { MessageDTO, MediaType } from "@/lib/types";
 import {
   PLATFORMS,
   PLATFORM_ATTACHMENTS,
@@ -138,6 +138,24 @@ export async function POST(
   } else {
     const json = await req.json();
     text = typeof json.body === "string" ? json.body.trim() : "";
+    // Forwarding: re-send an existing media file (by its served path) to this
+    // chat. The control server reads it off disk like any outgoing attachment.
+    if (json.media?.type && json.media?.url) {
+      const mtype = String(json.media.type) as MediaType;
+      if (!(PLATFORM_ATTACHMENTS[platform].types as readonly string[]).includes(mtype)) {
+        return NextResponse.json(
+          {
+            error: `${PLATFORMS[platform].label} can't receive that attachment type.`,
+          },
+          { status: 400 }
+        );
+      }
+      media = {
+        type: mtype,
+        url: String(json.media.url),
+        name: String(json.media.name || "file"),
+      };
+    }
   }
 
   if (!text && !media) {

@@ -15,6 +15,7 @@ import {
 } from "@/lib/platforms";
 import { clockTime, dayLabel, sameDay } from "@/lib/time";
 import { Avatar } from "./Avatar";
+import { ForwardModal } from "./ForwardModal";
 import { EmojiPicker } from "./EmojiPicker";
 import {
   PaperclipIcon,
@@ -45,6 +46,7 @@ export function ChatThread({
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [forwardMsg, setForwardMsg] = useState<MessageDTO | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -287,7 +289,7 @@ export function ChatThread({
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
-                  className={`flex items-end gap-2 ${inbound ? "justify-start" : "justify-end"}`}
+                  className={`group flex items-end gap-1.5 ${inbound ? "justify-start" : "justify-end"}`}
                 >
                   {inbound &&
                     (lastOfRun ? (
@@ -301,6 +303,18 @@ export function ChatThread({
                     ) : (
                       <div className="w-7 shrink-0" />
                     ))}
+                  {!inbound && (
+                    <button
+                      onClick={() => setForwardMsg(m)}
+                      title="Forward"
+                      className="mb-1 self-center rounded-full p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:bg-neutral-700"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                        <polyline points="15 17 20 12 15 7" />
+                        <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                      </svg>
+                    </button>
+                  )}
                   <div
                     className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
                       m.direction === "out"
@@ -336,6 +350,18 @@ export function ChatThread({
                       {clockTime(m.createdAt)}
                     </div>
                   </div>
+                  {inbound && (
+                    <button
+                      onClick={() => setForwardMsg(m)}
+                      title="Forward"
+                      className="mb-1 self-center rounded-full p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:bg-neutral-700"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                        <polyline points="15 17 20 12 15 7" />
+                        <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                      </svg>
+                    </button>
+                  )}
                 </motion.div>
               </Fragment>
             );
@@ -565,6 +591,16 @@ export function ChatThread({
           </motion.button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {forwardMsg && (
+          <ForwardModal
+            message={forwardMsg}
+            onClose={() => setForwardMsg(null)}
+            onDone={() => setForwardMsg(null)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
