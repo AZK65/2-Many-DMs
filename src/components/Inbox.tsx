@@ -122,6 +122,9 @@ export function Inbox() {
   const [showSnippets, setShowSnippets] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [expandedChannels, setExpandedChannels] = useState<Set<string>>(
+    new Set()
+  );
 
   // First-run: send new users to the onboarding screen.
   useEffect(() => {
@@ -452,6 +455,53 @@ export function Inbox() {
   // stay as list rows.
   const pinned = filtered.filter((c) => c.pinned);
   const rest = filtered.filter((c) => !c.pinned);
+
+  // Nest forum topics under their parent channel as expandable subchats.
+  type ChannelItem = {
+    kind: "channel";
+    id: string;
+    name: string;
+    topics: ConversationDTO[];
+    unread: number;
+    at: number;
+  };
+  type ConvItem = { kind: "conv"; conv: ConversationDTO; at: number };
+  const listItems = useMemo<(ConvItem | ChannelItem)[]>(() => {
+    const channels = new Map<string, ChannelItem>();
+    const singles: ConvItem[] = [];
+    for (const c of rest) {
+      if (c.topicOf) {
+        const g =
+          channels.get(c.topicOf) ||
+          ({
+            kind: "channel",
+            id: c.topicOf,
+            name: c.contact.name.split(" · ")[0],
+            topics: [],
+            unread: 0,
+            at: 0,
+          } as ChannelItem);
+        g.topics.push(c);
+        g.unread += c.unread;
+        g.at = Math.max(g.at, new Date(c.lastMessageAt).getTime());
+        channels.set(c.topicOf, g);
+      } else {
+        singles.push({
+          kind: "conv",
+          conv: c,
+          at: new Date(c.lastMessageAt).getTime(),
+        });
+      }
+    }
+    return [...singles, ...channels.values()].sort((a, b) => b.at - a.at);
+  }, [rest]);
+  function toggleChannel(id: string) {
+    setExpandedChannels((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
 
   // Contacts that appear on more than one account — those rows get a "via" tag
   // so you can tell the same person's chats apart.
@@ -973,7 +1023,8 @@ export function Inbox() {
             </div>
           )}
 
-          {rest.map((c) => (
+          {(() => {
+            const renderRow = (c: ConversationDTO, indent = false) => (
             <motion.div
               key={c.id}
               layout
@@ -981,7 +1032,9 @@ export function Inbox() {
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2 }}
               onClick={() => selectConversation(c.id)}
-              className={`group relative flex w-full cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors dark:border-neutral-800/70 ${
+              className={`group relative flex w-full cursor-pointer items-center gap-3 border-b border-slate-100 py-3 pr-4 text-left transition-colors dark:border-neutral-800/70 ${
+                indent ? "bg-slate-50/60 pl-12 dark:bg-neutral-900/40" : "pl-4"
+              } ${
                 c.id === selectedId
                   ? "bg-accent/15 dark:bg-accent/10"
                   : "hover:bg-slate-50 dark:hover:bg-neutral-800/60"
@@ -1010,8 +1063,15 @@ export function Inbox() {
                         }`}
                       />
                     )}
-                    <ChatTypeIcon isGroup={c.isGroup} handle={c.contact.handle} />
-                    <span className="truncate">{c.contact.name}</span>
+                    {!indent && (
+                      <ChatTypeIcon isGroup={c.isGroup} handle={c.contact.handle} />
+                    )}
+                    <span className="truncate">
+                      {indent
+                        ? c.contact.name.split(" · ").slice(1).join(" · ") ||
+                          c.contact.name
+                        : c.contact.name}
+                    </span>
                     {dupAccountTag(c) && (
                       <span
                         title={`via ${c.account?.label}`}
@@ -1083,7 +1143,52 @@ export function Inbox() {
 
               {convActionsMenu(c, "right-2 top-9 origin-top-right")}
             </motion.div>
-          ))}
+            );
+            const renderChannel = (g: ChannelItem) => (
+              <div key={"ch_" + g.id}>
+                <button
+                  onClick={() => toggleChannel(g.id)}
+                  className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/60"
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-200 text-slate-500 dark:bg-neutral-700 dark:text-neutral-300">
+                    <ChatTypeIcon isGroup handle="Channel" className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-semibold text-slate-900 dark:text-neutral-100">
+                        {g.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-slate-400 dark:text-neutral-500">
+                        {g.topics.length} topics
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400 dark:text-neutral-500">
+                      {expandedChannels.has(g.id) ? "Hide topics" : "Show topics"}
+                    </div>
+                  </div>
+                  {g.unread > 0 && (
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-fg">
+                      {g.unread}
+                    </span>
+                  )}
+                  <span
+                    className={`shrink-0 text-lg text-slate-400 transition-transform ${
+                      expandedChannels.has(g.id) ? "rotate-90" : ""
+                    }`}
+                  >
+                    ›
+                  </span>
+                </button>
+                {expandedChannels.has(g.id) &&
+                  g.topics.map((t) => renderRow(t, true))}
+              </div>
+            );
+            return listItems.map((item) =>
+              item.kind === "conv"
+                ? renderRow(item.conv)
+                : renderChannel(item)
+            );
+          })()}
         </div>
       </div>
 
