@@ -12,3 +12,5 @@ public/avatars
 .env
 .git
 *.log
+.baileys_auth
+.x_auth
