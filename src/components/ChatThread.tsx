@@ -245,6 +245,30 @@ export function ChatThread({
           messages.map((m, idx) => {
             const showDate =
               idx === 0 || !sameDay(messages[idx - 1].createdAt, m.createdAt);
+            // Group consecutive messages from the same sender into a "run" so we
+            // show one avatar (at the bottom) + one name (at the top) per run.
+            const inbound = m.direction !== "out";
+            const key = inbound ? m.senderName || "__contact" : "__me";
+            const prev = messages[idx - 1];
+            const next = messages[idx + 1];
+            const prevKey = prev
+              ? prev.direction !== "out"
+                ? prev.senderName || "__contact"
+                : "__me"
+              : null;
+            const nextKey = next
+              ? next.direction !== "out"
+                ? next.senderName || "__contact"
+                : "__me"
+              : null;
+            const firstOfRun =
+              !prev || prevKey !== key || !sameDay(prev.createdAt, m.createdAt);
+            const lastOfRun =
+              !next || nextKey !== key || !sameDay(m.createdAt, next.createdAt);
+            const avName = m.senderName || conversation.contact.name;
+            const avSrc = m.senderName
+              ? m.senderAvatarUrl
+              : conversation.contact.avatarUrl;
             return (
               <Fragment key={m.id}>
                 {showDate && (
@@ -263,8 +287,20 @@ export function ChatThread({
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
-                  className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
+                  className={`flex items-end gap-2 ${inbound ? "justify-start" : "justify-end"}`}
                 >
+                  {inbound &&
+                    (lastOfRun ? (
+                      <Avatar
+                        name={avName}
+                        platform={conversation.platform}
+                        size="xs"
+                        showBadge={false}
+                        src={avSrc}
+                      />
+                    ) : (
+                      <div className="w-7 shrink-0" />
+                    ))}
                   <div
                     className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
                       m.direction === "out"
@@ -272,7 +308,7 @@ export function ChatThread({
                         : "rounded-bl-md bg-white text-slate-800 dark:bg-neutral-800 dark:text-neutral-100"
                     }`}
                   >
-                    {m.direction !== "out" && m.senderName && (
+                    {inbound && firstOfRun && m.senderName && (
                       <div className="mb-0.5 flex flex-wrap items-center gap-1">
                         <span className="text-[11px] font-semibold text-accent">
                           {m.senderName}

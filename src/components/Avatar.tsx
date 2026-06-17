@@ -2,6 +2,7 @@ import { avatarColor, initials, PLATFORMS, type Platform } from "@/lib/platforms
 import { PlatformGlyph } from "./PlatformIcon";
 
 const SIZES = {
+  xs: { box: "h-7 w-7 text-[11px]", badge: "h-3.5 w-3.5", glyph: "h-2 w-2" },
   sm: { box: "h-10 w-10 text-sm", badge: "h-4 w-4", glyph: "h-2.5 w-2.5" },
   md: { box: "h-12 w-12 text-base", badge: "h-5 w-5", glyph: "h-3 w-3" },
   lg: { box: "h-16 w-16 text-xl", badge: "h-6 w-6", glyph: "h-3.5 w-3.5" },
@@ -12,11 +13,13 @@ export function Avatar({
   platform,
   size = "sm",
   src,
+  showBadge = true,
 }: {
   name: string;
   platform: Platform;
   size?: keyof typeof SIZES;
   src?: string | null;
+  showBadge?: boolean;
 }) {
   const s = SIZES[size];
   const p = PLATFORMS[platform];
@@ -37,16 +40,15 @@ export function Avatar({
           {initials(name)}
         </div>
       )}
-      <span
-        className={`${s.badge} absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full text-white ring-2 ring-white dark:ring-neutral-900`}
-        style={{ backgroundColor: p.bg }}
-        title={p.label}
-      >
-        <PlatformGlyph
-          platform={platform}
-          className={`${s.glyph}`}
-        />
-      </span>
+      {showBadge && (
+        <span
+          className={`${s.badge} absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full text-white ring-2 ring-white dark:ring-neutral-900`}
+          style={{ backgroundColor: p.bg }}
+          title={p.label}
+        >
+          <PlatformGlyph platform={platform} className={`${s.glyph}`} />
+        </span>
+      )}
     </div>
   );
 }
