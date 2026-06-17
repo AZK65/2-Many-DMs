@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
@@ -13,6 +13,20 @@ const DEPLOY_PROMPT =
 
 export function Landing() {
   const [copied, setCopied] = useState<string | null>(null);
+
+  type ChangeEntry = {
+    version: string;
+    date?: string;
+    title?: string;
+    notes?: string[];
+  };
+  const [changelog, setChangelog] = useState<ChangeEntry[]>([]);
+  useEffect(() => {
+    fetch("/changelog.json")
+      .then((r) => r.json())
+      .then((d) => setChangelog(Array.isArray(d.entries) ? d.entries : []))
+      .catch(() => {});
+  }, []);
 
   function copy(which: string) {
     navigator.clipboard?.writeText(DEPLOY_PROMPT).catch(() => {});
@@ -330,6 +344,52 @@ export function Landing() {
       </section>
 
       {/* Custom integrations / paid support */}
+      {/* Changelog */}
+      {changelog.length > 0 && (
+        <section id="changelog" className="mx-auto max-w-3xl px-5 py-20">
+          <SectionLabel n="04" label="Changelog" />
+          <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            What&apos;s new
+          </h2>
+          <p className="mt-3 text-slate-500 dark:text-neutral-400">
+            Every release, in one place.
+          </p>
+          <div className="mt-10 space-y-9 border-l border-slate-200 pl-6 dark:border-neutral-800">
+            {changelog.map((e) => (
+              <div key={e.version} className="relative">
+                <span className="absolute -left-[31px] top-1.5 h-3 w-3 rounded-full bg-accent ring-4 ring-white dark:ring-black" />
+                <div className="flex flex-wrap items-baseline gap-2.5">
+                  <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-sm font-bold text-accent">
+                    v{e.version}
+                  </span>
+                  {e.title && (
+                    <span className="font-semibold dark:text-neutral-100">
+                      {e.title}
+                    </span>
+                  )}
+                  {e.date && (
+                    <span className="text-xs text-slate-400 dark:text-neutral-500">
+                      {e.date}
+                    </span>
+                  )}
+                </div>
+                <ul className="mt-2.5 space-y-1.5">
+                  {(e.notes || []).map((n, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-2 text-sm text-slate-600 dark:text-neutral-300"
+                    >
+                      <span className="mt-px text-accent">•</span>
+                      <span>{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="mx-auto max-w-6xl px-5 pb-20">
         <div className="relative flex flex-col items-center justify-between gap-5 overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 to-neutral-900 p-8 text-white sm:flex-row sm:p-10">
           <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-accent/20 blur-3xl" />
