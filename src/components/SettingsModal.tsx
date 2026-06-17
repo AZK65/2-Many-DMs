@@ -380,6 +380,57 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </button>
           </Section>
 
+          {/* Plugins */}
+          <Section title="Plugins">
+            <div className="rounded-xl border border-slate-200 p-3 dark:border-neutral-700">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-900 text-sm text-white dark:bg-neutral-700">
+                    📅
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium dark:text-neutral-100">
+                      Cal.com
+                    </div>
+                    <div className="text-[11px] text-slate-400 dark:text-neutral-500">
+                      Suggest booking when a chat mentions a date; pre-fills the
+                      contact as a guest.
+                    </div>
+                  </div>
+                </div>
+                <Toggle
+                  on={s.plugins.calcom.enabled}
+                  onChange={(v) =>
+                    update({
+                      plugins: {
+                        ...s.plugins,
+                        calcom: { ...s.plugins.calcom, enabled: v },
+                      },
+                    })
+                  }
+                />
+              </div>
+              {s.plugins.calcom.enabled && (
+                <input
+                  value={s.plugins.calcom.link}
+                  onChange={(e) =>
+                    update({
+                      plugins: {
+                        ...s.plugins,
+                        calcom: { ...s.plugins.calcom, link: e.target.value },
+                      },
+                    })
+                  }
+                  placeholder="cal.com/you/30min  (or just your username)"
+                  className="mt-2.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                />
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 dark:text-neutral-500">
+              More plugins coming — tell me which you want.
+            </p>
+          </Section>
+
           {/* Connections */}
           <Section title="Connections">
             <div className="mb-2 flex items-center gap-2 text-xs">
@@ -478,6 +529,30 @@ function Row({
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  );
+}
+
+function Toggle({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+        on ? "bg-accent" : "bg-slate-300 dark:bg-neutral-600"
+      }`}
+      aria-pressed={on}
+    >
+      <span
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+          on ? "left-[18px]" : "left-0.5"
+        }`}
+      />
+    </button>
   );
 }
 

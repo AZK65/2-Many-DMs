@@ -13,6 +13,13 @@ export interface Settings {
   accentLight: string; // hex — accent in light mode
   accentDark: string; // hex — accent in dark mode
   stages: Stage[]; // editable board pipeline stages
+  plugins: PluginSettings;
+}
+
+export interface PluginSettings {
+  // Cal.com: when a chat mentions a date, offer to send your booking link with
+  // the contact pre-filled as a guest.
+  calcom: { enabled: boolean; link: string };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -22,7 +29,30 @@ export const DEFAULT_SETTINGS: Settings = {
   accentLight: "#0e9f63",
   accentDark: "#1fe88a",
   stages: PIPELINE,
+  plugins: { calcom: { enabled: false, link: "" } },
 };
+
+// Build a Cal.com booking URL with the contact pre-filled as a guest.
+export function calcomUrl(
+  link: string,
+  contact: { name?: string | null; email?: string | null }
+): string {
+  let base = (link || "").trim();
+  if (!base) return "";
+  if (!/^https?:\/\//i.test(base)) {
+    base = base.includes("cal.com")
+      ? "https://" + base.replace(/^\/+/, "")
+      : "https://cal.com/" + base.replace(/^\/+/, "");
+  }
+  const params = new URLSearchParams();
+  if (contact.name) params.set("name", contact.name);
+  if (contact.email) {
+    params.set("email", contact.email);
+    params.set("guests", contact.email);
+  }
+  const q = params.toString();
+  return q ? `${base}?${q}` : base;
+}
 
 // Board reads stages from here (falls back to the default pipeline).
 export function loadStages(): Stage[] {
