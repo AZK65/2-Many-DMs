@@ -14,6 +14,17 @@ export interface Settings {
   accentDark: string; // hex — accent in dark mode
   stages: Stage[]; // editable board pipeline stages
   plugins: PluginSettings;
+  macros: GroupMacro[]; // saved "create group" macros (Cmd+G)
+}
+
+// A reusable "create a group" preset: members + a first message.
+export interface GroupMacro {
+  id: string;
+  label: string;
+  platform: string;
+  groupName: string;
+  contactIds: string[];
+  message: string;
 }
 
 export interface PluginSettings {
@@ -30,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accentDark: "#1fe88a",
   stages: PIPELINE,
   plugins: { calcom: { enabled: false, link: "" } },
+  macros: [],
 };
 
 // Build a Cal.com booking URL with the contact pre-filled as a guest.

@@ -73,6 +73,12 @@ export interface Adapter {
   ): Promise<SentMessage>;
   // Marks a chat as read on the platform (when the user opens it in the inbox).
   markRead?(chatExternalId: string): Promise<void>;
+  // Create a group with the given members (by their contact externalKeys) and
+  // return the new chat's externalId. Optional — not every platform supports it.
+  createGroup?(
+    name: string,
+    participantKeys: string[]
+  ): Promise<{ chatExternalId: string }>;
   getStatus(): AdapterStatus;
   stop(): Promise<void>;
 }
