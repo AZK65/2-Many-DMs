@@ -23,6 +23,7 @@ import { PlatformGlyph } from "./PlatformIcon";
 import { ChatTypeIcon } from "./ChatTypeIcon";
 import ThemeToggle from "./ThemeToggle";
 import { SettingsModal } from "./SettingsModal";
+import { CreateGroupModal } from "./CreateGroupModal";
 import {
   loadSettings,
   applySettings,
@@ -120,6 +121,7 @@ export function Inbox() {
   const [snippets, setSnippets] = useState<SnippetDTO[]>([]);
   const [showSnippets, setShowSnippets] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
 
   // First-run: send new users to the onboarding screen.
   useEffect(() => {
@@ -169,6 +171,10 @@ export function Inbox() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        setShowCreateGroup(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1129,6 +1135,20 @@ export function Inbox() {
 
       <AnimatePresence>
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCreateGroup && (
+          <CreateGroupModal
+            onClose={() => setShowCreateGroup(false)}
+            onCreated={() =>
+              fetch("/api/conversations")
+                .then((r) => r.json())
+                .then(setConversations)
+                .catch(() => {})
+            }
+          />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>

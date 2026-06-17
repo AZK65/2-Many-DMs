@@ -195,6 +195,38 @@ function startControlServer() {
         });
         return;
       }
+      if (req.method === "POST" && req.url === "/group/create") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", async () => {
+          try {
+            const { platform, accountId, name, participantKeys, message } =
+              JSON.parse(body);
+            const adapter = resolveAdapter({ accountId, platform });
+            if (!adapter?.createGroup) {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              return res.end(
+                JSON.stringify({
+                  error: `creating groups isn't supported for ${platform}`,
+                })
+              );
+            }
+            const { chatExternalId } = await adapter.createGroup(
+              name,
+              participantKeys || []
+            );
+            if (message && chatExternalId) {
+              await adapter.send(chatExternalId, message).catch(() => {});
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, chatExternalId }));
+          } catch (e) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: String(e) }));
+          }
+        });
+        return;
+      }
       if (req.method === "GET" && req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(

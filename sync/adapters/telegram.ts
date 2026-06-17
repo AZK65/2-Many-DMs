@@ -327,6 +327,27 @@ export class TelegramAdapter implements Adapter {
     };
   }
 
+  async createGroup(
+    name: string,
+    participantKeys: string[]
+  ): Promise<{ chatExternalId: string }> {
+    const ids = participantKeys
+      .map((k) => Number(k.replace(/^telegram:/, "")))
+      .filter((n) => !Number.isNaN(n));
+    if (!ids.length) throw new Error("no Telegram participants");
+    const users = await Promise.all(
+      ids.map((id) => this.client.getInputEntity(id))
+    );
+    const res: any = await this.client.invoke(
+      new Api.messages.CreateChat({ users, title: name })
+    );
+    const chat =
+      res?.updates?.chats?.[0] || res?.chats?.[0] || res?.chat || null;
+    const chatId = chat ? String(chat.id) : "";
+    if (!chatId) throw new Error("group created but its id is missing");
+    return { chatExternalId: chatId };
+  }
+
   async markRead(chatExternalId: string): Promise<void> {
     const peer = await this.client.getInputEntity(parseTarget(chatExternalId).id);
     await this.client.invoke(

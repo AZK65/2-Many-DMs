@@ -406,6 +406,19 @@ export class WhatsAppBaileysAdapter implements Adapter {
     };
   }
 
+  async createGroup(
+    name: string,
+    participantKeys: string[]
+  ): Promise<{ chatExternalId: string }> {
+    if (!this.sock) throw new Error("WhatsApp (baileys) not ready");
+    const jids = participantKeys
+      .map((k) => k.replace(/^whatsapp:/, ""))
+      .filter((j) => j.includes("@"));
+    if (!jids.length) throw new Error("no WhatsApp participants");
+    const res = await this.sock.groupCreate(name, jids);
+    return { chatExternalId: res.id };
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     try {
