@@ -36,6 +36,12 @@ with **your** keys, no SaaS in the middle.
 
 ## Features
 
+### New in 0.6.1
+
+Guided Telegram, WhatsApp and X setup with clear prerequisites, recoverable errors, safe retries,
+live connection checks, and per-account session isolation. Setup works from the welcome screen and
+existing Connections panel. See [Connecting your channels](#connecting-your-channels).
+
 ### New in 0.6.0
 
 A redesigned inbox with a collapsible avatar rail, compact auto-growing composer, clearer direct messages,
@@ -119,13 +125,24 @@ Set `ALLOW_SELF_UPDATE=0` to disable one-click updates. Supervised production in
 
 | Channel | How it links |
 | --- | --- |
-| **Telegram** | `npm run tg:login` — one-time phone-code login (uses your own `TELEGRAM_API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org)). |
-| **WhatsApp** | Set `WHATSAPP_ENABLED=1`, run the worker, and scan the QR with **WhatsApp → Linked Devices**. The session persists in `.wwebjs_auth`. |
-| **X / Twitter** | `npm run x:login`, **or** paste your `auth_token` + `ct0` cookies into `.env`, **or** use the bundled [Chrome extension](extension/) to hand off your session with a pairing code. |
+| **Telegram** | Open **Connect Telegram**. The wizard helps you create your own app at [Telegram API tools](https://my.telegram.org/apps), then enter its API ID/hash, international phone number, login code, and two-step password if enabled. App credentials and the session are encrypted on your server after sign-in. Existing environment-based setups still work. |
+| **WhatsApp** | Choose **Connect WhatsApp**, have your phone ready, and scan the live QR from **WhatsApp → Linked devices → Link a device**. On Android, Linked devices is in the three-dot menu; on iPhone, in Settings. Expired QR codes can be regenerated without deleting saved sessions. |
+| **X / Twitter** | Choose **Connect X**. Download the bundled connector, install it unpacked in Chrome/Edge, sign in on X, then copy the exact App URL and short-lived pairing code into the connector. Return to setup to confirm live sync. If X Chat is locked, enter your existing numeric X Chat passcode—not your account password. |
 | **Discord** | In **Connections**, paste an official bot token, enable Message Content Intent, then use the generated install link. The bot reads only channels it can view and DMs sent directly to it; personal-account archives remain read-only. |
 
-> **Heads-up on X:** don't run the X browser through a datacenter proxy. Deploy on your own machine or
-> use a residential/5G proxy, or you risk an account ban.
+Start at `/welcome`, or add another account from **Connections**. Saved accounts can be reopened to finish linking.
+Setup shows **Connected and ready** only after the sync worker confirms it. Older messages may
+continue importing afterward; a ready connection is not a complete-history guarantee.
+
+These personal-session connectors can be interrupted by provider security checks, rate limits, device
+revocation, or network failures. They do not bypass those restrictions. Setup displays recovery guidance
+and paces retries; it never automatically repeats login codes or rejected X Chat passcodes.
+
+**Server checklist:** keep the web app and sync worker on the same persistent data directory, preserve
+`APP_ENCRYPTION_KEY` across restarts, and back up the database plus connector session directories.
+Do not run two workers against the same session. This version is single-owner, not a public multi-user
+service: remote hosts require a private owner connection (for example, an SSH tunnel exposing the app
+as localhost). The public marketing deployment and invited read-only CRM view cannot connect accounts.
 
 ## Environment
 
@@ -134,7 +151,7 @@ All config lives in `.env` (see [`.env.example`](.env.example)). The essentials:
 | Variable | What it's for |
 | --- | --- |
 | `DATABASE_URL` | SQLite path, e.g. `file:./dev.db` (or a mounted volume in prod). |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Your Telegram app credentials. |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Optional Telegram defaults; the setup wizard can save credentials per account instead. |
 | `TELEGRAM_SESSION` | Filled in by `npm run tg:login`. |
 | `APP_ENCRYPTION_KEY` | 64-hex-char key to encrypt stored sessions. **Required in production.** |
 | `X_AUTH_TOKEN` / `X_CT0` | X session cookies (or use `x:login` / the extension). |
@@ -155,7 +172,7 @@ Next.js app (App Router)  ──┐
                             ├── Prisma / SQLite  (conversations, contacts, automations)
 Sync worker (tsx)         ──┘
   ├── Telegram  (GramJS / MTProto)
-  ├── WhatsApp  (whatsapp-web.js + Puppeteer)
+  ├── WhatsApp  (Baileys or whatsapp-web.js + Puppeteer)
   ├── X         (Puppeteer + stealth + fingerprint injection)
   └── Discord   (official Bot API + Gateway)
 ```

@@ -3,7 +3,7 @@
 import { OverlayPortal } from "./OverlayPortal";
 
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   loadSettings,
   saveSettings,
@@ -17,6 +17,10 @@ import {
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
+import { TelegramConnect } from "./TelegramConnect";
+import { XConnect } from "./XConnect";
+import { WhatsAppConnect } from "./WhatsAppConnect";
+import { SavedConnection } from "./ConnectSetup";
 import { accountStatusView } from "@/lib/connection-status";
 import {
   CheckCircleIcon,
@@ -97,6 +101,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<Settings>(loadSettings());
   const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
+  const [connecting, setConnecting] = useState<"telegram" | "whatsapp" | "x" | null>(null);
+  const [setupAccount, setSetupAccount] = useState<Acct | null>(null);
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
   const [liveAccounts, setLiveAccounts] = useState<Record<string, LiveAcct>>({});
   const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([]);
@@ -634,7 +640,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
               {page === "connections" && (
                 <div className="space-y-5">
-                  <div className="flex items-center justify-between gap-4 rounded-xl bg-white p-4 ring-1 ring-slate-200 dark:bg-[#181818] dark:ring-neutral-800">
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-4 ring-1 ring-slate-200 dark:bg-[#181818] dark:ring-neutral-800">
                     <div className="flex items-center gap-3">
                       <span className={`h-3 w-3 rounded-full ${workerRunning ? "bg-emerald-500" : "bg-red-500"}`} />
                       <div>
@@ -642,7 +648,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         <div className="text-xs text-slate-500 dark:text-neutral-400">{workerRunning == null ? "Checking status…" : workerRunning ? "Running — account status shown below" : "Not running"}</div>
                       </div>
                     </div>
-                    <span className="text-sm font-semibold tabular-nums text-slate-500 dark:text-neutral-400">{connectedAccounts} of {accounts.length} connected</span>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold tabular-nums text-slate-500 dark:text-neutral-400">{connectedAccounts} of {accounts.length} connected</span>
+                      <select value="" aria-label="Connect messaging account" onChange={e => setConnecting(e.target.value as "telegram" | "whatsapp" | "x")} className={`${INPUT_CLASS} !w-auto`}>
+                        <option value="" disabled>Connect account…</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="x">X</option>
+                      </select>
+                    </div>
                   </div>
 
                   {PLATFORM_ORDER.filter((platform) => accounts.some((account) => account.platform === platform)).map((platform) => {
@@ -675,14 +689,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                                     <div className="truncate text-sm font-semibold text-slate-900 dark:text-neutral-100">{account.label || PLATFORMS[platform].label}</div>
                                     <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{account.driver ? DRIVER_LABEL[account.driver] || account.driver : "Standard connection"}{detail ? ` · ${detail}` : ""}</div>
                                   </div>
-                                  <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${statusClass}`}>{status.label}</span>
+                                  {["telegram", "whatsapp", "x"].includes(platform) ? <button type="button" aria-label={`Open ${account.label || PLATFORMS[platform].label} setup`} onClick={() => setSetupAccount(account)} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${statusClass}`}>{status.label} ›</button> : <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${statusClass}`}>{status.label}</span>}
                                 </div>
                                 {needsWhatsAppQr && (
                                   <WhatsAppLinkCode
                                     qr={live.qr}
                                     label={account.label || "WhatsApp"}
                                     accountId={account.id}
-                                    canRefresh={account.driver === "web"}
+                                    canRefresh={account.driver === "web" || account.driver === "baileys"}
                                   />
                                 )}
                               </div>
@@ -693,13 +707,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     );
                   })}
 
-                  {accounts.length === 0 && <EmptyState title="No messaging accounts" description="Connected WhatsApp, Telegram, X, and Discord accounts will appear here." />}
+                  {accounts.length === 0 && <EmptyState title="No messaging accounts" description="Choose Connect account above to set up your first inbox." />}
                 </div>
               )}
             </div>
           </main>
         </div>
       </motion.div>
+      <AnimatePresence>
+        {setupAccount && <SavedConnection accountId={setupAccount.id} platform={setupAccount.platform as Platform} driver={setupAccount.driver} onClose={() => setSetupAccount(null)} />}
+        {connecting === "telegram" && <TelegramConnect onClose={() => setConnecting(null)} />}
+        {connecting === "whatsapp" && <WhatsAppConnect onClose={() => setConnecting(null)} />}
+        {connecting === "x" && <XConnect onClose={() => setConnecting(null)} />}
+      </AnimatePresence>
     </motion.div></OverlayPortal>
   );
 }

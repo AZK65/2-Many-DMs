@@ -1,6 +1,18 @@
 {
-  "current": "0.6.0",
+  "current": "0.6.1",
   "entries": [
+    {
+      "version": "0.6.1",
+      "date": "2026-10-27",
+      "title": "Guided, recoverable account setup",
+      "notes": [
+        "Telegram app-credential guidance, international phone validation, paced code retries and a separate two-step password screen",
+        "WhatsApp QR setup with linked-device guidance, safe code regeneration and resumable saved accounts",
+        "Downloadable X connector with exact-server pairing, expiry handling and encrypted X Chat passcode setup",
+        "Live connection confirmation instead of treating saved accounts as already connected",
+        "Isolated per-account browser sessions and automatic loading of new or replaced account credentials"
+      ]
+    },
     {
       "version": "0.6.0",
       "date": "2026-10-27",

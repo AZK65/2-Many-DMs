@@ -6,6 +6,10 @@ dev.db-journal
 .wwebjs_auth
 .wwebjs_cache
 .x_auth
+.x_profile*
+.x_browser_pid*
+.x_cooldown.json*
+.x_repair_state.json*
 # Local test data, exports, and session artifacts must not enter an image.
 .env.*
 !.env.example

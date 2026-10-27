@@ -35,7 +35,7 @@ export function WhatsAppLinkCode({ qr, label, accountId, canRefresh = false }: {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not generate a new QR code.");
       setFreshQr(data.status?.qr || null);
-      setLinked(data.status?.state === "ready" || data.status?.state === "starting");
+      setLinked(data.status?.state === "ready");
     } catch (cause) {
       setError(cause instanceof Error && cause.name !== "TimeoutError" ? cause.message : "The request timed out. Check the connection and try again.");
     } finally {
@@ -58,10 +58,11 @@ export function WhatsAppLinkCode({ qr, label, accountId, canRefresh = false }: {
       )}
       <div className="max-w-sm text-center">
         <p className="text-sm text-slate-700 dark:text-neutral-200">
-          On your phone, open WhatsApp → <b>Settings</b> → <b>Linked Devices</b> → <b>Link a Device</b>, then scan this code.
+          Open WhatsApp on your phone. On iPhone, tap <b>Settings</b>; on Android, tap <b>⋮</b>. Choose <b>Linked devices → Link a device</b> and scan here.
         </p>
         <p className="mt-2 text-xs text-slate-400 dark:text-neutral-500">Keep this screen open. Codes update automatically until your phone is linked.</p>
       </div>
+      <p className="max-w-sm text-center text-xs text-slate-500 dark:text-neutral-400">Use the scanner inside Linked devices, not your camera app. Keep your phone online while linking.</p>
       {accountId && canRefresh && !linked && (
         <button type="button" onClick={refresh} disabled={busy}
           className="rounded-lg bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-300 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-wait disabled:opacity-50 dark:bg-[#313131] dark:text-neutral-100 dark:hover:bg-neutral-700">

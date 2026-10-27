@@ -172,10 +172,12 @@ export class WhatsAppAdapter implements Adapter {
   private readyDone = false;
   private authEpoch = 0;
   private proxyUrl?: string;
+  private clientId?: string;
 
   // Per-account ready: pass the account's proxy. Falls back to global PROXY_URL.
-  constructor(opts: { proxyUrl?: string; onIdentities?: (identities: WhatsAppIdentity[]) => Promise<void> } = {}) {
+  constructor(opts: { proxyUrl?: string; clientId?: string; onIdentities?: (identities: WhatsAppIdentity[]) => Promise<void> } = {}) {
     this.proxyUrl = opts.proxyUrl;
+    this.clientId = opts.clientId;
     this.onIdentities = opts.onIdentities;
   }
 
@@ -186,7 +188,7 @@ export class WhatsAppAdapter implements Adapter {
     // https://github.com/wppconnect-team/wa-version/tree/main/html
     const webVersion = process.env.WHATSAPP_WEB_VERSION;
     return new Client({
-      authStrategy: new LocalAuth({ dataPath: WA_SESSION_DIR }),
+      authStrategy: new LocalAuth({ dataPath: WA_SESSION_DIR, clientId: this.clientId }),
       ...(webVersion
         ? {
             webVersionCache: {
@@ -434,7 +436,7 @@ export class WhatsAppAdapter implements Adapter {
   }
 
   private cleanLocks(): void {
-    cleanChromeLocks(path.join(WA_SESSION_DIR, "session"));
+    cleanChromeLocks(path.join(WA_SESSION_DIR, this.clientId ? `session-${this.clientId}` : "session"));
   }
 
   private async disposeClient(client?: Client): Promise<void> {

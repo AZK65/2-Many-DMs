@@ -9,7 +9,7 @@
         width: 320px;
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-        background: #0a0a0a;
+        background: #181818;
         color: #fafafa;
       }
       .head {
@@ -33,13 +33,15 @@
         border: 1px solid #404040; background: #171717; color: #fafafa;
         font-size: 13px; outline: none;
       }
-      input:focus { border-color: #3b82f6; }
+      input:focus { border-color: #a3a3a3; outline: 2px solid #a3a3a3; }
       button {
         width: 100%; padding: 10px; border: 0; border-radius: 8px;
-        background: #2563eb; color: #fff; font-size: 14px; font-weight: 600;
+        background: #fafafa; color: #181818; font-size: 14px; font-weight: 600;
         cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
+      button:hover { filter: brightness(0.9); }
+      button:focus-visible { outline: 2px solid #a3a3a3; outline-offset: 4px; }
       .status { font-size: 12px; min-height: 16px; }
       .status.err { color: #f87171; }
       .status.ok { color: #34d399; }
@@ -54,22 +56,23 @@
         <div class="sub">Hands your X session to your inbox</div>
       </div>
     </div>
-    <div class="body">
+    <form class="body" id="setup">
       <div>
-        <label>App URL</label>
-        <input id="appUrl" placeholder="http://localhost:3000" />
+        <label for="appUrl">App URL (from setup)</label>
+        <input id="appUrl" type="url" placeholder="http://localhost:3000" required />
       </div>
       <div>
-        <label>Pairing code (from the app's onboarding)</label>
-        <input id="code" placeholder="e.g. 7K2QF9" autocomplete="off" />
+        <label for="code">Pairing code (from setup)</label>
+        <input id="code" placeholder="Paste your pairing code" autocomplete="off" maxlength="10" required />
       </div>
-      <button id="connect">Connect my X account</button>
-      <div id="status" class="status"></div>
+      <button id="connect" type="submit">Connect my X account</button>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
       <div class="hint">
         Make sure you're logged into x.com in this browser. We read only your
-        session cookies and send them over HTTPS to your app — nothing else.
+        session cookies only when you connect, and send them to the App URL above.
+        HTTPS is required except for localhost. Never use someone else’s App URL.
       </div>
-    </div>
+    </form>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -203,6 +203,16 @@ export class WhatsAppBaileysAdapter implements Adapter {
     await this.connect();
   }
 
+  private lastQrRefreshAt = 0;
+  async refreshQr(): Promise<void> {
+    if (this.state !== "qr" || this.sock?.user) throw new Error("WhatsApp is already linking. Wait for its status to update.");
+    if (Date.now() - this.lastQrRefreshAt < 15_000) throw new Error("Wait a few seconds for the new QR code before requesting another.");
+    this.lastQrRefreshAt = Date.now();
+    this.qr = null;
+    this.detail = "Generating a new QR code";
+    await this.recover();
+  }
+
   async start(
     onMessage: (m: InboundMessage) => Promise<void>,
     onRead?: (chatExternalId: string) => Promise<void>,

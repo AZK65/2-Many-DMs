@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { accountStoragePath, xSessionCookies } from "../account-session";
 import type { Browser, Page } from "puppeteer";
 import puppeteer, { REAL_UA } from "../x-browser";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
@@ -164,6 +165,7 @@ export class XAdapter implements Adapter {
   private outboundQueue: Promise<void> = Promise.resolve();
   private outboundPending = 0;
   private accountId?: string;
+  private session?: { authToken: string; ct0: string; passcode?: string };
   private discoveryOffsets = { general: 0, spam: 0 };
   private inboxDates = new Map<string, { preview: string; timestamp: number }>();
   private repairRetryAt = new Map<string, number>();
@@ -174,9 +176,14 @@ export class XAdapter implements Adapter {
   private attachmentRetryAt = new Map<string, number>();
 
   // Per-account ready: pass the account's proxy. Falls back to global PROXY_URL.
-  constructor(opts: { proxyUrl?: string; accountId?: string } = {}) {
+  constructor(opts: { proxyUrl?: string; accountId?: string; session?: { authToken: string; ct0: string; passcode?: string } } = {}) {
     this.proxyUrl = opts.proxyUrl;
     this.accountId = opts.accountId;
+    this.session = opts.session;
+  }
+
+  private storagePath(name: string) {
+    return accountStoragePath(process.env.DATA_DIR || process.cwd(), name, this.session ? this.accountId : undefined);
   }
 
   getStatus(): AdapterStatus {
@@ -241,11 +248,11 @@ export class XAdapter implements Adapter {
   }
 
   private cooldownFile(): string {
-    return path.join(process.env.DATA_DIR || process.cwd(), ".x_cooldown.json");
+    return this.storagePath(".x_cooldown.json");
   }
 
   private repairStateFile(): string {
-    return path.join(process.env.DATA_DIR || process.cwd(), ".x_repair_state.json");
+    return this.storagePath(".x_repair_state.json");
   }
 
   private loadRepairState(): void {
@@ -290,7 +297,7 @@ export class XAdapter implements Adapter {
   }
 
   private browserPidFile(): string {
-    return path.join(process.env.DATA_DIR || process.cwd(), ".x_browser_pid");
+    return this.storagePath(".x_browser_pid");
   }
 
   private browserProcessOwnsProfile(pid: number, profileDir: string): boolean {
@@ -539,7 +546,7 @@ export class XAdapter implements Adapter {
     this.reconnecting = false;
     this.restoreRateLimitCooldown();
     this.loadRepairState();
-    const cookies = loadCookies();
+    const cookies = this.session ? xSessionCookies(this.session) : loadCookies();
     if (!cookies) {
       this.state = "disconnected";
       console.log(
@@ -548,10 +555,7 @@ export class XAdapter implements Adapter {
       return;
     }
 
-    const profileDir = path.join(
-      process.env.DATA_DIR || process.cwd(),
-      ".x_profile"
-    );
+    const profileDir = this.storagePath(".x_profile");
     const previousBrowser = this.browser;
     this.browser = undefined;
     try {
@@ -655,7 +659,7 @@ export class XAdapter implements Adapter {
     if (inboxLoaded && await isLocked(this.page)) {
       // Headless self-host: unlock ourselves from X_PASSCODE rather than waiting
       // for someone to sit at a screen. Falls through to "locked" if we can't.
-      const result = await tryUnlock(this.page);
+      const result = await tryUnlock(this.page, { passcode: this.session ? (this.session.passcode || "") : undefined, accountId: this.accountId });
       if (result !== "unlocked" && result !== "not-locked") {
         this.markLocked(result);
         return;
@@ -912,7 +916,7 @@ export class XAdapter implements Adapter {
 
   private async unlockBackgroundPage(page: Page, label: string): Promise<boolean> {
     if (!(await isLocked(page))) return true;
-    const result = await tryUnlock(page);
+    const result = await tryUnlock(page, { passcode: this.session ? (this.session.passcode || "") : undefined, accountId: this.accountId });
     if (result === "unlocked" || result === "not-locked") return true;
     console.error(`[x] ${label} page could not be unlocked`);
     this.markLocked(result);

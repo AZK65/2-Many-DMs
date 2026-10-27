@@ -30,10 +30,13 @@ import { recordDeliveryReceipt } from "./delivery-receipt";
 import { MessageRetention, canonicalWhatsAppMessage } from "./retention";
 import fs from "node:fs";
 import { AvatarBackfill } from "./avatar-backfill";
+import { resolveTelegramSession } from "../src/lib/telegram-session";
+import { createHash } from "node:crypto";
 
 // One adapter instance per connected account, keyed by accountId.
 const adapters = new Map<string, Adapter>();
 const accountMeta = new Map<string, { platform: string; label: string | null }>();
+const accountVersions = new Map<string, string>();
 const connectorOperations = new ConnectorOperations<Adapter>();
 let adapterReload: Promise<void> | undefined;
 let controlServer: http.Server | undefined;
@@ -279,7 +282,7 @@ function trackedSend(
   return operation;
 }
 
-function safeJson(s: string): { authToken: string; ct0: string } | undefined {
+function safeJson(s: string): { authToken: string; ct0: string; passcode?: string } | undefined {
   try {
     const j = JSON.parse(s);
     if (j.authToken && j.ct0) return j;
@@ -300,26 +303,25 @@ function isHeavy(acc: RunnableAccount): boolean {
 
 function buildAdapter(acc: RunnableAccount): Adapter | null {
   if (acc.platform === "telegram") {
-    const { TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION } = process.env;
-    const session = acc.session || TELEGRAM_SESSION;
-    if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH || !session) {
+    const credentials = resolveTelegramSession(acc.session);
+    if (!credentials) {
       console.log("[sync] telegram account skipped — missing api id/hash/session");
       return null;
     }
-    return new TelegramAdapter(Number(TELEGRAM_API_ID), TELEGRAM_API_HASH, session, acc.id);
+    return new TelegramAdapter(credentials.apiId, credentials.apiHash, credentials.session, acc.id);
   }
   if (acc.platform === "whatsapp") {
     // Per-account session dir via clientId so multiple numbers don't collide.
     return acc.driver === "baileys"
       ? new WhatsAppBaileysAdapter({ clientId: acc.id })
-      : new WhatsAppAdapter({ onIdentities: (identities) => repairWhatsAppIdentities(acc.id, identities) });
+      : new WhatsAppAdapter({ clientId: acc.label === "default" ? undefined : acc.id, onIdentities: (identities) => repairWhatsAppIdentities(acc.id, identities) });
   }
   if (acc.platform === "x") {
     if (acc.driver === "api") {
       const auth = acc.session ? safeJson(acc.session) : undefined;
       return new XApiAdapter(auth ? { auth } : {});
     }
-    return new XAdapter({ accountId: acc.id });
+    return new XAdapter({ accountId: acc.id, session: acc.session ? safeJson(acc.session) : undefined });
   }
   if (acc.platform === "discord") {
     if (acc.driver !== "bot") {
@@ -367,6 +369,7 @@ async function reconcileAdapters() {
     }
     adapters.delete(accountId);
     accountMeta.delete(accountId);
+    accountVersions.delete(accountId);
   }
   if (!accounts.length) {
     console.log(
@@ -397,7 +400,15 @@ async function reconcileAdapters() {
     try {
       // startAdapters is also used by /reload after a browser-extension pairing.
       // Never create a second live adapter for an account already running.
-      if (adapters.has(acc.id)) continue;
+      const version = createHash("sha256").update(`${acc.driver}:${acc.session || "env"}`).digest("hex");
+      const current = adapters.get(acc.id);
+      if (current) {
+        if (accountVersions.get(acc.id) === version) continue;
+        // A fresh login replaces an invalid session without launching two clients.
+        if (!connectorOperations.canRecover(current)) continue;
+        await connectorOperations.runLifecycle(current, "recover", () => current.stop());
+        adapters.delete(acc.id);
+      }
       if (
         (acc.platform === "telegram" || acc.platform === "x") &&
         !acc.session
@@ -413,6 +424,7 @@ async function reconcileAdapters() {
       const adapter = buildAdapter(acc);
       if (!adapter) continue;
       adapters.set(acc.id, adapter);
+      accountVersions.set(acc.id, version);
       accountMeta.set(acc.id, { platform: acc.platform, label: acc.label });
       // Inject this account's id into every inbound message + read event.
       const onMessage = async (m: InboundMessage) => {
@@ -1056,6 +1068,7 @@ function startAutomationScheduler() {
 }
 
 function startConnectorRecovery() {
+  const linked = new WeakSet<Adapter>();
   const unhealthySince = new WeakMap<Adapter, number>();
   const healthySince = new WeakMap<Adapter, number>();
   const recoveryAttempts = new WeakMap<Adapter, number>();
@@ -1063,9 +1076,9 @@ function startConnectorRecovery() {
   let nextStartupAttemptAt = 0;
   const tick = () => {
     if (shuttingDown) return;
-    // A temporary DB/config error during startup must not leave a healthy
-    // control process running forever with no connectors registered.
-    if (!initialized && !adapterReload && Date.now() >= nextStartupAttemptAt) {
+    // Reconcile new/relinked accounts even if a browser closes before /reload
+    // answers, and retry a temporary startup DB/config failure.
+    if (!adapterReload && Date.now() >= nextStartupAttemptAt) {
       nextStartupAttemptAt = Date.now() + 30_000;
       void startAdapters().catch((error) =>
         console.error("[sync] connector startup retry failed:", error)
@@ -1075,6 +1088,11 @@ function startConnectorRecovery() {
       const { state, detail } = adapter.getStatus();
       const now = Date.now();
       if (state === "ready") {
+        if (!linked.has(adapter)) {
+          linked.add(adapter);
+          void prisma.account.updateMany({ where: { id, status: "pending" }, data: { status: "connected" } })
+            .catch(() => linked.delete(adapter));
+        }
         unhealthySince.delete(adapter);
         const stableSince = healthySince.get(adapter) ?? now;
         healthySince.set(adapter, stableSince);

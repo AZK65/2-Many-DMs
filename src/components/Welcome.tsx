@@ -11,8 +11,11 @@ import {
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
 import { TelegramConnect } from "./TelegramConnect";
-import { ConnectionsModal, type ConnectionsData } from "./ConnectionsModal";
-import { TG_LINK } from "@/lib/links";
+import { XConnect } from "./XConnect";
+import { WhatsAppConnect } from "./WhatsAppConnect";
+import { useSetupConnections, SavedConnection } from "./ConnectSetup";
+import { setupAccountLabel } from "@/lib/connection-setup";
+import { fetchJson } from "@/lib/fetch-json";
 
 import {
   CheckCircleIcon,
@@ -27,6 +30,7 @@ type AccountRow = {
   platform: string;
   label: string | null;
   status: string;
+  driver?: string | null;
 };
 
 const SETUP_STEPS = [
@@ -41,70 +45,48 @@ export function Welcome() {
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [showTelegram, setShowTelegram] = useState(false);
-  const [connections, setConnections] = useState<ConnectionsData | null>(null);
+  const { connections } = useSetupConnections();
   const [showWhatsApp, setShowWhatsApp] = useState(false);
-  const [xStage, setXStage] = useState<"closed" | "warning" | "steps">("closed");
-  const [pairCode, setPairCode] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [showX, setShowX] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<AccountRow | null>(null);
+  const [accountError, setAccountError] = useState("");
 
   useEffect(() => {
-    const load = () =>
-      fetch("/api/accounts")
-        .then((r) => r.json())
-        .then(setAccounts)
-        .catch(() => {});
-    load();
-    const t = setInterval(load, 4000);
-    return () => clearInterval(t);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      try {
+        const rows = await fetchJson<AccountRow[]>("/api/accounts", { signal: AbortSignal.timeout(6000) }, "Saved accounts");
+        if (!stopped) { setAccounts(rows); setAccountError(""); }
+      } catch { if (!stopped) setAccountError("Could not load saved accounts. Checking again shortly; your connections have not been removed."); }
+      if (!stopped) timer = setTimeout(load, 4000);
+    };
+    void load();
+    return () => { stopped = true; clearTimeout(timer); };
   }, []);
 
-  const anyConnected = accounts.some((a) => a.status === "connected");
-  const accountsFor = (p: string) => accounts.filter((a) => a.platform === p);
+  const anyConnected = accounts.some((a) => setupAccountLabel(a, connections) === "Connected");
+  const accountsFor = (p: string) => accounts.filter((a) => a.platform === p).map(a => ({ ...a, connectionLabel: setupAccountLabel(a, connections) }));
 
   // Re-trigger the connect flow for one more account of this platform.
   function addAnother(p: string) {
     if (p === "telegram") return setShowTelegram(true);
     if (p === "x") {
-      setXStage("warning");
-      if (!pairCode) getPairCode();
-      return;
+      return setShowX(true);
     }
-    // WhatsApp: create a pending account; it links via QR (scan in Connections
-    // once the worker runs it).
-    fetch("/api/accounts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ platform: p }),
-    }).catch(() => {});
-  }
-  function removeAccount(id: string) {
-    fetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => {});
-    setAccounts((a) => a.filter((x) => x.id !== id));
+    setShowWhatsApp(true);
   }
 
   function go(next: number) {
     setStep(next);
+    try { sessionStorage.setItem("2manydms-setup-step", String(next)); } catch {}
   }
-
-  async function getPairCode() {
-    const res = await fetch("/api/accounts/pair", { method: "POST" });
-    const d = await res.json();
-    setPairCode(d.code);
-  }
-
-  function openWhatsApp() {
-    fetch("/api/connections")
-      .then((r) => r.json())
-      .then((d: ConnectionsData) => {
-        setConnections(d);
-        setShowWhatsApp(true);
-      })
-      .catch(() => setShowWhatsApp(true));
-  }
+  useEffect(() => { try { const saved = Number(sessionStorage.getItem("2manydms-setup-step")); if (saved >= 0 && saved <= 2) setStep(saved); } catch {} }, []);
 
   function finish() {
     try {
       localStorage.setItem("onboarded", "1");
+      sessionStorage.removeItem("2manydms-setup-step");
     } catch {}
     router.replace("/");
   }
@@ -269,13 +251,13 @@ export function Welcome() {
                 <div className="mt-6 space-y-3">
                   {(
                     [
-                      ["telegram", "Telegram", "Sign in with your phone number", () => setShowTelegram(true)],
-                      ["whatsapp", "WhatsApp", "Scan a QR code with your phone", openWhatsApp],
+                      ["telegram", "Telegram", "Guided app setup, then phone sign in", () => setShowTelegram(true)],
+                      ["whatsapp", "WhatsApp", "Scan a QR code with your phone", () => setShowWhatsApp(true)],
                       [
                         "x",
                         "X (Twitter)",
                         "Link your session with our extension",
-                        () => setXStage((s) => (s === "closed" ? "warning" : "closed")),
+                        () => setShowX(true),
                       ],
                     ] as [Platform, string, string, () => void][]
                   ).map(([p, title, desc, onConnect], i) => (
@@ -292,114 +274,12 @@ export function Welcome() {
                         accounts={accountsFor(p)}
                         onConnect={onConnect}
                         onAdd={() => addAnother(p)}
-                        onRemove={removeAccount}
+                        onSelect={id => setSelectedAccount(accounts.find(a => a.id === id) || null)}
                       />
                     </motion.div>
                   ))}
 
-                  {/* X warning + steps */}
-                  <AnimatePresence>
-                    {xStage !== "closed" && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        {xStage === "warning" ? (
-                          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-                            <div className="flex items-start gap-2.5">
-                              <span className="text-lg leading-none">⚠️</span>
-                              <div>
-                                <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                                  Heads up before you connect X
-                                </div>
-                                <p className="mt-1 text-xs leading-relaxed text-amber-700 dark:text-amber-200/90">
-                                  <b>Don’t use a datacenter proxy with X.</b> We
-                                  strongly recommend running this on your{" "}
-                                  <b>local machine</b>, or using a{" "}
-                                  <b>5G / mobile proxy</b>. Otherwise there’s a
-                                  much higher risk of your account getting
-                                  <b> banned</b>.
-                                </p>
-                                <button
-                                  onClick={() => {
-                                    setXStage("steps");
-                                    if (!pairCode) getPairCode();
-                                  }}
-                                  className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700"
-                                >
-                                  I understand — show me how
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-neutral-800 dark:bg-neutral-900">
-                            <ol className="space-y-2 text-slate-600 dark:text-neutral-300">
-                              <li>
-                                <b>1.</b> Install the <b>OmniCRM</b> Chrome
-                                extension (load the{" "}
-                                <code className="rounded bg-slate-100 px-1 dark:bg-neutral-800">extension</code>{" "}
-                                folder unpacked at{" "}
-                                <code className="rounded bg-slate-100 px-1 dark:bg-neutral-800">chrome://extensions</code>).
-                              </li>
-                              <li>
-                                <b>2.</b> Make sure you’re logged into{" "}
-                                <b>x.com</b> in this browser.
-                              </li>
-                              <li>
-                                <b>3.</b> Open the extension, paste this code,
-                                and hit Connect:
-                              </li>
-                            </ol>
-                            <button
-                              onClick={() => {
-                                if (pairCode) {
-                                  navigator.clipboard?.writeText(pairCode).catch(() => {});
-                                  setCopied(true);
-                                  setTimeout(() => setCopied(false), 1500);
-                                }
-                              }}
-                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-3 font-mono text-xl font-bold tracking-[0.3em] text-white transition hover:bg-slate-800 dark:bg-neutral-100 dark:text-neutral-900"
-                            >
-                              {pairCode ?? "…"}
-                              <span className="font-sans text-[11px] font-medium tracking-normal opacity-60">
-                                {copied ? "copied!" : "tap to copy"}
-                              </span>
-                            </button>
-                            <p className="mt-2 text-[11px] text-slate-400 dark:text-neutral-500">
-                              This updates automatically once X links.
-                            </p>
-                          </div>
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* CTA — custom integrations */}
-                  <a
-                    href={TG_LINK}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 p-3.5 transition hover:border-accent/50 hover:bg-accent/40 dark:border-neutral-700 dark:hover:border-accent/40 dark:hover:bg-accent/5"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-800 dark:text-neutral-100">
-                        Need a custom integration?
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-neutral-400">
-                        Don’t see a platform, or want something tailored? The
-                        developer can build it for you.
-                      </div>
-                    </div>
-                    <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-fg">
-                      Contact
-                      <span className="rounded bg-white/20 px-1 text-[10px]">
-                        Paid
-                      </span>
-                    </span>
-                  </a>
+                  {accountError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{accountError}</p>}
                 </div>
 
                 <div className="mt-6 flex items-center justify-between">
@@ -432,10 +312,10 @@ export function Welcome() {
                   ✓
                 </motion.div>
                 <h2 className="mt-5 text-2xl font-bold tracking-tight text-slate-900 dark:text-neutral-100">
-                  You’re all set
+                  Your workspace is ready
                 </h2>
                 <p className="mx-auto mt-2 max-w-sm text-sm text-slate-500 dark:text-neutral-400">
-                  Here’s what you can do now:
+                  {anyConnected ? "Your connected inboxes are ready. History will continue syncing in the background." : accounts.length ? "Your accounts are saved. Finish connecting from the inbox’s Connections panel." : "No accounts connected yet. You can connect them any time from the inbox."}
                 </p>
                 <div className="mt-6 space-y-2.5 text-left">
                   {[
@@ -481,10 +361,11 @@ export function Welcome() {
           <TelegramConnect onClose={() => setShowTelegram(false)} />
         )}
       </AnimatePresence>
+      <AnimatePresence>{showX && <XConnect onClose={() => setShowX(false)} />}</AnimatePresence>
+      <AnimatePresence>{selectedAccount && <SavedConnection platform={selectedAccount.platform as Platform} accountId={selectedAccount.id} driver={selectedAccount.driver} onClose={() => setSelectedAccount(null)} />}</AnimatePresence>
       <AnimatePresence>
         {showWhatsApp && (
-          <ConnectionsModal
-            data={connections}
+          <WhatsAppConnect
             onClose={() => setShowWhatsApp(false)}
           />
         )}
@@ -500,15 +381,15 @@ function ConnectCard({
   accounts,
   onConnect,
   onAdd,
-  onRemove,
+  onSelect,
 }: {
   platform: Platform;
   title: string;
   desc: string;
-  accounts: { id: string; label: string | null }[];
+  accounts: { id: string; label: string | null; connectionLabel: string }[];
   onConnect: () => void;
   onAdd: () => void;
-  onRemove: (id: string) => void;
+  onSelect: (id: string) => void;
 }) {
   const has = accounts.length > 0;
   return (
@@ -524,7 +405,7 @@ function ConnectCard({
           <div className="font-semibold text-slate-900 dark:text-neutral-100">
             {title}
           </div>
-          <div className="truncate text-xs text-slate-500 dark:text-neutral-400">
+          <div className="text-xs text-slate-500 dark:text-neutral-400">
             {desc}
           </div>
         </div>
@@ -532,9 +413,9 @@ function ConnectCard({
           <motion.span
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
+            className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500 dark:bg-neutral-800 dark:text-neutral-400"
           >
-            {accounts.length} connected ✓
+            {accounts.filter(a => a.connectionLabel === "Connected").length}/{accounts.length} connected
           </motion.span>
         ) : (
           <button
@@ -549,19 +430,14 @@ function ConnectCard({
       {has && (
         <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3 dark:border-neutral-800">
           {accounts.map((a) => (
-            <span
+            <button
               key={a.id}
-              className="flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1 text-xs text-slate-600 dark:bg-neutral-800 dark:text-neutral-300"
+              onClick={() => onSelect(a.id)}
+              className="flex max-w-full items-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
             >
               <span className="max-w-[10rem] truncate">{a.label || title}</span>
-              <button
-                onClick={() => onRemove(a.id)}
-                title="Remove account"
-                className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[10px] text-slate-400 transition hover:bg-slate-200 hover:text-red-500 dark:text-neutral-500 dark:hover:bg-neutral-700"
-              >
-                ✕
-              </button>
-            </span>
+              <span className="text-xs text-slate-500">· {a.connectionLabel}</span>
+            </button>
           ))}
           <button
             onClick={onAdd}

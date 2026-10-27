@@ -17,8 +17,11 @@ public/media
 .x_profile*/
 .x_fingerprint.json
 .x_browser_pid
+.x_browser_pid_*
 .x_cooldown.json
+.x_cooldown.json_*
 .x_repair_state.json
+.x_repair_state.json_*
 .x_preview_backups/
 .x_backfill_progress.json
 .ocr_state.json

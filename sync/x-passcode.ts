@@ -1,4 +1,5 @@
 import type { Page } from "puppeteer";
+import { createHash } from "node:crypto";
 
 /* XChat (X's encrypted DMs) gates the inbox behind a numeric passcode. On a
    machine with a screen you type it yourself (`npm run x:unlock`); on a headless
@@ -74,10 +75,10 @@ export type UnlockResult =
 // Latches once X refuses the passcode, so reconnects stop retrying a wrong code
 // and walking the account toward a recovery lockout. Cleared by restarting the
 // worker (i.e. after you've fixed X_PASSCODE).
-let rejected = false;
+const rejected = new Set<string>();
 
 export function passcodeRejected(): boolean {
-  return rejected;
+  return rejected.size > 0;
 }
 
 async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
@@ -100,12 +101,13 @@ async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
   }
 }
 
-export async function tryUnlock(page: Page): Promise<UnlockResult> {
+export async function tryUnlock(page: Page, options: { passcode?: string; accountId?: string } = {}): Promise<UnlockResult> {
   if (!(await isLocked(page))) return "not-locked";
 
-  const passcode = (process.env.X_PASSCODE || "").trim();
+  const passcode = (options.passcode ?? process.env.X_PASSCODE ?? "").trim();
   if (!passcode) return "no-passcode";
-  if (rejected) return "rejected";
+  const key = createHash("sha256").update(`${options.accountId || "default"}:${passcode}`).digest("hex");
+  if (rejected.has(key)) return "rejected";
 
   try {
     await enterPasscode(page, passcode);
@@ -120,7 +122,7 @@ export async function tryUnlock(page: Page): Promise<UnlockResult> {
         return "unlocked";
       }
       if (await hasExplicitPasscodeError(page)) {
-        rejected = true;
+        rejected.add(key);
         // Never log the passcode itself.
         console.error(
           "[x] XChat passcode rejected — not retrying, since repeated attempts trigger X's recovery lockout. Fix X_PASSCODE and restart the worker."
