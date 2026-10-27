@@ -11,6 +11,8 @@ function defaultDriver(platform: string): string | null {
   if (platform === "whatsapp")
     return process.env.WHATSAPP_DRIVER === "baileys" ? "baileys" : "web";
   if (platform === "x") return process.env.X_DRIVER === "api" ? "api" : "browser";
+  if (platform === "discord") return "bot";
+  if (platform === "gmail") return "api";
   return null;
 }
 
@@ -24,6 +26,15 @@ export async function POST(req: NextRequest) {
   };
   if (!platform || !(platform in PLATFORMS)) {
     return NextResponse.json({ error: "Unknown platform" }, { status: 400 });
+  }
+  if (platform === "discord") {
+    return NextResponse.json(
+      {
+        error:
+          "Connect Discord with an official bot token from the Discord setup panel.",
+      },
+      { status: 400 }
+    );
   }
   const count = await prisma.account.count({
     where: { userId: user.id, platform },

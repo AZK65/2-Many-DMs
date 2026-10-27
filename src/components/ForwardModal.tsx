@@ -1,5 +1,7 @@
 "use client";
 
+import { OverlayPortal } from "./OverlayPortal";
+
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import type { ConversationDTO, MessageDTO } from "@/lib/types";
@@ -49,13 +51,14 @@ export function ForwardModal({
     if (!selected.size || sending) return;
     setSending(true);
     setError(null);
-    const payload: { body: string; media?: { type: string; url: string; name: string } } =
+    const payload: { body: string; media?: { type: string; url: string; name: string; isGif?: boolean } } =
       { body: message.body };
     if (message.mediaType && message.mediaUrl) {
       payload.media = {
         type: message.mediaType,
         url: message.mediaUrl,
         name: message.mediaName || "file",
+        isGif: message.mediaIsGif === true,
       };
     }
     let ok = 0;
@@ -88,7 +91,7 @@ export function ForwardModal({
     (message.mediaType ? `[${message.mediaType}]` : "(empty message)");
 
   return (
-    <motion.div
+    <OverlayPortal onClose={onClose}><motion.div role="dialog" aria-modal="true" aria-label="Forward message"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -193,6 +196,6 @@ export function ForwardModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }

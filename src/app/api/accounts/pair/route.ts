@@ -5,10 +5,20 @@ import { getCurrentUser, clientIp } from "@/lib/currentUser";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export function OPTIONS() {
+  return new NextResponse(null, { headers: CORS });
+}
+
 // The onboarding screen calls this to get a short code the user types into the
 // browser extension. The code maps back to their user for the cookie hand-off.
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser(clientIp(req));
   const code = createPairCode(user.id);
-  return NextResponse.json({ code });
+  return NextResponse.json({ code }, { headers: CORS });
 }

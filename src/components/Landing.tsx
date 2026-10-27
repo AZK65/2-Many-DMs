@@ -118,7 +118,7 @@ export function Landing() {
         )}
         <div className="animate-fade-in mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-300">
           <span className="flex -space-x-1.5">
-            {PLATFORM_ORDER.map((p) => (
+            {PLATFORM_ORDER.filter((p) => p !== "discord" && p !== "gmail").map((p) => (
               <span
                 key={p}
                 className="grid h-4 w-4 place-items-center rounded-full text-white ring-2 ring-white dark:ring-black"
@@ -254,7 +254,7 @@ export function Landing() {
           Connect in a couple clicks
         </h2>
         <p className="mt-3 max-w-xl text-base text-slate-500 dark:text-neutral-400">
-          No bot tokens to beg for. Each channel links the way you'd expect.
+          Each supported channel links with a clear, guided setup.
         </p>
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {(

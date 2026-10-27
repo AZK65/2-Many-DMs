@@ -6,6 +6,26 @@ dev.db-journal
 .wwebjs_auth
 .wwebjs_cache
 .x_auth
+# Local test data, exports, and session artifacts must not enter an image.
+.env.*
+!.env.example
+*.db*
+*.sqlite*
+.next-*
+.local
+tmp
+output
+outputs
+.chat-history
+.x_profile*
+.x_fingerprint.json
+.x_cooldown.json
+.x_repair_state.json
+.x_backfill_progress.json
+.x_preview_backups
+mobile/node_modules
+mobile/.expo
+mac-companion/.build
 .x_profile
 public/media
 public/avatars

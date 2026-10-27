@@ -7,7 +7,7 @@
 
 ### One inbox for every DM — with a CRM built in.
 
-Sync your **Telegram**, **WhatsApp** and **X** DMs into a single, self-hosted workspace.
+Sync **Telegram**, **WhatsApp**, **X**, **Gmail**, and permitted **Discord bot** channels into a single, self-hosted workspace.
 Triage by who owes a reply, run a pipeline, and automate follow-ups.
 
 <br/>
@@ -35,6 +35,19 @@ contacts through a deal pipeline, and fires automations off keywords — all run
 with **your** keys, no SaaS in the middle.
 
 ## Features
+
+### New in 0.6.0
+
+A redesigned inbox with a collapsible avatar rail, compact auto-growing composer, clearer direct messages,
+and sender identities in group chats. Includes local OCR search, inline GIFs and stickers, shared media,
+chat-history retention, sync-health indicators, a people network, and optional mobile and Mac companions.
+
+This is the standalone messaging product. No connected accounts, chat archives, client exports, or login
+sessions are included. Set up your own connections after installing.
+
+Before upgrading an existing installation, back up its database and session directories. Startup stops if
+a schema change requires data loss; review that migration manually rather than forcing a reset. The
+optional demo seed clears existing demo tables, so use it only with a fresh, disposable database.
 
 ### 🗂️ Turn-based triage inbox
 Every chat is sorted by **whose turn it is** — *Needs reply* vs *Cold* — so you never drop a lead.
@@ -91,6 +104,17 @@ npm run sync                  # in a second terminal: the channel sync worker
 Open `http://localhost:3000` for the inbox, `/board` for the pipeline, `/automations` for flows,
 and `/landing` for the marketing page.
 
+### Updates
+
+OmniCRM checks its authenticated Git upstream when the app opens, every ten minutes, and whenever
+the tab becomes active again. Incoming commit titles appear in the update card before anything is
+installed. Local installations can fast-forward, install dependencies, apply Prisma changes, and
+build with one click. Private-repository credentials remain in Git/your OS credential helper and are
+never sent to the browser. Updates stop safely if the installation has local code changes or commits.
+
+Set `ALLOW_SELF_UPDATE=0` to disable one-click updates. Supervised production installs can set
+`ALLOW_SELF_UPDATE=1` and optionally `UPDATE_RESTART_CMD` so the new build restarts automatically.
+
 ## Connecting your channels
 
 | Channel | How it links |
@@ -98,6 +122,7 @@ and `/landing` for the marketing page.
 | **Telegram** | `npm run tg:login` — one-time phone-code login (uses your own `TELEGRAM_API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org)). |
 | **WhatsApp** | Set `WHATSAPP_ENABLED=1`, run the worker, and scan the QR with **WhatsApp → Linked Devices**. The session persists in `.wwebjs_auth`. |
 | **X / Twitter** | `npm run x:login`, **or** paste your `auth_token` + `ct0` cookies into `.env`, **or** use the bundled [Chrome extension](extension/) to hand off your session with a pairing code. |
+| **Discord** | In **Connections**, paste an official bot token, enable Message Content Intent, then use the generated install link. The bot reads only channels it can view and DMs sent directly to it; personal-account archives remain read-only. |
 
 > **Heads-up on X:** don't run the X browser through a datacenter proxy. Deploy on your own machine or
 > use a residential/5G proxy, or you risk an account ban.
@@ -113,6 +138,7 @@ All config lives in `.env` (see [`.env.example`](.env.example)). The essentials:
 | `TELEGRAM_SESSION` | Filled in by `npm run tg:login`. |
 | `APP_ENCRYPTION_KEY` | 64-hex-char key to encrypt stored sessions. **Required in production.** |
 | `X_AUTH_TOKEN` / `X_CT0` | X session cookies (or use `x:login` / the extension). |
+| `DISCORD_ENABLED` / `DISCORD_BOT_TOKEN` | Optional env-based official Discord bot connection (the Connections UI can store the token encrypted instead). |
 | `PROXY_URL` | Optional sticky residential proxy for the WhatsApp/X browsers. |
 
 ## Deploy (Railway / Docker)
@@ -130,8 +156,13 @@ Next.js app (App Router)  ──┐
 Sync worker (tsx)         ──┘
   ├── Telegram  (GramJS / MTProto)
   ├── WhatsApp  (whatsapp-web.js + Puppeteer)
-  └── X         (Puppeteer + stealth + fingerprint injection)
+  ├── X         (Puppeteer + stealth + fingerprint injection)
+  └── Discord   (official Bot API + Gateway)
 ```
+
+### iOS / TestFlight
+
+The repository includes a native React Native app in [`mobile/`](mobile/). The iPhone app connects to this same self-hosted backend through **Tailscale Serve**; Prisma/SQLite, channel sessions, media, and sync workers remain on the private host. Run `npm run start:private`, then `npm run mobile:serve`, and enter the HTTPS tailnet URL in the app. See [`mobile/README.md`](mobile/README.md) for local iOS and TestFlight instructions.
 
 ## Security & privacy
 

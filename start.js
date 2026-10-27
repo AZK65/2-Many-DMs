@@ -7,9 +7,13 @@ const port = process.env.PORT || "3000";
 
 // Ensure the (possibly fresh, volume-backed) SQLite DB has the schema.
 console.log("[start] applying database schema…");
-spawnSync("npx", ["prisma", "db", "push", "--skip-generate", "--accept-data-loss"], {
+const schema = spawnSync("npx", ["prisma", "db", "push", "--skip-generate"], {
   stdio: "inherit",
 });
+if (schema.status !== 0) {
+  console.error("[start] schema update failed; back up the database and review the migration before restarting.");
+  process.exit(schema.status || 1);
+}
 
 let dying = false;
 

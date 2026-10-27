@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  kickstartManagedSyncService,
+  managedSyncServiceLoaded,
+} from "@/lib/managed-sync-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const workerStartState = globalThis as typeof globalThis & {
+  __omniWorkerStartingAt?: number;
+  __omniWorkerRestarting?: boolean;
+};
+const WORKER_START_GRACE_MS = 20_000;
 
 // Spawning the sync worker is a local-dev convenience. Restrict to localhost so
 // a hosted/exposed instance can't be made to launch processes; a non-local
@@ -18,10 +28,10 @@ function isLocal(req: NextRequest): boolean {
 async function workerUp(): Promise<boolean> {
   const url = (process.env.SYNC_CONTROL_URL || "http://localhost:4001") + "/health";
   try {
-    const c = new AbortController();
-    const t = setTimeout(() => c.abort(), 1500);
-    const r = await fetch(url, { signal: c.signal, cache: "no-store" });
-    clearTimeout(t);
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(1500),
+      cache: "no-store",
+    });
     return r.ok;
   } catch {
     return false;
@@ -38,18 +48,47 @@ export async function POST(req: NextRequest) {
   if (await workerUp()) {
     return NextResponse.json({ ok: true, already: true });
   }
+  if (workerStartState.__omniWorkerRestarting) {
+    return NextResponse.json({ ok: true, starting: true, restarting: true });
+  }
+  const now = Date.now();
+  if (
+    workerStartState.__omniWorkerStartingAt &&
+    now - workerStartState.__omniWorkerStartingAt < WORKER_START_GRACE_MS
+  ) {
+    return NextResponse.json({ ok: true, starting: true });
+  }
+  // Multiple panels can probe this route while the worker is still binding
+  // its health port. Claim one shared startup window before spawning so those
+  // concurrent probes cannot launch competing workers against the same X
+  // browser profile.
+  workerStartState.__omniWorkerStartingAt = now;
   try {
+    // The desktop install owns a launchd service that survives sign-out and
+    // Mac restarts. Let it own the worker process too: spawning a second copy
+    // here makes both copies use the same Telegram auth key, which Telegram
+    // permanently invalidates as AUTH_KEY_DUPLICATED.
+    if (await managedSyncServiceLoaded()) {
+      await kickstartManagedSyncService();
+      return NextResponse.json({ ok: true, started: true, managed: true });
+    }
+
     // Detach so the worker keeps running after this request; logs → sync.log.
     const out = fs.openSync(path.join(process.cwd(), "sync.log"), "a");
-    const child = spawn("npm", ["run", "sync"], {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: ["ignore", out, out],
-      env: process.env,
-    });
-    child.unref();
-    return NextResponse.json({ ok: true, started: true, pid: child.pid, log: "sync.log" });
+    try {
+      const child = spawn("npm", ["run", "sync"], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: ["ignore", out, out],
+        env: process.env,
+      });
+      child.unref();
+      return NextResponse.json({ ok: true, started: true, pid: child.pid, log: "sync.log" });
+    } finally {
+      fs.closeSync(out);
+    }
   } catch (e) {
+    delete workerStartState.__omniWorkerStartingAt;
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }

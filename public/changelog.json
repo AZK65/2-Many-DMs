@@ -1,6 +1,19 @@
 {
-  "current": "0.5.0",
+  "current": "0.6.0",
   "entries": [
+    {
+      "version": "0.6.0",
+      "date": "2026-10-27",
+      "title": "A redesigned messaging workspace",
+      "notes": [
+        "Redesigned inbox, collapsible avatar rail, compact auto-growing composer, and improved direct and group messages",
+        "Improved chat history retention, delivery states, backfill controls, and connection health across messaging platforms",
+        "Automatic sticker and GIF recovery, inline media playback, PDF previews, and local image OCR search",
+        "People network map, in-chat search, shared files and links, and persistent drafts",
+        "Discord and Gmail connectors, local translation and dictation, and an optional mobile companion",
+        "Standalone contact profiles, customizable deal stages, tags, and an email follow-up queue"
+      ]
+    },
     {
       "version": "0.5.0",
       "date": "2026-06-16",

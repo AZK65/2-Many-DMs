@@ -79,3 +79,30 @@ export function listTime(iso: string): string {
     ...(d.getFullYear() === now.getFullYear() ? {} : { year: "2-digit" }),
   });
 }
+
+// Inbox sidebar timestamp: keep today's rows compact, but show an exact date
+// and time for every older message instead of an ambiguous relative label.
+export function inboxDateTime(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return clockTime(iso);
+  const dateLabel = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "2-digit" }),
+  });
+  return `${dateLabel} · ${clockTime(iso)}`;
+}
+
+// Compact, exact timestamp for cards where both freshness and chronology
+// matter. Unlike listTime, this never collapses the date to "Yesterday".
+export function cardDateTime(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const dateLabel = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+  return `${dateLabel} · ${clockTime(iso)}`;
+}

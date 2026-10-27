@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 
 // A compact, dependency-free emoji picker. Curated sets per category — enough
@@ -72,11 +72,17 @@ export function EmojiPicker({
   onClose: () => void;
 }) {
   const [cat, setCat] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, []);
 
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} />
       <motion.div
+        ref={panelRef}
+        role="dialog"
+        aria-label="Choose an emoji"
+        onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); onClose(); } }}
         initial={{ opacity: 0, y: 6, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 6, scale: 0.98 }}

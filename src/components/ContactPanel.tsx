@@ -10,18 +10,29 @@ import type {
 } from "@/lib/types";
 import { PLATFORMS } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
+
 import { GroupMembers } from "./GroupMembers";
+
+import {
+  MESSAGE_PIN_CHANGED_EVENT,
+  type SharedContentDTO,
+  type SharedMessageDTO,
+} from "@/lib/shared-content";
 import {
   BuildingIcon,
+  CloseIcon,
+  LinkIcon,
   MailIcon,
+  PaperclipIcon,
+  PinIcon,
   PhoneIcon,
   PlusIcon,
+  RefreshIcon,
   SearchIcon,
   UserIcon,
 } from "./icons";
 
 type EditableField = "name" | "company" | "email" | "phone";
-
 export function ContactPanel({
   conversation,
   allTags,
@@ -30,6 +41,10 @@ export function ContactPanel({
   onContactChanged,
   onTagsChanged,
   onTagCreated,
+  onIntentChanged,
+  onFocusMessage,
+  onClose,
+  readOnly = false,
 }: {
   conversation: ConversationDTO;
   allTags: TagDTO[];
@@ -38,6 +53,10 @@ export function ContactPanel({
   onContactChanged: (contactId: string, patch: Partial<ContactDTO>) => void;
   onTagsChanged: (contactId: string, tags: TagDTO[]) => void;
   onTagCreated: (tag: TagDTO) => void;
+  onIntentChanged: (intent: ConversationDTO["intent"]) => void;
+  onFocusMessage: (messageId: string) => void;
+  onClose?: () => void;
+  readOnly?: boolean;
 }) {
   const contact = conversation.contact;
   const [picker, setPicker] = useState(false);
@@ -46,6 +65,16 @@ export function ContactPanel({
   const [relations, setRelations] = useState<RelationDTO[]>([]);
   const [relPicker, setRelPicker] = useState(false);
   const [relQuery, setRelQuery] = useState("");
+
+  const [sharedContent, setSharedContent] = useState<SharedContentDTO>({
+    pinned: [],
+    media: [],
+    links: [],
+  });
+  const [sharedView, setSharedView] = useState<"pinned" | "media" | "links">("pinned");
+  const [panelTab, setPanelTab] = useState<"info" | "shared">("info");
+  const [sharedLoading, setSharedLoading] = useState(true);
+  const [sharedError, setSharedError] = useState<string | null>(null);
 
   // Local editable copy so typing is smooth; we persist on blur.
   const [fields, setFields] = useState({
@@ -75,10 +104,41 @@ export function ContactPanel({
       .catch(() => setRelations([]));
   }, [contact.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function loadSharedContent(showLoading = false) {
+    if (showLoading) setSharedLoading(true);
+    setSharedError(null);
+    try {
+      const response = await fetch(`/api/conversations/${conversation.id}/shared`);
+      const data = (await response.json().catch(() => ({}))) as SharedContentDTO & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || "Shared items could not be loaded.");
+      setSharedContent(data);
+    } catch (error) {
+      setSharedError(
+        error instanceof Error ? error.message : "Shared items could not be loaded."
+      );
+    } finally {
+      setSharedLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setSharedView("pinned");
+    setSharedContent({ pinned: [], media: [], links: [] });
+    void loadSharedContent(true);
+
+    const receivePinUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string }>).detail;
+      if (detail?.conversationId === conversation.id) void loadSharedContent();
+    };
+    window.addEventListener(MESSAGE_PIN_CHANGED_EVENT, receivePinUpdate);
+    return () => window.removeEventListener(MESSAGE_PIN_CHANGED_EVENT, receivePinUpdate);
+  }, [conversation.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const assigned = new Set(contact.tags.map((t) => t.id));
   const available = allTags.filter((t) => !assigned.has(t.id));
   const platform = PLATFORMS[conversation.platform];
-
   // Conversations available to relate: everything except this chat and ones
   // already linked, filtered by the picker search.
   const relatedIds = new Set(relations.map((r) => r.conversationId));
@@ -125,7 +185,8 @@ export function ContactPanel({
   }
 
   async function saveField(field: EditableField) {
-    const value = fields[field].trim();
+    const rawValue = fields[field].trim();
+    const value = rawValue;
     const current = (contact[field] ?? "") as string;
     if (value === current) return;
     if (field === "name" && !value) {
@@ -191,15 +252,28 @@ export function ContactPanel({
       initial={{ opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 24 }}
-      transition={{ duration: 0.22, ease: "easeOut" }}
-      className="scroll-thin flex h-full w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+      transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+      className="contact-inspector scroll-thin fixed inset-y-0 right-0 z-40 flex h-full w-full max-w-sm shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-slate-50 shadow-xl lg:static lg:z-auto lg:w-80 lg:shadow-none dark:border-neutral-800 dark:bg-[#1F1F1F]"
     >
-      <div className="flex flex-col items-center gap-3 border-b border-slate-100 px-6 pb-7 pt-12 text-center dark:border-neutral-800">
+      <div className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-1 border-b border-slate-200 bg-slate-50 px-4 pr-14 dark:border-neutral-800 dark:bg-[#1F1F1F]">
+        {([['info', 'Info'], ['shared', 'Shared']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={panelTab === id} onClick={() => setPanelTab(id)} className={`rounded-md px-3 py-2 text-sm font-medium transition-colors duration-200 ${panelTab === id ? "bg-white text-slate-900 shadow-sm dark:bg-neutral-800 dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-white"}`}>{label}</button>)}
+      {onClose && (
+        <button type="button" onClick={onClose} className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-900 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-neutral-800 dark:hover:text-white" aria-label="Close contact details">
+          <CloseIcon className="h-4 w-4" />
+        </button>
+      )}
+      </div>
+      <div hidden={panelTab !== "shared"}>
+        <SharedInChat content={sharedContent} view={sharedView} loading={sharedLoading} error={sharedError} onViewChange={setSharedView} onRefresh={() => void loadSharedContent(true)} onOpenMessage={onFocusMessage} />
+      </div>
+      <div hidden={panelTab !== "info"}>
+      <div className="flex flex-col items-center gap-3 border-b border-slate-200 px-6 py-6 text-center dark:border-neutral-800">
         <Avatar
           name={contact.name}
           platform={conversation.platform}
           size="lg"
           src={contact.avatarUrl}
+          group={conversation.groupPreview}
         />
         <div>
           <div className="text-lg font-semibold dark:text-neutral-100">
@@ -210,15 +284,14 @@ export function ContactPanel({
           </div>
         </div>
         <span
-          className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
-          style={{ backgroundColor: platform.bg }}
+          className="rounded px-2 py-1 text-xs font-medium text-slate-500 dark:text-neutral-400"
         >
           {platform.label}
         </span>
       </div>
 
       {conversation.isGroup && (
-        <Section title="Members">
+        <Section title="People seen in this group">
           <GroupMembers
             conversationId={conversation.id}
             platform={conversation.platform}
@@ -228,34 +301,26 @@ export function ContactPanel({
       )}
 
       <Section
-        title="Details"
+        title="User information"
         action={
-          <button
-            onClick={() => setEditing((v) => !v)}
-            className="text-xs font-medium text-accent hover:text-accent dark:text-accent dark:hover:text-accent"
+          readOnly ? undefined : <button
+            type="button"
+            onClick={() => setEditing((current) => !current)}
+            className="text-xs font-medium text-accent transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-accent/80 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             {editing ? "Done" : "Edit"}
           </button>
         }
       >
-        <div className="space-y-2.5">
+        <div className="space-y-4">
           <Field
             icon={<UserIcon className="h-4 w-4" />}
             label="Full name"
             value={fields.name}
             placeholder="Add full name"
             editing={editing}
-            onChange={(v) => setFields((f) => ({ ...f, name: v }))}
+            onChange={(value) => setFields((current) => ({ ...current, name: value }))}
             onBlur={() => saveField("name")}
-          />
-          <Field
-            icon={<BuildingIcon className="h-4 w-4" />}
-            label="Company"
-            value={fields.company}
-            placeholder="Add company"
-            editing={editing}
-            onChange={(v) => setFields((f) => ({ ...f, company: v }))}
-            onBlur={() => saveField("company")}
           />
           <Field
             icon={<MailIcon className="h-4 w-4" />}
@@ -264,7 +329,7 @@ export function ContactPanel({
             value={fields.email}
             placeholder="Add email"
             editing={editing}
-            onChange={(v) => setFields((f) => ({ ...f, email: v }))}
+            onChange={(value) => setFields((current) => ({ ...current, email: value }))}
             onBlur={() => saveField("email")}
           />
           <Field
@@ -274,16 +339,48 @@ export function ContactPanel({
             value={fields.phone}
             placeholder="Add phone number"
             editing={editing}
-            onChange={(v) => setFields((f) => ({ ...f, phone: v }))}
+            onChange={(value) => setFields((current) => ({ ...current, phone: value }))}
             onBlur={() => saveField("phone")}
           />
+          <Field
+            icon={<BuildingIcon className="h-4 w-4" />}
+            label="Company"
+            value={fields.company}
+            placeholder="Add company"
+            editing={editing}
+            onChange={(value) => setFields((current) => ({ ...current, company: value }))}
+            onBlur={() => saveField("company")}
+          />
+
         </div>
+      </Section>
+
+      <Section title="Conversation type">
+        <select
+          disabled={readOnly}
+          value={conversation.intent}
+          onChange={(e) => {
+            const intent = e.target.value as ConversationDTO["intent"];
+            onIntentChanged(intent);
+            fetch(`/api/conversations/${conversation.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ intent }),
+            }).catch(() => {});
+          }}
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+        >
+          <option value="prospect">Prospect</option>
+          <option value="onboarding">Onboarding</option>
+          <option value="support">Support</option>
+          <option value="normal">Normal / personal</option>
+        </select>
       </Section>
 
       <Section
         title="Tags"
         action={
-          <button
+          readOnly ? undefined : <button
             onClick={() => setPicker((v) => !v)}
             className="text-xs font-medium text-accent hover:text-accent dark:text-accent dark:hover:text-accent"
           >
@@ -310,13 +407,13 @@ export function ContactPanel({
                 style={{ backgroundColor: t.color }}
               >
                 {t.name}
-                <button
+                {!readOnly && <button
                   onClick={() => removeTag(t.id)}
                   className="opacity-70 hover:opacity-100"
                   aria-label={`Remove ${t.name}`}
                 >
                   ×
-                </button>
+                </button>}
               </motion.span>
             ))}
           </AnimatePresence>
@@ -368,22 +465,23 @@ export function ContactPanel({
 
       <Section title="Notes">
         <textarea
+          readOnly={readOnly}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={saveNotes}
+          onBlur={() => !readOnly && saveNotes()}
           rows={5}
           placeholder="Add private notes about this contact…"
           className="w-full resize-none rounded-lg bg-slate-100 p-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-accent/40"
         />
         <div className="h-4 text-right text-[10px] text-slate-400 dark:text-neutral-500">
-          {savingNotes ? "Saving…" : "Saved on blur"}
+          {readOnly ? "Read only" : savingNotes ? "Saving…" : "Saved on blur"}
         </div>
       </Section>
 
       <Section
         title="Relations"
         action={
-          <button
+          readOnly ? undefined : <button
             onClick={() => {
               setRelPicker((v) => !v);
               setRelQuery("");
@@ -505,7 +603,202 @@ export function ContactPanel({
           </div>
         )}
       </Section>
+      </div>
     </motion.div>
+  );
+}
+
+function sharedSender(item: { direction: "in" | "out"; senderName: string | null }) {
+  return item.direction === "out" ? "You" : item.senderName || "Contact";
+}
+
+function sharedTime(iso: string) {
+  return new Date(iso).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function MediaItem({
+  item,
+  onOpenMessage,
+}: {
+  item: SharedMessageDTO;
+  onOpenMessage: (messageId: string) => void;
+}) {
+  const name = item.mediaName || `${item.mediaType || "Shared"} attachment`;
+  const mediaPath = `${item.mediaName || ""} ${item.mediaUrl || ""}`.toLowerCase();
+  const visualType = item.mediaType === "image" || /\.(png|jpe?g|gif|webp|heic|avif)(?:\?|$)/.test(mediaPath)
+    ? "image"
+    : item.mediaType === "video" || /\.(mp4|mov|webm|m4v)(?:\?|$)/.test(mediaPath)
+      ? "video"
+      : item.mediaType === "audio" || /\.(mp3|m4a|wav|ogg|aac)(?:\?|$)/.test(mediaPath)
+        ? "audio"
+        : item.mediaType;
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-neutral-700 dark:bg-[#1F1F1F]">
+      {visualType === "image" && item.mediaUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={item.mediaUrl} alt={name} className="aspect-square w-full object-cover" loading="lazy" />
+      ) : visualType === "video" && item.mediaUrl ? (
+        <video src={item.mediaUrl} controls preload="metadata" playsInline className="aspect-video w-full bg-black object-contain" />
+      ) : visualType === "audio" && item.mediaUrl ? (
+        <div className="p-3">
+          <audio src={item.mediaUrl} controls preload="metadata" className="w-full" />
+        </div>
+      ) : (
+        <div className="flex min-h-24 flex-col items-center justify-center gap-2 px-3 py-4 text-center">
+          <PaperclipIcon className="h-5 w-5 text-slate-400" />
+          <span className="max-w-full truncate text-xs font-medium text-slate-600 dark:text-neutral-300">{name}</span>
+          {item.mediaUrl && (
+            <a href={item.mediaUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-accent hover:underline">
+              Open file
+            </a>
+          )}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => onOpenMessage(item.id)}
+        className="flex w-full items-center justify-between border-t border-slate-200 px-3 py-2 text-left text-[11px] text-slate-500 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent dark:border-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      >
+        <span className="truncate">{sharedSender(item)}</span>
+        <span className="shrink-0">{sharedTime(item.createdAt)}</span>
+      </button>
+    </div>
+  );
+}
+
+function SharedInChat({
+  content,
+  view,
+  loading,
+  error,
+  onViewChange,
+  onRefresh,
+  onOpenMessage,
+}: {
+  content: SharedContentDTO;
+  view: "pinned" | "media" | "links";
+  loading: boolean;
+  error: string | null;
+  onViewChange: (view: "pinned" | "media" | "links") => void;
+  onRefresh: () => void;
+  onOpenMessage: (messageId: string) => void;
+}) {
+  const tabs = [
+    { id: "pinned" as const, label: "Pinned", count: content.pinned.length, icon: PinIcon },
+    { id: "media" as const, label: "Media", count: content.media.length, icon: PaperclipIcon },
+    { id: "links" as const, label: "Links", count: content.links.length, icon: LinkIcon },
+  ];
+  const activeCount = content[view].length;
+
+  return (
+    <Section
+      title="Shared in this chat"
+      action={
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          title="Refresh shared items"
+          aria-label="Refresh shared items"
+          className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-700 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        >
+          <RefreshIcon className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      }
+    >
+      <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-[#1F1F1F]" role="tablist" aria-label="Shared chat content">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = view === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onViewChange(tab.id)}
+              className={`flex min-w-0 items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                active
+                  ? "bg-white text-slate-900 shadow-sm dark:bg-neutral-700 dark:text-white"
+                  : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-100"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{tab.label}</span>
+              <span className="text-[10px] font-medium opacity-60">{tab.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3">
+        {error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">{error}</div>
+        ) : loading && activeCount === 0 ? (
+          <div className="space-y-2" aria-label="Loading shared items">
+            <div className="h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-neutral-800" />
+            <div className="h-12 animate-pulse rounded-xl bg-slate-100 dark:bg-neutral-800" />
+          </div>
+        ) : activeCount === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center dark:border-neutral-700">
+            <div className="text-sm font-medium text-slate-600 dark:text-neutral-300">
+              {view === "pinned" ? "No pinned messages" : view === "media" ? "No shared media" : "No shared links"}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-slate-400 dark:text-neutral-500">
+              {view === "pinned"
+                ? "Use the pin beside any message to keep it here."
+                : `Anything shared in this conversation will appear here.`}
+            </div>
+          </div>
+        ) : view === "pinned" ? (
+          <div className="space-y-2">
+            {content.pinned.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onOpenMessage(item.id)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:border-accent/40 hover:bg-white active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-neutral-700 dark:bg-[#1F1F1F] dark:hover:bg-neutral-800"
+              >
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-semibold text-accent">{sharedSender(item)}</span>
+                  <span className="shrink-0 text-slate-400">{sharedTime(item.createdAt)}</span>
+                </div>
+                <div className="mt-1 max-h-16 overflow-hidden break-words text-xs leading-5 text-slate-700 dark:text-neutral-200">
+                  {item.body || item.mediaName || (item.mediaType ? `${item.mediaType} attachment` : "Message")}
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : view === "media" ? (
+          <div className="grid grid-cols-2 gap-2">
+            {content.media.map((item) => (
+              <MediaItem key={item.id} item={item} onOpenMessage={onOpenMessage} />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {content.links.map((item) => {
+              let host = item.url;
+              try { host = new URL(item.url).hostname.replace(/^www\./, ""); } catch { /* show raw URL */ }
+              return (
+                <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-neutral-700 dark:bg-[#1F1F1F]">
+                  <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-semibold text-accent hover:underline" title={item.url}>{host}</a>
+                  <div className="mt-1 truncate text-xs text-slate-500 dark:text-neutral-400">{item.url}</div>
+                  <button type="button" onClick={() => onOpenMessage(item.messageId)} className="mt-2 text-[11px] font-medium text-slate-400 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-neutral-200">
+                    {sharedSender(item)} · {sharedTime(item.createdAt)}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -516,6 +809,8 @@ function Field({
   placeholder,
   type = "text",
   editing,
+  linkHref,
+  linkLabel,
   onChange,
   onBlur,
 }: {
@@ -525,16 +820,18 @@ function Field({
   placeholder?: string;
   type?: string;
   editing: boolean;
+  linkHref?: string | null;
+  linkLabel?: string;
   onChange: (v: string) => void;
   onBlur: () => void;
 }) {
   return (
     <label className="flex items-center gap-2.5">
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-400 dark:bg-neutral-800 dark:text-neutral-500">
+      <span className="grid h-8 w-4 shrink-0 place-items-center text-slate-400 dark:text-neutral-500">
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+        <span className="block text-xs font-medium text-slate-500 dark:text-neutral-400">
           {label}
         </span>
         {editing ? (
@@ -550,12 +847,22 @@ function Field({
             }}
             className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-accent/50 focus:ring-2 focus:ring-accent/30 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-accent/50 dark:focus:ring-accent/20"
           />
+        ) : linkHref && value ? (
+          <a
+            href={linkHref}
+            target="_blank"
+            rel="noreferrer"
+            title={value}
+            className="block truncate text-sm font-semibold text-accent transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-accent/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {linkLabel || value}
+          </a>
         ) : (
           <span
             className={`block truncate text-sm ${
               value
                 ? "text-slate-800 dark:text-neutral-100"
-                : "text-slate-400 dark:text-neutral-600"
+                : "text-slate-400 dark:text-neutral-500"
             }`}
           >
             {value || placeholder}
@@ -578,7 +885,7 @@ function Section({
   return (
     <div className="border-b border-slate-100 px-6 py-4 dark:border-neutral-800">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-neutral-200">
           {title}
         </h3>
         {action}

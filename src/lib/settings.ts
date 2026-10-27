@@ -10,6 +10,7 @@ export interface Settings {
   scrollbar: ScrollbarPref;
   coldDays: number; // a chat is "cold" after this many untouched days
   defaultView: "all" | "needsreply" | "cold"; // inbox tab on load
+  notifications: boolean;
   accentLight: string; // hex — accent in light mode
   accentDark: string; // hex — accent in dark mode
   stages: Stage[]; // editable board pipeline stages
@@ -47,6 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scrollbar: "default",
   coldDays: 7,
   defaultView: "needsreply",
+  notifications: false,
   accentLight: "#0e9f63",
   accentDark: "#1fe88a",
   stages: PIPELINE,
@@ -88,7 +90,14 @@ const KEY = "tmd-settings";
 export function loadSettings(): Settings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(KEY) || "{}") };
+    const parsed = JSON.parse(localStorage.getItem(KEY) || "{}") as Partial<Settings>;
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      plugins: {
+        calcom: { ...DEFAULT_SETTINGS.plugins.calcom, ...parsed.plugins?.calcom },
+      },
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }

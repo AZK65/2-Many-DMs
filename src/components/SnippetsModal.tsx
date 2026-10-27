@@ -1,5 +1,7 @@
 "use client";
 
+import { OverlayPortal } from "./OverlayPortal";
+
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { SnippetDTO } from "@/lib/types";
@@ -51,7 +53,7 @@ export function SnippetsModal({
   }
 
   return (
-    <motion.div
+    <OverlayPortal onClose={onClose}><motion.div role="dialog" aria-modal="true" aria-label="Snippets"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -216,6 +218,6 @@ export function SnippetsModal({
           </div>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }

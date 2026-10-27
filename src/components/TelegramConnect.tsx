@@ -1,4 +1,5 @@
 "use client";
+import { OverlayPortal } from "./OverlayPortal";
 
 import { useState } from "react";
 import { motion } from "motion/react";
@@ -74,7 +75,7 @@ export function TelegramConnect({
   }
 
   return (
-    <motion.div
+    <OverlayPortal onClose={busy ? undefined : onClose}><motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -194,7 +195,7 @@ export function TelegramConnect({
           )}
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }
 

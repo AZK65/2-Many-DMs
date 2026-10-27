@@ -5,7 +5,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const controlUrl = process.env.SYNC_CONTROL_URL || "http://localhost:4001";
   try {
-    const res = await fetch(`${controlUrl}/status`, { cache: "no-store" });
+    const res = await fetch(`${controlUrl}/status`, {
+      cache: "no-store",
+      // Keep the deadline active while consuming the body, too.
+      signal: AbortSignal.timeout(3_000),
+    });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const platforms = await res.json();
     return NextResponse.json({ workerRunning: true, platforms });
@@ -17,6 +21,7 @@ export async function GET() {
         telegram: { platform: "telegram", state: "disabled" },
         whatsapp: { platform: "whatsapp", state: "disabled" },
         x: { platform: "x", state: "disabled" },
+        discord: { platform: "discord", state: "disabled" },
       },
     });
   }

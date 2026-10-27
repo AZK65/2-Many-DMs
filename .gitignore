@@ -1,5 +1,7 @@
 node_modules
 .next
+.next-dev
+.next-*/
 out
 .env
 .env.local
@@ -12,14 +14,25 @@ public/media
 .wwebjs_auth
 .wwebjs_cache
 .x_auth
-.x_profile
+.x_profile*/
 .x_fingerprint.json
+.x_browser_pid
+.x_cooldown.json
+.x_repair_state.json
+.x_preview_backups/
+.x_backfill_progress.json
+.ocr_state.json
 public/avatars
+public/pdf.worker.min.mjs
 
 # databases (may contain real synced DMs)
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 prisma/dev.db
 
 # local tooling / build artifacts / design scratch
@@ -29,12 +42,25 @@ prisma/dev.db
 
 # db backups
 *.db.bak*
+*.db.backup*
+
+# generated exports and import reports may contain customer data
+outputs/
+output/
+tmp/
+.local/
 
 # worker log (started from the app)
 sync.log
+.omnicrm-sync.lock/
 
 # platform session dirs (NEVER commit — contain live credentials)
 .baileys_auth/
 .x_auth/
 .wwebjs_auth/
 .wwebjs_cache/
+.chat-history/
+.local/sync-retention/
+.local/whatsapp-messages/
+mac-companion/.build/
+public/downloads/omni-dictation-macos.zip

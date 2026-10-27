@@ -1,5 +1,7 @@
 "use client";
 
+import { OverlayPortal } from "./OverlayPortal";
+
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
@@ -14,6 +16,20 @@ import {
 } from "@/lib/settings";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
+import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
+import { accountStatusView } from "@/lib/connection-status";
+import {
+  CheckCircleIcon,
+  ClockIcon,
+  CloseIcon,
+  FolderIcon,
+  LinkIcon,
+  PlusIcon,
+  SunIcon,
+  TrashIcon,
+  UserIcon,
+  ZapIcon,
+} from "./icons";
 
 type Acct = {
   id: string;
@@ -24,6 +40,23 @@ type Acct = {
   driver: string | null;
 };
 
+type LiveAcct = {
+  accountId: string;
+  state: "starting" | "qr" | "ready" | "disconnected" | "disabled";
+  qr?: string | null;
+  detail?: string | null;
+};
+
+function accountSummary(accounts: Acct[], liveAccounts: Record<string, LiveAcct>) {
+  const connected = accounts.filter((account) =>
+    accountStatusView(account, liveAccounts[account.id]).connected
+  ).length;
+  const inactive = accounts.length - connected;
+  if (!inactive) return `${connected} connected`;
+  if (!connected) return `${inactive} inactive`;
+  return `${connected} connected · ${inactive} inactive`;
+}
+
 const DRIVER_LABEL: Record<string, string> = {
   baileys: "Baileys (browser-free)",
   web: "whatsapp-web.js (browser)",
@@ -32,19 +65,64 @@ const DRIVER_LABEL: Record<string, string> = {
   mtproto: "MTProto",
 };
 
+type SettingsPage =
+  | "general"
+  | "organization"
+  | "workflow"
+  | "groups"
+  | "integrations"
+  | "connections";
+
+const SETTINGS_PAGES: Array<{
+  id: SettingsPage;
+  label: string;
+  description: string;
+}> = [
+  { id: "general", label: "General", description: "Appearance and inbox behavior" },
+  { id: "organization", label: "Organization", description: "Tabs and conversation tags" },
+  { id: "workflow", label: "Workflow", description: "Board stages and ordering" },
+  { id: "groups", label: "Groups", description: "Macros and reusable templates" },
+  { id: "integrations", label: "Integrations", description: "Scheduling" },
+  { id: "connections", label: "Connections", description: "Connected messaging accounts" },
+];
+
+const INPUT_CLASS =
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-neutral-100 dark:placeholder:text-neutral-500";
+
+const ICON_BUTTON_CLASS =
+  "grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-700 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-500 dark:hover:bg-[#313131] dark:hover:text-neutral-100";
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [page, setPage] = useState<SettingsPage>("general");
   const [s, setS] = useState<Settings>(loadSettings());
   const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
+  const [liveAccounts, setLiveAccounts] = useState<Record<string, LiveAcct>>({});
   const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [showTagManager, setShowTagManager] = useState(false);
+  const [showApplicationTags, setShowApplicationTags] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [newTag, setNewTag] = useState("");
   const [newFolder, setNewFolder] = useState("");
 
+  const [notifDenied, setNotifDenied] = useState(false);
+
   function setTheme(t: ThemePref) {
     setThemeState(t);
     applyTheme(t);
+  }
+
+  // Browsers only grant notification permission from a user gesture, so the
+  // prompt hangs off this toggle rather than firing on page load.
+  async function toggleNotifications(on: boolean) {
+    if (!on) return update({ notifications: false });
+    if (typeof Notification === "undefined") return;
+    let perm: NotificationPermission = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    setNotifDenied(perm === "denied");
+    update({ notifications: perm === "granted" });
   }
 
   // ── Tags (server) ──
@@ -142,11 +220,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setThemeState(currentTheme());
     fetch("/api/tags").then((r) => r.json()).then(setTags).catch(() => {});
     fetch("/api/folders").then((r) => r.json()).then(setFolders).catch(() => {});
-    fetch("/api/accounts").then((r) => r.json()).then(setAccounts).catch(() => {});
-    fetch("/api/connections")
-      .then((r) => r.json())
-      .then((d) => setWorkerRunning(!!d.workerRunning))
-      .catch(() => setWorkerRunning(false));
+    const refreshConnections = () => {
+      fetch("/api/accounts", { cache: "no-store" })
+        .then((r) => r.json())
+        .then(setAccounts)
+        .catch(() => {});
+      fetch("/api/connections", { cache: "no-store", signal: AbortSignal.timeout(5000) })
+        .then((r) => { if (!r.ok) throw new Error("Status unavailable"); return r.json(); })
+        .then((data) => {
+          setWorkerRunning(!!data.workerRunning);
+          const current = Array.isArray(data?.platforms?.accounts)
+            ? (data.platforms.accounts as LiveAcct[])
+            : [];
+          setLiveAccounts(
+            Object.fromEntries(current.map((account) => [account.accountId, account]))
+          );
+        })
+        .catch(() => {
+          setWorkerRunning(false);
+          setLiveAccounts({});
+        });
+    };
+    refreshConnections();
+    const interval = window.setInterval(refreshConnections, 4000);
+    return () => window.clearInterval(interval);
   }, []);
 
   function update(patch: Partial<Settings>) {
@@ -155,483 +252,489 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     saveSettings(next);
   }
 
+  const activePage = SETTINGS_PAGES.find((item) => item.id === page)!;
+  const connectedAccounts = accounts.filter((account) =>
+    accountStatusView(account, liveAccounts[account.id]).connected
+  ).length;
+  const applicationTags = tags.filter((tag) => /^application\b/i.test(tag.name));
+  const customTags = tags.filter((tag) => !/^application\b/i.test(tag.name));
+  const normalizedTagQuery = tagQuery.trim().toLowerCase();
+  const visibleCustomTags = customTags.filter((tag) =>
+    tag.name.toLowerCase().includes(normalizedTagQuery)
+  );
+  const visibleApplicationTags = applicationTags.filter((tag) =>
+    tag.name.toLowerCase().includes(normalizedTagQuery)
+  );
+
   return (
-    <motion.div
+    <OverlayPortal onClose={onClose}><motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 sm:p-4"
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        initial={{ opacity: 0, scale: 0.97, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 8 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-        className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
+        exit={{ opacity: 0, scale: 0.97, y: 16 }}
+        transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        className="flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[min(90dvh,52rem)] sm:rounded-2xl dark:bg-[#181818]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-neutral-700">
-          <h2 className="text-base font-semibold dark:text-neutral-100">Settings</h2>
-          <button
-            onClick={onClose}
-            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">
-          {/* Appearance */}
-          <Section title="Appearance">
-            <Row label="Theme" hint="Light, dark, or follow your system">
-              <Segmented<ThemePref>
-                value={theme}
-                onChange={setTheme}
-                options={[
-                  ["light", "Light"],
-                  ["dark", "Dark"],
-                  ["system", "Auto"],
-                ]}
-              />
-            </Row>
-            <Row label="Accent · light" hint="Buttons & highlights in light mode">
-              <input
-                type="color"
-                value={s.accentLight}
-                onChange={(e) => update({ accentLight: e.target.value })}
-                className="h-7 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
-              />
-            </Row>
-            <Row label="Accent · dark" hint="Buttons & highlights in dark mode">
-              <input
-                type="color"
-                value={s.accentDark}
-                onChange={(e) => update({ accentDark: e.target.value })}
-                className="h-7 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
-              />
-            </Row>
-            <Row label="Scrollbar" hint="The thin slider on scrollable lists">
-              <Segmented<ScrollbarPref>
-                value={s.scrollbar}
-                onChange={(v) => update({ scrollbar: v })}
-                options={[
-                  ["thin", "Thin"],
-                  ["default", "Default"],
-                  ["hidden", "Hidden"],
-                ]}
-              />
-            </Row>
-            <button
-              onClick={() =>
-                update({
-                  accentLight: DEFAULT_SETTINGS.accentLight,
-                  accentDark: DEFAULT_SETTINGS.accentDark,
-                })
-              }
-              className="text-[11px] text-slate-400 transition hover:text-slate-600 dark:text-neutral-500 dark:hover:text-neutral-300"
-            >
-              Reset accent to default
-            </button>
-          </Section>
-
-          {/* Inbox */}
-          <Section title="Inbox">
-            <Row label="Default tab" hint="Which view opens on load">
-              <select
-                value={s.defaultView}
-                onChange={(e) =>
-                  update({ defaultView: e.target.value as Settings["defaultView"] })
-                }
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-              >
-                <option value="all">All</option>
-                <option value="needsreply">Needs reply</option>
-                <option value="cold">Cold</option>
-              </select>
-            </Row>
-            <Row label="Cold after" hint="Days untouched before a chat is flagged cold">
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min={1}
-                  max={90}
-                  value={s.coldDays}
-                  onChange={(e) =>
-                    update({ coldDays: Math.max(1, Math.min(90, Number(e.target.value) || 1)) })
-                  }
-                  className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <span className="text-xs text-slate-400 dark:text-neutral-500">days</span>
-              </div>
-            </Row>
-          </Section>
-
-          {/* Tabs (folders) */}
-          <Section title="Tabs">
-            {folders.map((f) => (
-              <div key={f.id} className="flex items-center gap-2">
-                <input
-                  defaultValue={f.name}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== f.name) renameFolder(f.id, v);
-                  }}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <button
-                  onClick={() => delFolder(f.id)}
-                  title="Delete tab"
-                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center gap-2">
-              <input
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addFolder()}
-                placeholder="New tab…"
-                className="min-w-0 flex-1 rounded-lg border border-dashed border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700 dark:text-neutral-200"
-              />
-              <button
-                onClick={addFolder}
-                className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg transition hover:opacity-90"
-              >
-                Add
-              </button>
-            </div>
-          </Section>
-
-          {/* Tags */}
-          <Section title="Tags">
-            {tags.map((t) => (
-              <div key={t.id} className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={t.color}
-                  onChange={(e) => patchTag(t.id, { color: e.target.value })}
-                  className="h-7 w-8 shrink-0 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
-                />
-                <input
-                  defaultValue={t.name}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== t.name) patchTag(t.id, { name: v });
-                  }}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <button
-                  onClick={() => delTag(t.id)}
-                  title="Delete tag"
-                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center gap-2">
-              <input
-                value={newTag}
-                onChange={(e) => setNewTag(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addTag()}
-                placeholder="New tag…"
-                className="min-w-0 flex-1 rounded-lg border border-dashed border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700 dark:text-neutral-200"
-              />
-              <button
-                onClick={addTag}
-                className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg transition hover:opacity-90"
-              >
-                Add
-              </button>
-            </div>
-          </Section>
-
-          {/* Board stages */}
-          <Section title="Board stages">
-            {s.stages.map((st, i) => (
-              <div key={st.id} className="flex items-center gap-1.5">
-                <input
-                  type="color"
-                  value={st.color}
-                  onChange={(e) => patchStage(st.id, { color: e.target.value })}
-                  className="h-7 w-8 shrink-0 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5 dark:border-neutral-700"
-                />
-                <input
-                  value={st.name}
-                  onChange={(e) => patchStage(st.id, { name: e.target.value })}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <button
-                  onClick={() => moveStage(i, -1)}
-                  disabled={i === 0}
-                  title="Move up"
-                  className="rounded p-1 text-slate-400 transition disabled:opacity-30 dark:text-neutral-500"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={() => moveStage(i, 1)}
-                  disabled={i === s.stages.length - 1}
-                  title="Move down"
-                  className="rounded p-1 text-slate-400 transition disabled:opacity-30 dark:text-neutral-500"
-                >
-                  ↓
-                </button>
-                <button
-                  onClick={() => delStage(st.id)}
-                  title="Delete stage"
-                  className="rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={addStage}
-              className="rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/10 dark:border-neutral-700"
-            >
-              + Add stage
-            </button>
-          </Section>
-
-          {/* Plugins */}
-          <Section title="Plugins">
-            <div className="rounded-xl border border-slate-200 p-3 dark:border-neutral-700">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-900 text-sm text-white dark:bg-neutral-700">
-                    📅
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium dark:text-neutral-100">
-                      Cal.com
-                    </div>
-                    <div className="text-[11px] text-slate-400 dark:text-neutral-500">
-                      Suggest booking when a chat mentions a date; pre-fills the
-                      contact as a guest.
-                    </div>
-                  </div>
-                </div>
-                <Toggle
-                  on={s.plugins.calcom.enabled}
-                  onChange={(v) =>
-                    update({
-                      plugins: {
-                        ...s.plugins,
-                        calcom: { ...s.plugins.calcom, enabled: v },
-                      },
-                    })
-                  }
-                />
-              </div>
-              {s.plugins.calcom.enabled && (
-                <input
-                  value={s.plugins.calcom.link}
-                  onChange={(e) =>
-                    update({
-                      plugins: {
-                        ...s.plugins,
-                        calcom: { ...s.plugins.calcom, link: e.target.value },
-                      },
-                    })
-                  }
-                  placeholder="cal.com/you/30min  (or just your username)"
-                  className="mt-2.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-              )}
-            </div>
-            <p className="text-[11px] text-slate-400 dark:text-neutral-500">
-              More plugins coming — tell me which you want.
+        <header className="flex shrink-0 items-center gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 dark:border-neutral-800">
+          <div className="min-w-0 flex-1">
+            <h2 id="settings-title" className="text-lg font-semibold tracking-tight text-slate-950 dark:text-white">
+              Settings
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-neutral-400">
+              Manage how OmniCRM looks, organizes work, and connects to your accounts.
             </p>
-          </Section>
+          </div>
+          <div className="hidden items-center gap-2 text-xs font-medium text-slate-500 sm:flex dark:text-neutral-400">
+            <CheckCircleIcon className="h-4 w-4 text-accent" />
+            Saved automatically
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className={ICON_BUTTON_CLASS}
+            aria-label="Close settings"
+          >
+            <CloseIcon className="h-5 w-5" />
+          </button>
+        </header>
 
-          {/* Group macros */}
-          <Section title="Group macros (⌘G)">
-            {s.macros.length === 0 && (
-              <p className="text-xs text-slate-400 dark:text-neutral-500">
-                No macros yet — create one from ⌘G (New group chat) → Save as
-                macro.
-              </p>
-            )}
-            {s.macros.map((m) => (
-              <div
-                key={m.id}
-                className="space-y-1.5 rounded-xl border border-slate-200 p-2.5 dark:border-neutral-700"
-              >
-                <div className="flex items-center gap-2">
-                  <input
-                    value={m.label}
-                    onChange={(e) => patchMacro(m.id, { label: e.target.value })}
-                    placeholder="Macro name"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-                  />
-                  <span className="shrink-0 text-[10px] text-slate-400 dark:text-neutral-500">
-                    {PLATFORMS[m.platform as Platform]?.label} ·{" "}
-                    {m.contactIds.length} ppl
-                  </span>
-                  <button
-                    onClick={() => delMacro(m.id)}
-                    title="Delete macro"
-                    className="shrink-0 rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <input
-                  value={m.groupName}
-                  onChange={(e) => patchMacro(m.id, { groupName: e.target.value })}
-                  placeholder="Group name"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <textarea
-                  value={m.message}
-                  onChange={(e) => patchMacro(m.id, { message: e.target.value })}
-                  placeholder="Preset message"
-                  rows={2}
-                  className="w-full resize-none rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-              </div>
-            ))}
-            {s.macros.length > 0 && (
-              <p className="text-[11px] text-slate-400 dark:text-neutral-500">
-                Members are chosen when you create the macro from ⌘G.
-              </p>
-            )}
-          </Section>
-
-          {/* Group templates */}
-          <Section title="Group templates">
-            {s.templates.length === 0 && (
-              <p className="text-xs text-slate-400 dark:text-neutral-500">
-                No templates yet — save one from ⌘G (what the group is for).
-              </p>
-            )}
-            {s.templates.map((t) => (
-              <div
-                key={t.id}
-                className="space-y-1.5 rounded-xl border border-slate-200 p-2.5 dark:border-neutral-700"
-              >
-                <div className="flex items-center gap-2">
-                  <input
-                    value={t.label}
-                    onChange={(e) => patchTemplate(t.id, { label: e.target.value })}
-                    placeholder="What the group is for"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-medium dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-                  />
-                  <button
-                    onClick={() => delTemplate(t.id)}
-                    title="Delete template"
-                    className="shrink-0 rounded p-1 text-slate-300 transition hover:text-red-500 dark:text-neutral-600"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <input
-                  value={t.groupName}
-                  onChange={(e) =>
-                    patchTemplate(t.id, { groupName: e.target.value })
-                  }
-                  placeholder="Default group name"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-                <textarea
-                  value={t.message}
-                  onChange={(e) =>
-                    patchTemplate(t.id, { message: e.target.value })
-                  }
-                  placeholder="First message"
-                  rows={2}
-                  className="w-full resize-none rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-                />
-              </div>
-            ))}
-          </Section>
-
-          {/* Connections */}
-          <Section title="Connections">
-            <div className="mb-2 flex items-center gap-2 text-xs">
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: workerRunning ? "#22c55e" : "#ef4444" }}
-              />
-              <span className="text-slate-600 dark:text-neutral-300">
-                Sync worker {workerRunning == null ? "…" : workerRunning ? "running" : "not running"}
-              </span>
-            </div>
-            {PLATFORM_ORDER.filter((p) => accounts.some((a) => a.platform === p)).map(
-              (p) => (
-                <div key={p} className="mb-2">
-                  <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-neutral-400">
-                    <span
-                      className="grid h-4 w-4 place-items-center rounded-full text-white"
-                      style={{ backgroundColor: PLATFORMS[p].bg }}
-                    >
-                      <PlatformGlyph platform={p as Platform} className="h-2.5 w-2.5" />
+        <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[15rem_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="flex min-w-0 flex-col overflow-hidden border-b border-slate-200 bg-white px-3 py-3 md:border-b-0 md:border-r md:px-3 md:py-5 dark:border-neutral-800 dark:bg-[#181818]">
+            <nav aria-label="Settings categories" className="grid w-full grid-cols-2 gap-1 sm:grid-cols-3 md:flex md:flex-col">
+              {SETTINGS_PAGES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setPage(item.id)}
+                  aria-current={page === item.id ? "page" : undefined}
+                  className={`flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-full ${
+                    page === item.id
+                      ? "bg-slate-100 text-slate-950 dark:bg-[#272727] dark:text-white"
+                      : "text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:text-neutral-400 dark:hover:bg-[#1F1F1F] dark:hover:text-neutral-100"
+                  }`}
+                >
+                  <SettingsPageIcon page={item.id} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold">{item.label}</span>
+                    <span className="hidden truncate text-xs text-slate-400 md:block dark:text-neutral-500">
+                      {item.description}
                     </span>
-                    {PLATFORMS[p].label}
-                  </div>
-                  {accounts
-                    .filter((a) => a.platform === p)
-                    .map((a) => (
-                      <div
-                        key={a.id}
-                        className="flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-xs"
+                  </span>
+                  {item.id === "connections" && (
+                    <span className="ml-auto hidden tabular-nums text-xs font-medium text-slate-400 md:block dark:text-neutral-500">
+                      {connectedAccounts}/{accounts.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+            <div className="mt-auto hidden border-t border-slate-200 px-3 pt-4 text-xs text-slate-400 md:block dark:border-neutral-800 dark:text-neutral-500">
+              Changes save on this device as you make them.
+            </div>
+          </aside>
+
+          <main className="scroll-thin min-h-0 min-w-0 overflow-x-hidden overflow-y-auto bg-slate-50 dark:bg-black">
+            <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-8 sm:py-8">
+              <div className="mb-6">
+                <h3 className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                  {activePage.label}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">
+                  {activePage.description}
+                </p>
+              </div>
+
+              {page === "general" && (
+                <div className="space-y-5">
+                  <SettingsPanel title="Appearance" description="Choose how OmniCRM looks on this device.">
+                    <SettingsRow label="Theme" hint="Use light, dark, or your system preference.">
+                      <Segmented<ThemePref>
+                        value={theme}
+                        onChange={setTheme}
+                        options={[["light", "Light"], ["dark", "Dark"], ["system", "System"]]}
+                      />
+                    </SettingsRow>
+                    <SettingsRow label="Light mode accent" hint="Buttons and active states in light mode.">
+                      <ColorControl value={s.accentLight} onChange={(value) => update({ accentLight: value })} />
+                    </SettingsRow>
+                    <SettingsRow label="Dark mode accent" hint="Buttons and active states in dark mode.">
+                      <ColorControl value={s.accentDark} onChange={(value) => update({ accentDark: value })} />
+                    </SettingsRow>
+                    <SettingsRow label="Scrollbar" hint="Control the width of scrollable lists.">
+                      <Segmented<ScrollbarPref>
+                        value={s.scrollbar}
+                        onChange={(value) => update({ scrollbar: value })}
+                        options={[["thin", "Thin"], ["default", "Default"], ["hidden", "Hidden"]]}
+                      />
+                    </SettingsRow>
+                    <button
+                      type="button"
+                      onClick={() => update({ accentLight: DEFAULT_SETTINGS.accentLight, accentDark: DEFAULT_SETTINGS.accentDark })}
+                      className="text-sm font-semibold text-accent transition-colors duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      Restore default colors
+                    </button>
+                  </SettingsPanel>
+
+                  <SettingsPanel title="Inbox behavior" description="Set the view and alerts you start with each day.">
+                    <SettingsRow label="Default inbox" hint="The view OmniCRM opens first.">
+                      <select
+                        value={s.defaultView}
+                        onChange={(event) => update({ defaultView: event.target.value as Settings["defaultView"] })}
+                        className={`${INPUT_CLASS} w-40`}
                       >
-                        <span className="truncate text-slate-700 dark:text-neutral-200">
-                          {a.label || PLATFORMS[p].label}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <span className="text-[10px] text-slate-400 dark:text-neutral-500">
-                            {a.driver ? DRIVER_LABEL[a.driver] || a.driver : "—"}
+                        <option value="all">All conversations</option>
+                        <option value="needsreply">Reply</option>
+                        <option value="cold">Cold</option>
+                      </select>
+                    </SettingsRow>
+                    <SettingsRow
+                      label="Desktop notifications"
+                      hint={notifDenied ? "Blocked in your browser. Re-enable notifications for this site." : "Notify you about new messages while OmniCRM is open."}
+                    >
+                      <Toggle on={s.notifications} onChange={toggleNotifications} label="Desktop notifications" />
+                    </SettingsRow>
+                    <SettingsRow label="Mark chats cold after" hint="Flag conversations that have had no activity.">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={s.coldDays}
+                          onChange={(event) => update({ coldDays: Math.max(1, Math.min(90, Number(event.target.value) || 1)) })}
+                          className={`${INPUT_CLASS} w-20 tabular-nums`}
+                        />
+                        <span className="text-sm text-slate-500 dark:text-neutral-400">days</span>
+                      </label>
+                    </SettingsRow>
+                  </SettingsPanel>
+                </div>
+              )}
+
+              {page === "organization" && (
+                <div className="space-y-5">
+                  <SettingsPanel title="Inbox tabs" description="Create focused views for the conversations you manage.">
+                    <div className="space-y-2">
+                      {folders.map((folder) => (
+                        <div key={folder.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 dark:bg-[#1F1F1F]">
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-slate-400 ring-1 ring-slate-200 dark:bg-[#272727] dark:ring-neutral-700">
+                            <FolderIcon className="h-4 w-4" />
                           </span>
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                              a.status === "connected"
-                                ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
-                                : "bg-slate-100 text-slate-500 dark:bg-neutral-700 dark:text-neutral-300"
-                            }`}
+                          <input
+                            defaultValue={folder.name}
+                            aria-label={`Rename ${folder.name}`}
+                            onBlur={(event) => {
+                              const value = event.target.value.trim();
+                              if (value && value !== folder.name) renameFolder(folder.id, value);
+                            }}
+                            className={`${INPUT_CLASS} min-w-0 flex-1`}
+                          />
+                          <button type="button" onClick={() => delFolder(folder.id)} className={ICON_BUTTON_CLASS} aria-label={`Delete ${folder.name}`} title="Delete tab">
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <InlineAdd value={newFolder} onChange={setNewFolder} onAdd={addFolder} placeholder="Name a new inbox tab" buttonLabel="Add tab" />
+                  </SettingsPanel>
+
+                  <SettingsPanel title="Conversation tags" description="Keep everyday labels visible and expand synced application statuses only when you need them.">
+                    {!showTagManager ? (
+                      <div>
+                        <div className="flex flex-wrap gap-2">
+                          {customTags.slice(0, 6).map((tag) => (
+                            <span key={tag.id} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:bg-[#272727] dark:text-neutral-200">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                              <span className="truncate">{tag.name}</span>
+                            </span>
+                          ))}
+                          {customTags.length > 6 && (
+                            <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium tabular-nums text-slate-500 dark:bg-[#272727] dark:text-neutral-400">+{customTags.length - 6} more labels</span>
+                          )}
+                          {applicationTags.length > 0 && (
+                            <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium tabular-nums text-slate-500 dark:bg-[#272727] dark:text-neutral-400">{applicationTags.length} application statuses</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowTagManager(true)}
+                          className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-200 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-[#272727] dark:text-neutral-200 dark:hover:bg-[#313131]"
+                        >
+                          Manage {tags.length} tags
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            value={tagQuery}
+                            onChange={(event) => setTagQuery(event.target.value)}
+                            placeholder="Search tags"
+                            autoFocus
+                            className={`${INPUT_CLASS} min-w-0 flex-1`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowTagManager(false);
+                              setShowApplicationTags(false);
+                              setTagQuery("");
+                            }}
+                            className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-800 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-400 dark:hover:bg-[#272727] dark:hover:text-neutral-100"
                           >
-                            {a.status}
-                          </span>
-                        </span>
+                            Done
+                          </button>
+                        </div>
+
+                        {visibleCustomTags.length > 0 && (
+                          <div className="space-y-1.5">
+                            {visibleCustomTags.map((tag) => (
+                              <TagEditorRow key={tag.id} tag={tag} onPatch={patchTag} onDelete={delTag} />
+                            ))}
+                          </div>
+                        )}
+
+                        {visibleApplicationTags.length > 0 && (
+                          <div className="overflow-hidden rounded-xl bg-slate-50 dark:bg-[#1F1F1F]">
+                            <button
+                              type="button"
+                              onClick={() => setShowApplicationTags((shown) => !shown)}
+                              aria-expanded={showApplicationTags || !!normalizedTagQuery}
+                              className="flex w-full items-center gap-3 px-3 py-3 text-left transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-[#272727]"
+                            >
+                              <span className="flex shrink-0 -space-x-1">
+                                {visibleApplicationTags.slice(0, 3).map((tag) => (
+                                  <span key={tag.id} className="h-5 w-5 rounded-full border-2 border-slate-50 dark:border-[#1F1F1F]" style={{ backgroundColor: tag.color }} />
+                                ))}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-semibold text-slate-900 dark:text-neutral-100">Application status tags</span>
+                                <span className="mt-0.5 block text-xs text-slate-400 dark:text-neutral-500">{visibleApplicationTags.length} synced statuses</span>
+                              </span>
+                              <span className="text-xs font-semibold text-slate-500 dark:text-neutral-400">{showApplicationTags || normalizedTagQuery ? "Hide" : "Manage"}</span>
+                              <span className={`text-sm text-slate-400 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${showApplicationTags || normalizedTagQuery ? "rotate-180" : ""}`} aria-hidden="true">⌄</span>
+                            </button>
+                            {(showApplicationTags || !!normalizedTagQuery) && (
+                              <div className="space-y-1.5 border-t border-slate-200 p-2 dark:border-neutral-800">
+                                {visibleApplicationTags.map((tag) => (
+                                  <TagEditorRow key={tag.id} tag={tag} onPatch={patchTag} onDelete={delTag} />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {visibleCustomTags.length === 0 && visibleApplicationTags.length === 0 && (
+                          <p className="rounded-lg bg-slate-50 px-3 py-4 text-center text-sm text-slate-400 dark:bg-[#1F1F1F] dark:text-neutral-500">No tags match your search.</p>
+                        )}
+
+                        <InlineAdd value={newTag} onChange={setNewTag} onAdd={addTag} placeholder="Name a new tag" buttonLabel="Add tag" />
+                      </div>
+                    )}
+                  </SettingsPanel>
+                </div>
+              )}
+
+              {page === "workflow" && (
+                <SettingsPanel title="Board stages" description="Rename, recolor, and reorder the stages used on your board.">
+                  <div className="space-y-2">
+                    {s.stages.map((stage, index) => (
+                      <div key={stage.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 dark:bg-[#1F1F1F]">
+                        <input
+                          type="color"
+                          value={stage.color}
+                          onChange={(event) => patchStage(stage.id, { color: event.target.value })}
+                          className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 dark:border-neutral-700 dark:bg-[#272727]"
+                          aria-label={`Color for ${stage.name}`}
+                        />
+                        <input value={stage.name} onChange={(event) => patchStage(stage.id, { name: event.target.value })} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+                        <div className="flex shrink-0 items-center rounded-lg bg-white ring-1 ring-slate-200 dark:bg-[#272727] dark:ring-neutral-700">
+                          <button type="button" onClick={() => moveStage(index, -1)} disabled={index === 0} className={`${ICON_BUTTON_CLASS} h-8 w-8 disabled:pointer-events-none disabled:opacity-30`} aria-label={`Move ${stage.name} up`}>↑</button>
+                          <button type="button" onClick={() => moveStage(index, 1)} disabled={index === s.stages.length - 1} className={`${ICON_BUTTON_CLASS} h-8 w-8 disabled:pointer-events-none disabled:opacity-30`} aria-label={`Move ${stage.name} down`}>↓</button>
+                        </div>
+                        <button type="button" onClick={() => delStage(stage.id)} className={ICON_BUTTON_CLASS} aria-label={`Delete ${stage.name}`} title="Delete stage">
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
                       </div>
                     ))}
-                </div>
-              )
-            )}
-            {accounts.length === 0 && (
-              <p className="text-xs text-slate-400 dark:text-neutral-500">
-                No accounts connected yet.
-              </p>
-            )}
-          </Section>
+                  </div>
+                  <button type="button" onClick={addStage} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm font-semibold text-accent transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-accent/10 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-neutral-700">
+                    <PlusIcon className="h-4 w-4" /> Add board stage
+                  </button>
+                </SettingsPanel>
+              )}
 
-          <p className="mt-2 text-[11px] text-slate-400 dark:text-neutral-500">
-            Settings are saved on this device. Want more controls here? Tell me which.
-          </p>
+              {page === "groups" && (
+                <div className="space-y-5">
+                  <SettingsPanel title="Group macros" description="Saved people, group details, and an opening message for ⌘G.">
+                    {s.macros.length === 0 ? (
+                      <EmptyState title="No group macros yet" description="Create a group with ⌘G, then save it as a macro to manage it here." />
+                    ) : (
+                      <div className="space-y-3">
+                        {s.macros.map((macro) => (
+                          <div key={macro.id} className="space-y-3 rounded-xl bg-slate-50 p-3 dark:bg-[#1F1F1F]">
+                            <div className="flex items-center gap-2">
+                              <input value={macro.label} onChange={(event) => patchMacro(macro.id, { label: event.target.value })} placeholder="Macro name" className={`${INPUT_CLASS} min-w-0 flex-1 font-medium`} />
+                              <span className="shrink-0 text-xs text-slate-400 dark:text-neutral-500">{PLATFORMS[macro.platform as Platform]?.label} · {macro.contactIds.length} people</span>
+                              <button type="button" onClick={() => delMacro(macro.id)} className={ICON_BUTTON_CLASS} aria-label={`Delete ${macro.label}`}><TrashIcon className="h-4 w-4" /></button>
+                            </div>
+                            <input value={macro.groupName} onChange={(event) => patchMacro(macro.id, { groupName: event.target.value })} placeholder="Group name" className={INPUT_CLASS} />
+                            <textarea value={macro.message} onChange={(event) => patchMacro(macro.id, { message: event.target.value })} placeholder="Opening message" rows={3} className={`${INPUT_CLASS} resize-y`} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SettingsPanel>
+
+                  <SettingsPanel title="Group templates" description="Reusable group names and opening messages without fixed members.">
+                    {s.templates.length === 0 ? (
+                      <EmptyState title="No group templates yet" description="Save a group purpose from ⌘G and it will appear here." />
+                    ) : (
+                      <div className="space-y-3">
+                        {s.templates.map((template) => (
+                          <div key={template.id} className="space-y-3 rounded-xl bg-slate-50 p-3 dark:bg-[#1F1F1F]">
+                            <div className="flex items-center gap-2">
+                              <input value={template.label} onChange={(event) => patchTemplate(template.id, { label: event.target.value })} placeholder="Template purpose" className={`${INPUT_CLASS} min-w-0 flex-1 font-medium`} />
+                              <button type="button" onClick={() => delTemplate(template.id)} className={ICON_BUTTON_CLASS} aria-label={`Delete ${template.label}`}><TrashIcon className="h-4 w-4" /></button>
+                            </div>
+                            <input value={template.groupName} onChange={(event) => patchTemplate(template.id, { groupName: event.target.value })} placeholder="Default group name" className={INPUT_CLASS} />
+                            <textarea value={template.message} onChange={(event) => patchTemplate(template.id, { message: event.target.value })} placeholder="Opening message" rows={3} className={`${INPUT_CLASS} resize-y`} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SettingsPanel>
+                </div>
+              )}
+
+              {page === "integrations" && (
+                <div className="space-y-5">
+                  <IntegrationPanel icon={<ClockIcon className="h-5 w-5" />} name="Cal.com" description="Suggest your booking link when a conversation mentions a date." enabled={s.plugins.calcom.enabled} onToggle={(enabled) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, enabled } } })}>
+                    {s.plugins.calcom.enabled && (
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-neutral-200">Booking link</span>
+                        <input value={s.plugins.calcom.link} onChange={(event) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, link: event.target.value } } })} placeholder="cal.com/you/30min" className={INPUT_CLASS} />
+                      </label>
+                    )}
+                  </IntegrationPanel>
+
+                </div>
+              )}
+
+              {page === "connections" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between gap-4 rounded-xl bg-white p-4 ring-1 ring-slate-200 dark:bg-[#181818] dark:ring-neutral-800">
+                    <div className="flex items-center gap-3">
+                      <span className={`h-3 w-3 rounded-full ${workerRunning ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white">Sync service</div>
+                        <div className="text-xs text-slate-500 dark:text-neutral-400">{workerRunning == null ? "Checking status…" : workerRunning ? "Running — account status shown below" : "Not running"}</div>
+                      </div>
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums text-slate-500 dark:text-neutral-400">{connectedAccounts} of {accounts.length} connected</span>
+                  </div>
+
+                  {PLATFORM_ORDER.filter((platform) => accounts.some((account) => account.platform === platform)).map((platform) => {
+                    const platformAccounts = accounts.filter((account) => account.platform === platform);
+                    return (
+                      <SettingsPanel
+                        key={platform}
+                        title={PLATFORMS[platform].label}
+                        description={accountSummary(platformAccounts, liveAccounts)}
+                      >
+                        <div className="space-y-2">
+                          {platformAccounts.map((account) => {
+                            const live = liveAccounts[account.id];
+                            const status = accountStatusView(account, live);
+                            const statusClass =
+                              status.tone === "success"
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                                : status.tone === "progress"
+                                  ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300"
+                                  : "bg-slate-200 text-slate-600 dark:bg-[#272727] dark:text-neutral-300";
+                            const needsWhatsAppQr = platform === "whatsapp" && (live?.state === "qr" || live?.detail === "Generating a new QR code");
+                            const detail = live?.state === "qr" ? "Waiting for you to link your phone" : live?.detail || account.detail;
+                            return (
+                              <div key={account.id} className="rounded-xl bg-slate-50 p-3 dark:bg-[#1F1F1F]">
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white" style={{ backgroundColor: PLATFORMS[platform].bg }}>
+                                    <PlatformGlyph platform={platform as Platform} className="h-5 w-5" />
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-neutral-100">{account.label || PLATFORMS[platform].label}</div>
+                                    <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{account.driver ? DRIVER_LABEL[account.driver] || account.driver : "Standard connection"}{detail ? ` · ${detail}` : ""}</div>
+                                  </div>
+                                  <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${statusClass}`}>{status.label}</span>
+                                </div>
+                                {needsWhatsAppQr && (
+                                  <WhatsAppLinkCode
+                                    qr={live.qr}
+                                    label={account.label || "WhatsApp"}
+                                    accountId={account.id}
+                                    canRefresh={account.driver === "web"}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </SettingsPanel>
+                    );
+                  })}
+
+                  {accounts.length === 0 && <EmptyState title="No messaging accounts" description="Connected WhatsApp, Telegram, X, and Discord accounts will appear here." />}
+                </div>
+              )}
+            </div>
+          </main>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function SettingsPageIcon({ page }: { page: SettingsPage }) {
+  const className = "h-4 w-4 shrink-0";
+  if (page === "general") return <SunIcon className={className} />;
+  if (page === "organization") return <FolderIcon className={className} />;
+  if (page === "workflow") return <ZapIcon className={className} />;
+  if (page === "groups") return <UserIcon className={className} />;
+  if (page === "integrations") return <LinkIcon className={className} />;
+  return <CheckCircleIcon className={className} />;
+}
+
+function SettingsPanel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mb-5 last:mb-0">
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
-        {title}
-      </h3>
-      <div className="space-y-2.5">{children}</div>
-    </div>
+    <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5 dark:bg-[#181818] dark:ring-neutral-800">
+      <div className="mb-5">
+        <h4 className="text-base font-semibold text-slate-950 dark:text-white">{title}</h4>
+        <p className="mt-1 text-sm text-pretty text-slate-500 dark:text-neutral-400">{description}</p>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
   );
 }
 
-function Row({
+function SettingsRow({
   label,
   hint,
   children,
@@ -641,11 +744,11 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col items-start justify-between gap-3 border-b border-slate-100 pb-4 last:border-0 last:pb-0 lg:flex-row lg:items-center dark:border-neutral-800">
       <div className="min-w-0">
-        <div className="text-sm dark:text-neutral-100">{label}</div>
+        <div className="text-sm font-medium text-slate-900 dark:text-neutral-100">{label}</div>
         {hint && (
-          <div className="text-[11px] text-slate-400 dark:text-neutral-500">{hint}</div>
+          <div className="mt-1 max-w-md text-xs leading-5 text-slate-400 dark:text-neutral-500">{hint}</div>
         )}
       </div>
       <div className="shrink-0">{children}</div>
@@ -653,24 +756,154 @@ function Row({
   );
 }
 
+function ColorControl({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 ring-1 ring-slate-200 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 focus-within:ring-2 focus-within:ring-accent dark:bg-[#1F1F1F] dark:ring-neutral-700 dark:hover:bg-[#272727]">
+      <input
+        type="color"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+        aria-label={`Choose color ${value}`}
+      />
+      <span className="text-xs font-medium tabular-nums uppercase text-slate-500 dark:text-neutral-400">{value}</span>
+    </label>
+  );
+}
+
+function TagEditorRow({
+  tag,
+  onPatch,
+  onDelete,
+}: {
+  tag: { id: string; name: string; color: string };
+  onPatch: (id: string, patch: { name?: string; color?: string }) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 dark:bg-[#1F1F1F]">
+      <input
+        type="color"
+        value={tag.color}
+        onChange={(event) => onPatch(tag.id, { color: event.target.value })}
+        className="h-8 w-8 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 dark:border-neutral-700 dark:bg-[#272727]"
+        aria-label={`Color for ${tag.name}`}
+      />
+      <input
+        defaultValue={tag.name}
+        aria-label={`Rename ${tag.name}`}
+        onBlur={(event) => {
+          const value = event.target.value.trim();
+          if (value && value !== tag.name) onPatch(tag.id, { name: value });
+        }}
+        className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#272727] dark:text-neutral-100"
+      />
+      <button type="button" onClick={() => onDelete(tag.id)} className={`${ICON_BUTTON_CLASS} h-8 w-8`} aria-label={`Delete ${tag.name}`} title="Delete tag">
+        <TrashIcon className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function InlineAdd({
+  value,
+  onChange,
+  onAdd,
+  placeholder,
+  buttonLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+  placeholder: string;
+  buttonLabel: string;
+}) {
+  return (
+    <form
+      className="flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row dark:border-neutral-800"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onAdd();
+      }}
+    >
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+      <button
+        type="submit"
+        disabled={!value.trim()}
+        className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-40"
+      >
+        <PlusIcon className="h-4 w-4" />
+        {buttonLabel}
+      </button>
+    </form>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-slate-50 px-6 py-8 text-center dark:bg-[#1F1F1F]">
+      <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-slate-400 ring-1 ring-slate-200 dark:bg-[#272727] dark:ring-neutral-700">
+        <PlusIcon className="h-4 w-4" />
+      </span>
+      <div className="mt-3 text-sm font-semibold text-slate-900 dark:text-neutral-100">{title}</div>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400 dark:text-neutral-500">{description}</p>
+    </div>
+  );
+}
+
+function IntegrationPanel({
+  icon,
+  name,
+  description,
+  enabled,
+  onToggle,
+  children,
+}: {
+  icon: React.ReactNode;
+  name: string;
+  description: string;
+  enabled?: boolean;
+  onToggle?: (enabled: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5 dark:bg-[#181818] dark:ring-neutral-800">
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-700 dark:bg-[#272727] dark:text-neutral-200">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <h4 className="text-base font-semibold text-slate-950 dark:text-white">{name}</h4>
+          <p className="mt-1 max-w-xl text-sm leading-5 text-slate-500 dark:text-neutral-400">{description}</p>
+        </div>
+        {onToggle && <Toggle on={!!enabled} onChange={onToggle} label={name} />}
+      </div>
+      {children && <div className="mt-5 border-t border-slate-100 pt-5 dark:border-neutral-800">{children}</div>}
+    </section>
+  );
+}
+
 function Toggle({
   on,
   onChange,
+  label,
 }: {
   on: boolean;
   onChange: (v: boolean) => void;
+  label: string;
 }) {
   return (
     <button
+      type="button"
       onClick={() => onChange(!on)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         on ? "bg-accent" : "bg-slate-300 dark:bg-neutral-600"
       }`}
-      aria-pressed={on}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-          on ? "left-[18px]" : "left-0.5"
+        className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+          on ? "translate-x-5" : "translate-x-0"
         }`}
       />
     </button>
@@ -687,15 +920,17 @@ function Segmented<T extends string>({
   options: [T, string][];
 }) {
   return (
-    <div className="flex rounded-lg bg-slate-100 p-0.5 dark:bg-neutral-900">
+    <div className="flex max-w-full overflow-x-auto rounded-lg bg-slate-100 p-1 dark:bg-[#1F1F1F]">
       {options.map(([v, label]) => (
         <button
           key={v}
+          type="button"
           onClick={() => onChange(v)}
-          className={`rounded-md px-2 py-1 text-xs font-medium transition ${
+          aria-pressed={value === v}
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
             value === v
-              ? "bg-white text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-              : "text-slate-500 dark:text-neutral-400"
+              ? "bg-white text-slate-900 shadow-sm dark:bg-[#313131] dark:text-white"
+              : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-100"
           }`}
         >
           {label}

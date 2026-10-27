@@ -12,11 +12,13 @@ import type {
 } from "@/lib/types";
 import { PLATFORMS, PLATFORM_ORDER } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
-import ThemeToggle from "./ThemeToggle";
+import { WorkspaceHeader } from "./WorkspaceHeader";
 import { listTime } from "@/lib/time";
 import {
   CheckCircleIcon,
+  ClockIcon,
   FolderIcon,
+  FunnelIcon,
   PlusIcon,
   SendIcon,
   TrashIcon,
@@ -43,8 +45,9 @@ type Draft = {
   platform: string;
   tagId: string;
   folderId: string;
+  intent: string;
   actions: ActionStep[];
-  schedule: "manual" | "daily" | "every_n_days";
+  schedule: "instant" | "manual" | "daily" | "every_n_days";
   everyNDays: number;
   cooldownDays: number;
 };
@@ -66,6 +69,7 @@ function emptyDraft(): Draft {
     platform: "",
     tagId: "",
     folderId: "",
+    intent: "",
     actions: [
       { id: genId(), type: "send", message: "Hey {first}, just following up — " },
     ],
@@ -169,12 +173,33 @@ function summary(a: AutomationDTO): string {
       ? `New chats (last ${d} days)`
       : "Everyone matching filters";
   const sched =
-    a.schedule === "daily"
+    a.schedule === "instant"
+      ? " · instantly"
+      : a.schedule === "daily"
       ? " · daily"
       : a.schedule === "every_n_days"
       ? ` · every ${a.everyNDays ?? 1}d`
       : "";
   return trig + sched;
+}
+
+function actionSummary(a: AutomationDTO): string {
+  const send = a.actions.find((x) => x.type === "send");
+  if (send?.type === "send") return `“${send.message}”`;
+  return a.actions
+    .map((action) => {
+      if (action.type === "intent")
+        return `Set intent to ${action.intent[0].toUpperCase()}${action.intent.slice(1)}`;
+      if (action.type === "follow_up")
+        return action.days === 0
+          ? "Add to Follow-ups"
+          : `Follow up in ${action.days} day${action.days === 1 ? "" : "s"}`;
+      if (action.type === "tag") return "Add tag";
+      if (action.type === "status") return `Set status to ${action.status}`;
+      return "";
+    })
+    .filter(Boolean)
+    .join(" → ");
 }
 
 export function Automations() {
@@ -186,6 +211,7 @@ export function Automations() {
   const [running, setRunning] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [installingPack, setInstallingPack] = useState(false);
 
   const reload = useCallback(() => {
     fetch("/api/automations")
@@ -245,6 +271,26 @@ export function Automations() {
     }
   }
 
+  async function installStarterPack() {
+    setInstallingPack(true);
+    try {
+      const res = await fetch("/api/automations/starter-pack", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not install workflow");
+      setToast(
+        data.created
+          ? `Installed ${data.created} SaaS inbox automations`
+          : "SaaS inbox automations are already installed"
+      );
+      reload();
+    } catch (e) {
+      setToast((e as Error).message);
+    } finally {
+      setInstallingPack(false);
+      setTimeout(() => setToast(null), 5000);
+    }
+  }
+
   function edit(a: AutomationDTO) {
     setEditing({
       id: a.id,
@@ -255,6 +301,7 @@ export function Automations() {
       platform: a.platform ?? "",
       tagId: a.tagId ?? "",
       folderId: a.folderId ?? "",
+      intent: a.intent ?? "",
       actions: a.actions.length
         ? a.actions
         : [{ id: genId(), type: "send", message: a.message }],
@@ -265,33 +312,8 @@ export function Automations() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 dark:bg-neutral-950">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
-        <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
-          <Link
-            href="/"
-            className="rounded-md px-2.5 py-1 text-slate-500 transition hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-          >
-            Inbox
-          </Link>
-          <Link
-            href="/board"
-            className="rounded-md px-2.5 py-1 text-slate-500 transition hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-          >
-            Board
-          </Link>
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100">
-            Automations
-          </span>
-        </nav>
-        </div>
-        <ThemeToggle />
-      </header>
+    <div className="workspace-page flex h-dvh flex-col bg-slate-100 dark:bg-neutral-950">
+      <WorkspaceHeader />
 
       <div className="scroll-thin flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-5 py-6">
@@ -305,14 +327,23 @@ export function Automations() {
                 quiet.
               </p>
             </div>
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setPicking(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent"
-            >
-              <ZapIcon className="h-4 w-4" />
-              New automation
-            </motion.button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={installStarterPack}
+                disabled={installingPack}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                {installingPack ? "Installing…" : "Install SaaS workflow"}
+              </button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setPicking(true)}
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent"
+              >
+                <ZapIcon className="h-4 w-4" />
+                New automation
+              </motion.button>
+            </div>
           </div>
 
           {loading && (
@@ -378,7 +409,7 @@ export function Automations() {
                         {summary(a)}
                       </div>
                       <div className="mt-1.5 truncate text-sm text-slate-600 dark:text-neutral-300">
-                        “{a.message}”
+                        {actionSummary(a)}
                       </div>
                       {a.lastRunAt && (
                         <div className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">
@@ -570,7 +601,11 @@ function Builder({
         ? { id: genId(), type: "send", message: "" }
         : type === "tag"
         ? { id: genId(), type: "tag", tagId: tags[0]?.id ?? "" }
-        : { id: genId(), type: "status", status: "done" };
+        : type === "status"
+        ? { id: genId(), type: "status", status: "done" }
+        : type === "intent"
+        ? { id: genId(), type: "intent", intent: "prospect" }
+        : { id: genId(), type: "follow_up", days: 0 };
     set({ actions: [...d.actions, step] });
     setAddOpen(false);
   }
@@ -675,7 +710,7 @@ function Builder({
                   <input
                     value={d.keyword}
                     onChange={(e) => set({ keyword: e.target.value })}
-                    placeholder="Keyword or phrase, e.g. pricing"
+                    placeholder="Keywords separated by commas, e.g. pricing, demo, trial"
                     className={inputCls}
                   />
                 )}
@@ -738,6 +773,17 @@ function Builder({
                       </option>
                     ))}
                   </select>
+                  <select
+                    value={d.intent}
+                    onChange={(e) => set({ intent: e.target.value })}
+                    className={`${inputCls} flex-1`}
+                  >
+                    <option value="">Any intent</option>
+                    <option value="prospect">Prospect</option>
+                    <option value="onboarding">Onboarding</option>
+                    <option value="support">Support</option>
+                    <option value="normal">Normal</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -757,10 +803,22 @@ function Builder({
                       icon: <FolderIcon className="h-3.5 w-3.5" />,
                       chip: "bg-accent/15 text-accent dark:bg-accent/15 dark:text-accent",
                     }
-                  : {
+                  : a.type === "status"
+                  ? {
                       label: "Set status",
                       icon: <CheckCircleIcon className="h-3.5 w-3.5" />,
                       chip: "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400",
+                    }
+                  : a.type === "intent"
+                  ? {
+                      label: "Set intent",
+                      icon: <FunnelIcon className="h-3.5 w-3.5" />,
+                      chip: "bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400",
+                    }
+                  : {
+                      label: "Create follow-up",
+                      icon: <ClockIcon className="h-3.5 w-3.5" />,
+                      chip: "bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400",
                     };
               return (
                 <div key={a.id}>
@@ -830,6 +888,35 @@ function Builder({
                           <option value="open">Mark needs reply</option>
                         </select>
                       )}
+                      {a.type === "intent" && (
+                        <select
+                          value={a.intent}
+                          onChange={(e) =>
+                            updateAction(a.id, { intent: e.target.value })
+                          }
+                          className={inputCls}
+                        >
+                          <option value="prospect">Prospect</option>
+                          <option value="onboarding">Onboarding</option>
+                          <option value="support">Support</option>
+                          <option value="normal">Normal</option>
+                        </select>
+                      )}
+                      {a.type === "follow_up" && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-neutral-400">
+                          <span>Due in</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={a.days}
+                            onChange={(e) =>
+                              updateAction(a.id, { days: Math.max(0, Number(e.target.value) || 0) })
+                            }
+                            className={`${inputCls} w-20`}
+                          />
+                          <span>days (0 = now)</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -859,6 +946,8 @@ function Builder({
                         ["send", "Send message"],
                         ["tag", "Add tag"],
                         ["status", "Set status"],
+                        ["intent", "Set intent"],
+                        ["follow_up", "Create follow-up"],
                       ] as [ActionStep["type"], string][]
                     ).map(([t, l]) => (
                       <button
@@ -885,6 +974,7 @@ function Builder({
                 className={inputCls}
               >
                 <option value="manual">Manually (Run now)</option>
+                <option value="instant">Instantly on inbound keyword</option>
                 <option value="daily">Daily</option>
                 <option value="every_n_days">Every N days</option>
               </select>

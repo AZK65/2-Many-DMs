@@ -14,12 +14,26 @@ import { TelegramConnect } from "./TelegramConnect";
 import { ConnectionsModal, type ConnectionsData } from "./ConnectionsModal";
 import { TG_LINK } from "@/lib/links";
 
+import {
+  CheckCircleIcon,
+  CheckIcon,
+  ExternalLinkIcon,
+  MailIcon,
+  ZapIcon,
+} from "./icons";
+
 type AccountRow = {
   id: string;
   platform: string;
   label: string | null;
   status: string;
 };
+
+const SETUP_STEPS = [
+  { title: "Welcome", detail: "See the daily workflow" },
+  { title: "Channels", detail: "Connect your inboxes" },
+  { title: "Ready", detail: "Start with a clean queue" },
+];
 
 export function Welcome() {
   const router = useRouter();
@@ -96,42 +110,92 @@ export function Welcome() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 dark:bg-black">
-      <div className="absolute right-4 top-4">
-        <ThemeToggle />
-      </div>
+    <div className="relative min-h-dvh bg-slate-50 lg:grid lg:grid-cols-[minmax(0,0.85fr)_minmax(32rem,1.15fr)] dark:bg-black">
+      <aside className="hidden min-h-dvh flex-col border-r border-slate-200 bg-white px-12 py-10 lg:flex dark:border-neutral-800 dark:bg-neutral-900">
+        <div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/lockup-light.png" alt="2 Many DMs" className="h-9 w-auto dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/lockup-dark.png" alt="2 Many DMs" className="hidden h-9 w-auto dark:block" />
+        </div>
+        <div className="mt-16 max-w-md">
+          <p className="text-sm font-semibold text-accent">Your daily command center</p>
+          <h1 className="mt-3 text-balance text-4xl font-bold tracking-tight text-slate-950 dark:text-white">
+            All your conversations. One place to keep up.
+          </h1>
+          <p className="mt-4 max-w-sm text-pretty text-base text-slate-500 dark:text-neutral-400">
+            Connect your inboxes, find any conversation, and keep your follow-ups in one place.
+          </p>
+        </div>
+        <nav aria-label="Onboarding progress" className="mt-12 space-y-2">
+          {SETUP_STEPS.map((item, index) => (
+            <div
+              key={item.title}
+              className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                index === step
+                  ? "bg-slate-100 dark:bg-neutral-800"
+                  : "text-slate-400 dark:text-neutral-500"
+              }`}
+            >
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-semibold tabular-nums ${
+                index < step
+                  ? "bg-accent text-accent-fg"
+                  : index === step
+                    ? "bg-slate-950 text-white dark:bg-white dark:text-black"
+                    : "bg-slate-100 text-slate-400 dark:bg-neutral-800 dark:text-neutral-500"
+              }`}>
+                {index < step ? <CheckIcon className="h-4 w-4" /> : index + 1}
+              </span>
+              <div>
+                <div className={`text-sm font-semibold ${index === step ? "text-slate-900 dark:text-white" : ""}`}>
+                  {item.title}
+                </div>
+                <div className="text-xs">{item.detail}</div>
+              </div>
+            </div>
+          ))}
+        </nav>
+        <div className="mt-auto flex items-center gap-2 text-xs text-slate-400 dark:text-neutral-500">
+          <CheckCircleIcon className="h-4 w-4 text-accent" />
+          Credentials stay in their platform sessions.
+        </div>
+      </aside>
 
-      {/* Progress dots */}
-      <div className="absolute top-6 flex gap-1.5">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className={`h-2 rounded-full transition-all duration-300 ${
-              i === step ? "w-6" : "w-2"
-            } ${i <= step ? "bg-accent" : "bg-slate-300 dark:bg-neutral-700"}`}
-          />
-        ))}
-      </div>
+      <main className="relative flex min-h-dvh items-center justify-center px-6 py-16 lg:px-12">
+        <div className="absolute right-4 top-4">
+          <ThemeToggle />
+        </div>
+        <div className="absolute left-6 top-6 flex items-center gap-2 lg:hidden">
+          {SETUP_STEPS.map((item, index) => (
+            <span
+              key={item.title}
+              aria-label={item.title}
+              className={`h-2 rounded-full transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                index === step ? "w-8 bg-accent" : index < step ? "w-2 bg-accent" : "w-2 bg-slate-300 dark:bg-neutral-700"
+              }`}
+            />
+          ))}
+        </div>
 
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-xl">
         <div>
           <motion.div
             key={step}
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.26, ease: "easeOut" }}
+            transition={{ duration: 0.7, ease: [0.32, 0.72, 0, 1] }}
           >
             {/* ── Step 0: intro ── */}
             {step === 0 && (
-              <div className="text-center">
-                <div className="mb-7 flex justify-center">
+              <div>
+                <div className="mb-10 flex lg:hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/brand/lockup-light.png" alt="2 Many DMs" className="h-9 w-auto dark:hidden" />
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/brand/lockup-dark.png" alt="2 Many DMs" className="hidden h-9 w-auto dark:block" />
                 </div>
-                <div className="mb-8 flex items-center justify-center gap-3">
-                  {PLATFORM_ORDER.map((p, i) => (
+                <div className="mb-8 flex items-center gap-3">
+                  {PLATFORM_ORDER.filter((p) => p !== "discord" && p !== "gmail").map((p, i) => (
                     <motion.span
                       key={p}
                       initial={{ scale: 0, y: 10 }}
@@ -155,24 +219,23 @@ export function Welcome() {
                       <PlatformGlyph platform={p} className="h-7 w-7" />
                     </motion.span>
                   ))}
+
                 </div>
                 <motion.h1
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.5 }}
-                  className="text-3xl font-bold tracking-tight text-slate-900 dark:text-neutral-100"
+                  className="max-w-lg text-balance text-4xl font-bold tracking-tight text-slate-950 dark:text-white"
                 >
-                  One inbox for every DM
+                  Less switching. More conversation.
                 </motion.h1>
                 <motion.p
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.62 }}
-                  className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-500 dark:text-neutral-400"
+                  className="mt-4 max-w-lg text-pretty text-base text-slate-500 dark:text-neutral-400"
                 >
-                  Telegram, WhatsApp and X in one place — with a built-in CRM,
-                  command-search, and automations on top. Let’s connect your
-                  accounts.
+                  Bring Telegram, WhatsApp, X, Discord and Gmail into one working queue. Search your history, save drafts, and keep track of the conversations that need you.
                 </motion.p>
                 <motion.button
                   initial={{ opacity: 0, y: 8 }}
@@ -180,9 +243,9 @@ export function Welcome() {
                   transition={{ delay: 0.74 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => go(1)}
-                  className="mt-8 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-accent-fg transition hover:bg-accent"
+                  className="mt-8 w-full rounded-xl bg-accent px-3 py-3 text-base font-semibold text-accent-fg transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-offset-black"
                 >
-                  Get started →
+                  Set up my workspace
                 </motion.button>
                 <button
                   onClick={finish}
@@ -349,9 +412,9 @@ export function Welcome() {
                   <motion.button
                     whileTap={{ scale: 0.97 }}
                     onClick={() => go(2)}
-                    className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent"
+                    className="rounded-xl bg-accent px-3 py-2 text-base font-semibold text-accent-fg transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   >
-                    {anyConnected ? "Continue →" : "I’ll connect later →"}
+                    {anyConnected ? "Continue" : "Connect later"}
                   </motion.button>
                 </div>
               </div>
@@ -376,18 +439,18 @@ export function Welcome() {
                 </p>
                 <div className="mt-6 space-y-2.5 text-left">
                   {[
-                    ["📥", "Unified inbox", "Triage every DM by who owes a reply."],
-                    ["🗂️", "Pipeline board", "Drag contacts through your deal stages."],
-                    ["⚡", "Automations", "Auto-follow-up and broadcast on autopilot."],
-                  ].map(([icon, title, desc], i) => (
+                    { icon: <MailIcon className="h-5 w-5" />, title: "Unified inbox", desc: "Triage every DM by who owes a reply." },
+                    { icon: <ZapIcon className="h-5 w-5" />, title: "Search your history", desc: "Find messages, shared files, and the people you know." },
+                    { icon: <CheckCircleIcon className="h-5 w-5" />, title: "Follow-ups", desc: "Keep reminders and your next steps beside your conversations." },
+                  ].map(({ icon, title, desc }, i) => (
                     <motion.div
                       key={title}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.15 + i * 0.1 }}
-                      className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+                      className="flex items-center gap-3 rounded-xl bg-white p-4 ring-1 ring-slate-200 dark:bg-neutral-900 dark:ring-neutral-800"
                     >
-                      <span className="text-xl">{icon}</span>
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-200">{icon}</span>
                       <div>
                         <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">
                           {title}
@@ -402,15 +465,16 @@ export function Welcome() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={finish}
-                  className="mt-7 w-full rounded-xl bg-accent py-3 text-sm font-semibold text-accent-fg transition hover:bg-accent"
+                  className="mt-7 w-full rounded-xl bg-accent px-3 py-3 text-base font-semibold text-accent-fg transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  Go to my inbox →
+                  Open my inbox
                 </motion.button>
               </div>
             )}
           </motion.div>
         </div>
       </div>
+      </main>
 
       <AnimatePresence>
         {showTelegram && (

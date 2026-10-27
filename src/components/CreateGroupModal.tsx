@@ -1,10 +1,13 @@
 "use client";
 
+import { OverlayPortal } from "./OverlayPortal";
+
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import type { ConversationDTO } from "@/lib/types";
 import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
+import { CheckCircleIcon, CopyIcon, LinkIcon } from "./icons";
 import {
   loadSettings,
   saveSettings,
@@ -12,14 +15,34 @@ import {
   type GroupTemplate,
 } from "@/lib/settings";
 
-// X group-DM creation isn't wired up; Telegram + WhatsApp are.
-const GROUP_PLATFORMS: Platform[] = ["telegram", "whatsapp"];
+const GROUP_PLATFORMS: Platform[] = ["telegram", "whatsapp", "gmail", "x", "discord"];
+const GROUP_SUPPORT: Record<Platform, { enabled: boolean; note: string; requiresMessage?: boolean }> = {
+  telegram: { enabled: true, note: "Creates a native Telegram group." },
+  whatsapp: { enabled: true, note: "Creates a native WhatsApp group." },
+  gmail: { enabled: true, requiresMessage: true, note: "Starts one group email thread for everyone." },
+  x: { enabled: false, note: "X does not give this connection safe permission to create group DMs." },
+  discord: { enabled: false, note: "Official Discord bots cannot create private group DMs. Create a server channel in Discord." },
+};
 
 type Person = {
   contactId: string;
   name: string;
   platform: Platform;
   avatarUrl: string | null;
+};
+
+type ParticipantOutcome = {
+  contactId: string | null;
+  name: string;
+  participantKey: string;
+  status: "added" | "invite_sent" | "not_added";
+  detail?: string;
+};
+
+type CreationResult = {
+  chatExternalId: string;
+  inviteUrl?: string;
+  participantOutcomes: ParticipantOutcome[];
 };
 
 export function CreateGroupModal({
@@ -37,6 +60,8 @@ export function CreateGroupModal({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creationResult, setCreationResult] = useState<CreationResult | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
   const [macros, setMacros] = useState<GroupMacro[]>([]);
   const [templates, setTemplates] = useState<GroupTemplate[]>([]);
 
@@ -64,6 +89,14 @@ export function CreateGroupModal({
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, onClose]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -129,8 +162,17 @@ export function CreateGroupModal({
   }
 
   async function create() {
+    const support = GROUP_SUPPORT[platform];
+    if (!support.enabled) {
+      setError(support.note);
+      return;
+    }
     if (!groupName.trim() || !selected.size || busy) {
       setError("Add a name and at least one person.");
+      return;
+    }
+    if (support.requiresMessage && !message.trim()) {
+      setError("Add a first message to start the group email.");
       return;
     }
     setBusy(true);
@@ -146,14 +188,15 @@ export function CreateGroupModal({
           message: message.trim(),
         }),
       });
-      const d = await r.json();
+      const d = (await r.json()) as CreationResult & { error?: string };
       if (!r.ok) {
         setError(d.error || "Couldn't create the group.");
         setBusy(false);
         return;
       }
+      setCreationResult(d);
+      setBusy(false);
       onCreated(`Created "${groupName.trim()}" with ${selected.size} people`);
-      onClose();
     } catch {
       setError("Couldn't reach the server.");
       setBusy(false);
@@ -161,28 +204,31 @@ export function CreateGroupModal({
   }
 
   return (
-    <motion.div
+    <OverlayPortal onClose={busy ? undefined : onClose}><motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onClick={() => !busy && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-group-title"
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-neutral-700">
-          <h2 className="text-base font-semibold dark:text-neutral-100">
-            New group chat
+          <h2 id="create-group-title" className="text-base font-semibold dark:text-neutral-100">
+            {creationResult ? "Group created" : "New group chat"}
           </h2>
           <button
-            onClick={onClose}
+            onClick={() => !busy && onClose()}
             className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-700"
             aria-label="Close"
           >
@@ -191,6 +237,100 @@ export function CreateGroupModal({
         </div>
 
         <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">
+          {creationResult ? (
+            <div className="py-2">
+              <div className="mb-5 flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent/15 text-accent">
+                  <CheckCircleIcon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-slate-900 dark:text-neutral-100">
+                    {groupName.trim()} is ready
+                  </h3>
+                  <p className="mt-0.5 text-sm text-slate-500 dark:text-neutral-400">
+                    {creationResult.participantOutcomes.filter((outcome) => outcome.status === "added").length} added
+                    {creationResult.participantOutcomes.some((outcome) => outcome.status === "invite_sent")
+                      ? ` · ${creationResult.participantOutcomes.filter((outcome) => outcome.status === "invite_sent").length} invited privately`
+                      : ""}
+                  </p>
+                </div>
+              </div>
+
+              {creationResult.participantOutcomes.some(
+                (outcome) => outcome.status !== "added"
+              ) ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
+                    People who needed an invite
+                  </p>
+                  {creationResult.participantOutcomes
+                    .filter((outcome) => outcome.status !== "added")
+                    .map((outcome) => (
+                      <div
+                        key={`${outcome.participantKey}-${outcome.name}`}
+                        className="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-2.5 dark:border-neutral-700"
+                      >
+                        <span
+                          className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full ${
+                            outcome.status === "invite_sent"
+                              ? "bg-accent/15 text-accent"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                          }`}
+                        >
+                          <LinkIcon className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                            <span className="truncate text-sm font-medium text-slate-800 dark:text-neutral-100">
+                              {outcome.name}
+                            </span>
+                            <span
+                              className={`text-xs font-semibold ${
+                                outcome.status === "invite_sent"
+                                  ? "text-accent"
+                                  : "text-amber-700 dark:text-amber-300"
+                              }`}
+                            >
+                              {outcome.status === "invite_sent"
+                                ? "Invite link sent"
+                                : "Invite not sent"}
+                            </span>
+                          </div>
+                          {outcome.detail && (
+                            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">
+                              {outcome.detail}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-accent/10 px-4 py-3 text-sm text-slate-600 dark:text-neutral-300">
+                  Everyone was added directly to the group.
+                </div>
+              )}
+
+              {creationResult.inviteUrl &&
+                creationResult.participantOutcomes.some(
+                  (outcome) => outcome.status === "not_added"
+                ) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(creationResult.inviteUrl!);
+                      setCopiedInvite(true);
+                      window.setTimeout(() => setCopiedInvite(false), 1800);
+                    }}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                  >
+                    <CopyIcon className="h-4 w-4" />
+                    {copiedInvite ? "Invite link copied" : "Copy invite link"}
+                  </button>
+                )}
+            </div>
+          ) : (
+            <>
           {/* Templates — the group's purpose (name + message), pick people fresh */}
           <div className="mb-3">
             <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -268,23 +408,32 @@ export function CreateGroupModal({
           )}
 
           {/* Platform */}
-          <div className="mb-3 flex rounded-lg bg-slate-100 p-0.5 dark:bg-neutral-900">
+          <div className="mb-2 grid grid-cols-5 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-neutral-900">
             {GROUP_PLATFORMS.map((p) => (
               <button
                 key={p}
                 onClick={() => {
                   setPlatform(p);
                   setSelected(new Set());
+                  setError(null);
                 }}
-                className={`flex-1 rounded-md py-1 text-xs font-medium transition ${
+                className={`min-w-0 rounded-lg px-1 py-2 text-[11px] font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${
                   platform === p
                     ? "bg-white text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                    : "text-slate-500 dark:text-neutral-400"
+                    : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-100"
                 }`}
               >
-                {PLATFORMS[p].label}
+                <span className="block truncate">{PLATFORMS[p].label}</span>
               </button>
             ))}
+          </div>
+
+          <div className={`mb-3 rounded-lg px-3 py-2 text-xs leading-5 ${
+            GROUP_SUPPORT[platform].enabled
+              ? "bg-accent/10 text-slate-600 dark:text-neutral-300"
+              : "bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+          }`}>
+            {GROUP_SUPPORT[platform].note}
           </div>
 
           <input
@@ -342,13 +491,25 @@ export function CreateGroupModal({
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="First message (optional)"
+            placeholder={GROUP_SUPPORT[platform].requiresMessage ? "First message (required)" : "First message (optional)"}
             rows={2}
             className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
           />
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 border-t border-slate-200 px-5 py-3 dark:border-neutral-700">
+          {creationResult ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-auto rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-800"
+            >
+              Done
+            </button>
+          ) : (
+            <>
           {error ? (
             <span className="flex-1 truncate text-xs text-red-500">{error}</span>
           ) : (
@@ -362,13 +523,15 @@ export function CreateGroupModal({
           )}
           <button
             onClick={create}
-            disabled={busy || !groupName.trim() || !selected.size}
+            disabled={busy || !GROUP_SUPPORT[platform].enabled || !groupName.trim() || !selected.size || Boolean(GROUP_SUPPORT[platform].requiresMessage && !message.trim())}
             className="rounded-lg bg-accent px-4 py-1.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Creating…" : "Create group"}
           </button>
+            </>
+          )}
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }

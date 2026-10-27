@@ -1,10 +1,13 @@
 "use client";
 
+import { OverlayPortal } from "./OverlayPortal";
+
 import { useState, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import { TelegramConnect } from "./TelegramConnect";
+import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
 
 export type ConnState =
   | "starting"
@@ -18,6 +21,7 @@ export interface ConnStatus {
   state: ConnState;
   qr?: string | null;
   detail?: string;
+  sync?: import("@/lib/sync-health").SyncHealth;
 }
 
 export interface ConnectionsData {
@@ -34,12 +38,31 @@ const STATE_META: Record<ConnState, { label: string; color: string }> = {
 };
 
 export function ConnectionsModal({
-  data,
+  data: initialData,
   onClose,
 }: {
   data: ConnectionsData | null;
   onClose: () => void;
 }) {
+  const [data, setData] = useState(initialData);
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    const refresh = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch("/api/connections", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        if (!response.ok) throw new Error("Status unavailable");
+        const current = await response.json();
+        if (!cancelled) setData(current);
+      } catch { if (!cancelled) setData(null); }
+      finally { inFlight = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 4000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
   const [connectingTelegram, setConnectingTelegram] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
@@ -50,10 +73,16 @@ export function ConnectionsModal({
     label: string | null;
     status: string;
     detail: string | null;
+    driver?: string | null;
   };
   const [accounts, setAccounts] = useState<Acct[]>([]);
   const [busyAcct, setBusyAcct] = useState(false);
-  const [xCode, setXCode] = useState<string | null>(null);
+  const [connectorPlatform, setConnectorPlatform] = useState<"x" | "discord" | null>(null);
+  const [discordToken, setDiscordToken] = useState("");
+  const [discordLabel, setDiscordLabel] = useState("");
+  const [connectingDiscord, setConnectingDiscord] = useState(false);
+  const [discordMessage, setDiscordMessage] = useState<string | null>(null);
+  const [discordInstallUrl, setDiscordInstallUrl] = useState<string | null>(null);
   const [startingWorker, setStartingWorker] = useState(false);
   const [workerMsg, setWorkerMsg] = useState<string | null>(null);
 
@@ -116,15 +145,23 @@ export function ConnectionsModal({
     if (a?.accountId) live[a.accountId] = a;
 
   async function addAccount(platform: string) {
+    if (platform === "gmail") {
+      window.location.href = "/api/accounts/gmail/connect";
+      return;
+    }
     if (platform === "telegram") {
       setConnectingTelegram(true);
       return;
     }
     if (platform === "x") {
-      const r = await fetch("/api/accounts/pair", { method: "POST" })
-        .then((res) => res.json())
-        .catch(() => null);
-      setXCode(r?.code || "ERROR");
+      // The extension requests and consumes its own short-lived pairing code;
+      // this panel only needs to guide the user to the correct connector tab.
+      setConnectorPlatform(platform);
+      return;
+    }
+    if (platform === "discord") {
+      setConnectorPlatform("discord");
+      setDiscordMessage(null);
       return;
     }
     // WhatsApp: create a pending account; the worker links it via QR on (re)start.
@@ -136,6 +173,38 @@ export function ConnectionsModal({
     }).catch(() => {});
     setBusyAcct(false);
     loadAccounts();
+  }
+
+  async function connectDiscord() {
+    if (!discordToken.trim() || connectingDiscord) return;
+    setConnectingDiscord(true);
+    setDiscordMessage("Verifying the bot token with Discord…");
+    setDiscordInstallUrl(null);
+    try {
+      const response = await fetch("/api/accounts/discord/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botToken: discordToken, label: discordLabel }),
+      });
+      const result = await response.json().catch(() => ({})) as {
+        error?: string;
+        installUrl?: string;
+        workerReloaded?: boolean;
+      };
+      if (!response.ok) throw new Error(result.error || "Discord could not connect this bot.");
+      setDiscordToken("");
+      setDiscordInstallUrl(result.installUrl || null);
+      setDiscordMessage(
+        result.workerReloaded
+          ? "Bot verified. Add it to your server, then it will begin importing readable channels."
+          : "Bot verified. Add it to your server, then start the sync worker."
+      );
+      loadAccounts();
+    } catch (error) {
+      setDiscordMessage(error instanceof Error ? error.message : "Discord could not connect this bot.");
+    } finally {
+      setConnectingDiscord(false);
+    }
   }
 
   async function removeAccount(id: string) {
@@ -164,7 +233,7 @@ export function ConnectionsModal({
   }
 
   return (
-    <motion.div
+    <OverlayPortal onClose={onClose}><motion.div role="dialog" aria-modal="true" aria-label="Connections"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -177,10 +246,10 @@ export function ConnectionsModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-xl dark:bg-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-neutral-700">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-neutral-700 dark:bg-neutral-800">
           <h2 className="text-base font-semibold dark:text-neutral-100">Connections</h2>
           <button
             onClick={onClose}
@@ -254,13 +323,7 @@ export function ConnectionsModal({
                   <div className="flex flex-wrap gap-1.5">
                     {group.map((a) => {
                       const l = live[a.id];
-                      const st: ConnState =
-                        (l?.state as ConnState) ||
-                        (a.status === "connected"
-                          ? "ready"
-                          : a.status === "pending"
-                            ? "starting"
-                            : "disconnected");
+                      const st: ConnState = l?.state ?? "disabled";
                       const meta = STATE_META[st] || STATE_META.disabled;
                       return (
                         <span
@@ -289,17 +352,13 @@ export function ConnectionsModal({
                   </div>
                   {group.map((a) => {
                     const l = live[a.id];
-                    if (l?.state !== "qr" || !l?.qr) return null;
+                    if (p !== "whatsapp" || (l?.state !== "qr" && l?.detail !== "Generating a new QR code")) return null;
                     return (
                       <div
                         key={a.id + "-qr"}
                         className="mt-2 flex flex-col items-center gap-1 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={l.qr} alt="WhatsApp QR" className="h-40 w-40 rounded bg-white" />
-                        <p className="text-[11px] text-slate-500 dark:text-neutral-400">
-                          {a.label || "WhatsApp"} → Linked Devices → Link a Device
-                        </p>
+                        <WhatsAppLinkCode qr={l.qr} label={a.label || "WhatsApp"} accountId={a.id} canRefresh={a.driver === "web"} />
                       </div>
                     );
                   })}
@@ -328,22 +387,89 @@ export function ConnectionsModal({
             ))}
           </div>
 
-          {xCode && (
+          {connectorPlatform === "x" && (
             <div className="mt-3 rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs text-slate-600 dark:text-neutral-300">
-              In the <b>2 Many DMs</b> Chrome extension (logged into the X account
-              you want), paste this pairing code:
-              <div className="mt-1.5 font-mono text-lg font-bold tracking-[0.3em] text-accent dark:text-accent">
-                {xCode}
-              </div>
-              <div className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">
-                It hands off that account&apos;s cookies and adds it here.
+              Open <b>x.com</b>, make
+              sure you&apos;re signed in, then open the <b>2 Many DMs Connector</b>
+              extension and click <b>Connect my X account</b>.
+              <div className="mt-1.5 text-[11px] text-slate-400 dark:text-neutral-500">
+                Pairing is automatic. The encrypted session appears here and the
+                running worker starts its message backfill immediately.
               </div>
             </div>
           )}
 
+          {connectorPlatform === "discord" && (
+            <div className="mt-3 rounded-xl border border-[#5865f2]/30 bg-[#5865f2]/10 p-3 text-xs text-slate-700 dark:text-neutral-200">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Connect an official Discord bot</div>
+                  <p className="mt-1 leading-relaxed text-slate-500 dark:text-neutral-400">
+                    Create a bot, enable <b>Message Content Intent</b>, then paste its bot token below.
+                  </p>
+                </div>
+                <a
+                  href="https://discord.com/developers/applications"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 rounded-lg border border-[#5865f2]/30 bg-white px-2.5 py-1.5 font-semibold text-[#5865f2] transition hover:bg-[#5865f2]/5 dark:bg-neutral-900"
+                >
+                  Developer Portal ↗
+                </a>
+              </div>
+              <div className="mt-3 grid gap-2">
+                <input
+                  value={discordLabel}
+                  onChange={(event) => setDiscordLabel(event.target.value)}
+                  placeholder="Label (optional)"
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 outline-none transition focus:border-[#5865f2] focus:ring-2 focus:ring-[#5865f2]/20 dark:border-neutral-700 dark:bg-neutral-900"
+                />
+                <input
+                  type="password"
+                  value={discordToken}
+                  onChange={(event) => setDiscordToken(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void connectDiscord();
+                  }}
+                  placeholder="Bot token"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono outline-none transition focus:border-[#5865f2] focus:ring-2 focus:ring-[#5865f2]/20 dark:border-neutral-700 dark:bg-neutral-900"
+                />
+                <button
+                  type="button"
+                  onClick={connectDiscord}
+                  disabled={!discordToken.trim() || connectingDiscord}
+                  className="rounded-lg bg-[#5865f2] px-3 py-2 font-semibold text-white transition hover:bg-[#4752c4] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {connectingDiscord ? "Verifying…" : "Verify and connect bot"}
+                </button>
+              </div>
+              {discordMessage && (
+                <p className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 leading-relaxed dark:bg-neutral-900/70">
+                  {discordMessage}
+                </p>
+              )}
+              {discordInstallUrl && (
+                <a
+                  href={discordInstallUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 flex items-center justify-center rounded-lg border border-[#5865f2]/30 bg-white px-3 py-2 font-semibold text-[#5865f2] transition hover:bg-[#5865f2]/5 dark:bg-neutral-900"
+                >
+                  Add bot to a Discord server ↗
+                </a>
+              )}
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500 dark:text-neutral-400">
+                The token is encrypted at rest. The bot can only read server channels it is invited to and permitted to view, plus DMs sent directly to the bot. Existing personal-account archives stay read-only.
+              </p>
+            </div>
+          )}
+
           <p className="mt-3 text-[11px] leading-relaxed text-slate-400 dark:text-neutral-500">
-            New accounts start syncing when the worker (re)starts. WhatsApp shows
-            its QR here once it does.
+            Connections recover automatically after brief network loss or Mac
+            wake. WhatsApp shows a QR here only when it needs to be linked again.
           </p>
         </div>
 
@@ -386,9 +512,17 @@ export function ConnectionsModal({
                       Not enabled
                     </span>
                   )}
+                  {p === "discord" && (
+                    <button
+                      onClick={() => setConnectorPlatform("discord")}
+                      className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#4752c4]"
+                    >
+                      {state === "ready" ? "Reconnect" : "Connect bot"}
+                    </button>
+                  )}
                 </div>
 
-                {state === "qr" && status?.qr && (
+                {state === "qr" && status?.qr && !accounts.some((account) => account.platform === p) && (
                   <div className="mt-3 flex flex-col items-center gap-2 rounded-xl bg-slate-50 p-4 dark:bg-neutral-900">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -411,10 +545,49 @@ export function ConnectionsModal({
                       <div className="flex items-start gap-2">
                         <span aria-hidden>🔒</span>
                         <div className="flex-1">
-                          <span className="font-semibold">XChat is locked.</span>{" "}
-                          X&apos;s encrypted DMs need a one-time unlock — you&apos;ll
-                          type your passcode into X&apos;s own window (we never see
-                          it).
+                          {/rejected/i.test(status?.detail || "") ? (
+                            <>
+                              <span className="font-semibold">
+                                XChat passcode rejected.
+                              </span>{" "}
+                              X refused the code in{" "}
+                              <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                                X_PASSCODE
+                              </code>
+                              . It won&apos;t be retried — repeat attempts trip
+                              X&apos;s recovery lockout. Fix it in{" "}
+                              <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                                .env
+                              </code>{" "}
+                              and restart the worker.
+                            </>
+                          ) : /no passcode/i.test(status?.detail || "") ? (
+                            <>
+                              <span className="font-semibold">
+                                XChat is locked.
+                              </span>{" "}
+                              Set{" "}
+                              <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                                X_PASSCODE
+                              </code>{" "}
+                              in{" "}
+                              <code className="rounded bg-amber-100 px-1 dark:bg-amber-500/20">
+                                .env
+                              </code>{" "}
+                              to unlock automatically — that&apos;s how it works on
+                              a headless server, where there&apos;s no window to
+                              type into.
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-semibold">
+                                XChat is locked.
+                              </span>{" "}
+                              X&apos;s encrypted DMs need a one-time unlock —
+                              you&apos;ll type your passcode into X&apos;s own
+                              window (we never see it).
+                            </>
+                          )}
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             <button
                               onClick={unlockXChat}
@@ -461,9 +634,19 @@ export function ConnectionsModal({
                     </p>
                   )}
 
-                {state === "disconnected" && p !== "x" && (
+                {state === "disconnected" && p !== "x" && p !== "whatsapp" && p !== "discord" && (
                   <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
-                    Connection dropped. Restart the sync worker to reconnect.
+                    {p === "telegram" && /reconnect Telegram/i.test(status?.detail || "")
+                      ? "Telegram invalidated this saved login. Connect again once to create a fresh session."
+                      : "Connection dropped. Restart the sync worker to reconnect."}
+                  </p>
+                )}
+
+                {state === "disconnected" && p === "whatsapp" && (
+                  <p className="mt-2 text-xs text-slate-500 dark:text-neutral-400">
+                    {status?.detail || "WhatsApp disconnected."} A fresh QR will
+                    appear here automatically if the linked-device session was
+                    logged out.
                   </p>
                 )}
 
@@ -478,6 +661,24 @@ export function ConnectionsModal({
                     cookies (the extension fills these in), then restart{" "}
                     <code className="rounded bg-slate-100 px-1 dark:bg-neutral-700">npm run sync</code>.
                   </p>
+                )}
+
+                {p === "discord" && (
+                  <div className={`mt-2 rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+                    state === "ready"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+                      : state === "disconnected"
+                        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+                        : "border-slate-200 bg-slate-50 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
+                  }`}>
+                    {state === "ready" ? (
+                      <><span className="font-semibold">Official bot connected.</span> New messages sync live; manual replies and history backfill are enabled in channels the bot can access.</>
+                    ) : state === "disconnected" ? (
+                      <><span className="font-semibold">Bot needs attention.</span> {status?.detail || "Check its token, Message Content Intent, and channel permissions."}</>
+                    ) : (
+                      <><span className="font-semibold">Connect an official bot.</span> Personal-account archives remain searchable but read-only.</>
+                    )}
+                  </div>
                 )}
 
                 {state === "disabled" &&
@@ -502,6 +703,6 @@ export function ConnectionsModal({
           <TelegramConnect onClose={() => setConnectingTelegram(false)} />
         )}
       </AnimatePresence>
-    </motion.div>
+    </motion.div></OverlayPortal>
   );
 }

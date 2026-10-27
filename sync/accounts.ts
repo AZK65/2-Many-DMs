@@ -50,6 +50,8 @@ function envPlatforms(): { platform: string; driver: string }[] {
       platform: "x",
       driver: process.env.X_DRIVER === "api" ? "api" : "browser",
     });
+  if (process.env.DISCORD_ENABLED === "1" && process.env.DISCORD_BOT_TOKEN)
+    out.push({ platform: "discord", driver: "bot" });
   return out;
 }
 
@@ -80,6 +82,10 @@ export async function ensureAndBackfill(): Promise<void> {
   const byPlatform = new Map<string, string>();
   for (const a of accounts) if (!byPlatform.has(a.platform)) byPlatform.set(a.platform, a.id);
   for (const [platform, accountId] of byPlatform) {
+    // Legacy Discord imports came from a retired personal-account connector.
+    // Keep those archives unassigned/read-only: an official bot may not have
+    // access to the same DMs, even when a channel id happens to look valid.
+    if (platform === "discord") continue;
     const r = await prisma.conversation.updateMany({
       where: { platform, accountId: null },
       data: { accountId },

@@ -16,5 +16,11 @@ export async function DELETE(
   await prisma.account.deleteMany({
     where: { id: params.id, userId: user.id },
   });
+  const controlUrl = process.env.SYNC_CONTROL_URL || "http://localhost:4001";
+  await fetch(`${controlUrl}/reload`, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {});
   return NextResponse.json({ ok: true });
 }

@@ -9,6 +9,7 @@ import type {
   MediaType,
   OutboundMedia,
   SentMessage,
+  InboundReaction,
 } from "./types";
 
 /* Browser-free X *classic* DMs via the private 1.1 dm API, authed with the
@@ -44,6 +45,17 @@ function loadAuth(): { authToken: string; ct0: string } | null {
 
 const API = "https://x.com/i/api/1.1";
 
+// X's fixed DM reaction set, for payloads that send a key instead of an emoji.
+const X_REACTION_EMOJI: Record<string, string> = {
+  funny: "\u{1F602}",
+  surprised: "\u{1F62E}",
+  sad: "\u{1F622}",
+  like: "\u2764\uFE0F",
+  excited: "\u{1F525}",
+  agree: "\u{1F44D}",
+  disagree: "\u{1F44E}",
+};
+
 interface XApiOpts {
   proxyUrl?: string;
   auth?: { authToken: string; ct0: string }; // per-account cookies (else env/file)
@@ -58,7 +70,9 @@ export class XApiAdapter implements Adapter {
   private cursor?: string;
   private timer?: ReturnType<typeof setInterval>;
   private onMessage?: (m: InboundMessage) => Promise<void>;
+  private onReaction?: (r: InboundReaction) => Promise<void>;
   private busy = false;
+  private recoveryPromise?: Promise<void>;
   // Last seen message id per conversation, for mark_read.
   private lastEvent = new Map<string, string>();
 
@@ -89,10 +103,18 @@ export class XApiAdapter implements Adapter {
   }
 
   private async api(url: string, init: any = {}): Promise<any> {
-    const res = await fetch(url, {
-      ...init,
-      headers: { ...this.headers(init.headers || {}) },
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...init,
+        headers: { ...this.headers(init.headers || {}) },
+      });
+    } catch (error) {
+      // A network failure is recoverable and must stop the worker from routing
+      // more sends into a connector that only looks ready.
+      if (this.state === "ready") this.state = "starting";
+      throw error;
+    }
     if (res.status === 401 || res.status === 403) {
       this.state = "disconnected";
       throw new Error(`x api auth failed (${res.status}) — refresh X_AUTH_TOKEN/X_CT0`);
@@ -102,8 +124,35 @@ export class XApiAdapter implements Adapter {
     return ct.includes("application/json") ? res.json() : res.text();
   }
 
-  async start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void> {
+  async ensureReady(): Promise<void> {
+    if (this.state === "ready") return;
+    if (this.state === "disconnected") throw new Error("X needs to be reconnected");
+    if (!this.recoveryPromise) {
+      this.recoveryPromise = this.backfill()
+        .catch((error) => {
+          this.state = "starting";
+          throw error;
+        })
+        .finally(() => {
+          this.recoveryPromise = undefined;
+        });
+    }
+    return this.recoveryPromise;
+  }
+
+  async recover(): Promise<void> {
+    if (this.recoveryPromise) return this.recoveryPromise;
+    this.state = "starting";
+    await this.ensureReady();
+  }
+
+  async start(
+    onMessage: (m: InboundMessage) => Promise<void>,
+    _onRead?: (chatExternalId: string) => Promise<void>,
+    onReaction?: (r: InboundReaction) => Promise<void>
+  ): Promise<void> {
     this.onMessage = onMessage;
+    this.onReaction = onReaction;
     this.auth = this.optAuth || loadAuth() || undefined;
     if (!this.auth) {
       this.state = "disconnected";
@@ -118,7 +167,7 @@ export class XApiAdapter implements Adapter {
       // "me" from the inbox itself.
       await this.backfill();
     } catch (e) {
-      this.state = "disconnected";
+      if (!/auth failed|reconnect/i.test(String(e))) this.state = "starting";
       console.error("[x:api] connect failed:", e);
       return;
     }
@@ -157,6 +206,15 @@ export class XApiAdapter implements Adapter {
         Object.keys(block.conversations || {}).length
       } conversations`
     );
+    const inboxMetaKeys = Array.from(
+      new Set(
+        Object.values(block.conversations || {}).flatMap((conv: any) =>
+          Object.keys(conv || {}).filter((key) => /trust|quality|inbox|spam/i.test(key))
+        )
+      )
+    );
+    if (inboxMetaKeys.length)
+      console.log(`[x:api] inbox classification fields: ${inboxMetaKeys.join(", ")}`);
     await this.ingest(block);
     if (block.cursor) this.cursor = block.cursor;
   }
@@ -174,6 +232,11 @@ export class XApiAdapter implements Adapter {
     }
   }
 
+  async requestHistory(): Promise<void> {
+    if (!this.onMessage || this.state !== "ready") throw new Error("X is not ready");
+    await this.backfill();
+  }
+
   // Parse an inbox/user_events block (conversations + users + entries) and feed
   // each 1:1 DM message to the store.
   private async ingest(block: any): Promise<void> {
@@ -184,12 +247,45 @@ export class XApiAdapter implements Adapter {
 
     // entries arrive newest-first; persist oldest-first so ordering is natural.
     for (const entry of [...entries].reverse()) {
+      // Reactions share the entries array with messages. X sends a legacy
+      // reaction_key ("funny") on older payloads and emoji_reaction on newer
+      // ones; prefer the emoji and fall back to the documented key set.
+      const rc = entry.reaction_create || entry.reaction_delete;
+      if (rc && this.onReaction) {
+        const emoji =
+          rc.emoji_reaction ||
+          X_REACTION_EMOJI[String(rc.reaction_key || "").toLowerCase()] ||
+          "";
+        if (emoji && rc.message_id) {
+          await this.onReaction({
+            platform: "x",
+            messageExternalId: `x:${rc.message_id}`,
+            actor: { externalKey: `x:user:${rc.sender_id}` },
+            emoji,
+            removed: !!entry.reaction_delete,
+          }).catch(() => {});
+        }
+        continue;
+      }
+
       const m = entry.message;
       if (!m) continue;
       const md = m.message_data || {};
       const convId: string = m.conversation_id || md.conversation_id;
       if (!convId) continue;
       const conv = conversations[convId];
+      // X has renamed these fields across inbox versions. Treat any explicit
+      // untrusted / low-quality signal as a request; absent metadata is General.
+      const inboxCategory: "general" | "spam" =
+        conv?.trusted === false ||
+        conv?.is_trusted === false ||
+        conv?.isTrusted === false ||
+        conv?.trust_status === "untrusted" ||
+        conv?.inbox_type === "untrusted" ||
+        conv?.inbox_type === "spam" ||
+        conv?.low_quality === true
+          ? "spam"
+          : "general";
       const isGroup = conv?.type === "GROUP_DM";
       const senderId = String(md.sender_id || "");
       const direction: "in" | "out" = senderId === this.myId ? "out" : "in";
@@ -209,6 +305,12 @@ export class XApiAdapter implements Adapter {
           senderInfo = {
             externalKey: `x:user:${senderId}`,
             name: su.name || su.screen_name || "Member",
+            avatarUrl: su.profile_image_url_https
+              ? (await saveAvatarFromUrl(
+                  `x_user_${senderId}`,
+                  su.profile_image_url_https.replace("_normal", "_400x400")
+                )) || undefined
+              : undefined,
           };
         }
       } else {
@@ -244,6 +346,7 @@ export class XApiAdapter implements Adapter {
         timestamp: new Date(Number(md.time || m.time || Date.now())),
         contact: { externalKey: `x:${convId}`, name, handle, avatarUrl },
         isGroup,
+        inboxCategory,
         sender: senderInfo,
       };
 
@@ -287,7 +390,7 @@ export class XApiAdapter implements Adapter {
     body: string,
     media?: OutboundMedia
   ): Promise<SentMessage> {
-    if (this.state !== "ready") throw new Error("X (api) not ready");
+    await this.ensureReady();
     let mediaId = "";
     if (media) mediaId = await this.uploadMedia(media);
 

@@ -1,4 +1,4 @@
-export type Platform = "x" | "whatsapp" | "telegram";
+export type Platform = "x" | "whatsapp" | "telegram" | "discord" | "gmail";
 
 export const PLATFORMS: Record<
   Platform,
@@ -7,12 +7,21 @@ export const PLATFORMS: Record<
   x: { label: "X", color: "#ffffff", bg: "#0f1419" },
   whatsapp: { label: "WhatsApp", color: "#ffffff", bg: "#25d366" },
   telegram: { label: "Telegram", color: "#ffffff", bg: "#229ed9" },
+  discord: { label: "Discord", color: "#ffffff", bg: "#5865f2" },
+  gmail: { label: "Gmail", color: "#ffffff", bg: "#d93025" },
 };
 
-export const PLATFORM_ORDER: Platform[] = ["x", "whatsapp", "telegram"];
+export const PLATFORM_ORDER: Platform[] = [
+  "x",
+  "whatsapp",
+  "telegram",
+  "discord",
+  "gmail",
+];
 
 // What each platform can send. Types differ: Telegram takes any file, WhatsApp
-// takes media + documents, X only photos/GIFs/videos.
+// takes media + documents, Discord takes any file (but caps free accounts at
+// ~10 MB), X only photos/GIFs/videos.
 export type SendableMediaType = "image" | "video" | "audio" | "file";
 
 export interface AttachmentCaps {
@@ -37,6 +46,16 @@ export const PLATFORM_ATTACHMENTS: Record<Platform, AttachmentCaps> = {
     accept: "image/*,video/*",
     types: ["image", "video"],
     hint: "Photos, GIFs or videos only",
+  },
+  discord: {
+    accept: "*/*",
+    types: ["image", "video", "audio", "file"],
+    hint: "Any file — 10 MB max without Nitro",
+  },
+  gmail: {
+    accept: "*/*",
+    types: ["image", "video", "audio", "file"],
+    hint: "Attach any file up to 25 MB",
   },
 };
 
@@ -72,10 +91,11 @@ export function avatarColor(seed: string): string {
 }
 
 export function initials(name: string): string {
-  return name
-    .split(" ")
-    .filter(Boolean)
+  const words = name.match(/[\p{L}\p{N}]+/gu) || [];
+  // Separators in group titles ("Team x Alex", "A / B") are not names.
+  return words
+    .filter(word => words.length === 1 || word.toLowerCase() !== "x")
     .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase())
-    .join("");
+    .map(word => Array.from(word)[0]?.toUpperCase())
+    .join("") || "?";
 }

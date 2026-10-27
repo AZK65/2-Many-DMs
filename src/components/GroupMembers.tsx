@@ -25,13 +25,23 @@ export function GroupMembers({
 }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/conversations/${conversationId}/members`)
-      .then((r) => r.json())
-      .then(setMembers)
-      .catch(() => setMembers([]));
-  }, [conversationId]);
+    const controller = new AbortController();
+    setMembers([]);
+    setPickerFor(null);
+    setLoading(true);
+    setError(false);
+    fetch(`/api/conversations/${conversationId}/members`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error("Could not load people"); return r.json(); })
+      .then(data => { if (!controller.signal.aborted) setMembers(data); })
+      .catch(() => { if (!controller.signal.aborted) setError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [conversationId, retry]);
 
   async function addTag(memberId: string, tag: TagDTO) {
     setMembers((ms) =>
@@ -55,6 +65,18 @@ export function GroupMembers({
     }).catch(() => {});
   }
 
+  if (loading) return <div role="status" aria-label="Loading people in this group" className="space-y-3">
+    {[0, 1, 2].map(i => <div key={i} className="flex animate-pulse items-center gap-2 motion-reduce:animate-none">
+      <span className="h-10 w-10 rounded-full bg-slate-200 dark:bg-neutral-800" />
+      <span className="h-4 w-24 rounded bg-slate-200 dark:bg-neutral-800" />
+    </div>)}
+  </div>;
+
+  if (error) return <div className="text-xs text-slate-500 dark:text-neutral-400">
+    Could not load people in this group.
+    <button type="button" onClick={() => setRetry(value => value + 1)} className="ml-2 rounded text-accent underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Retry</button>
+  </div>;
+
   if (!members.length) {
     return (
       <p className="text-xs text-slate-400 dark:text-neutral-500">
@@ -65,12 +87,15 @@ export function GroupMembers({
 
   return (
     <div className="space-y-2">
+      <p className="pb-2 text-xs text-slate-500 dark:text-neutral-400">
+        {members.length} {members.length === 1 ? "person" : "people"} from synced messages. This may not include everyone currently in the group.
+      </p>
       {members.map((m) => {
         const avail = allTags.filter((t) => !m.tags.some((x) => x.id === t.id));
         return (
           <div
             key={m.id}
-            className="rounded-xl border border-slate-200 p-2.5 dark:border-neutral-700"
+            className="group py-2"
           >
             <div className="flex items-center gap-2">
               <Avatar
@@ -83,7 +108,7 @@ export function GroupMembers({
                 {m.name}
               </span>
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <div className="ml-12 flex flex-wrap items-center gap-1">
               {m.tags.map((t) => (
                 <span
                   key={t.id}
@@ -93,6 +118,7 @@ export function GroupMembers({
                   {t.name}
                   <button
                     onClick={() => removeTag(m.id, t.id)}
+                    aria-label={`Remove ${t.name} from ${m.name}`}
                     className="opacity-70 transition hover:opacity-100"
                   >
                     ✕
@@ -102,7 +128,9 @@ export function GroupMembers({
               <div className="relative">
                 <button
                   onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}
-                  className="rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-500 transition hover:border-slate-400 dark:border-neutral-600 dark:text-neutral-400"
+                  aria-label={`Add a tag to ${m.name}`}
+                  aria-expanded={pickerFor === m.id}
+                  className="rounded px-1 py-0.5 text-xs text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
                 >
                   + tag
                 </button>

@@ -12,7 +12,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const rows = await prisma.message.findMany({
-    where: { conversationId: params.id, senderContactId: { not: null } },
+    where: { conversationId: params.id, direction: "in", senderContactId: { not: null }, senderContact: { isGroup: false } },
     distinct: ["senderContactId"],
     orderBy: { createdAt: "desc" },
     select: {
@@ -20,7 +20,12 @@ export async function GET(
         select: {
           id: true,
           name: true,
+          handle: true,
+          externalKey: true,
           avatarUrl: true,
+          company: true,
+          email: true,
+          phone: true,
           tags: { include: { tag: true } },
         },
       },
@@ -33,6 +38,11 @@ export async function GET(
       id: c.id,
       name: c.name,
       avatarUrl: c.avatarUrl,
+      handle: c.handle,
+      externalKey: c.externalKey,
+      company: c.company,
+      email: c.email,
+      phone: c.phone,
       tags: c.tags.map((ct) => ({
         id: ct.tag.id,
         name: ct.tag.name,

@@ -24,7 +24,7 @@ model Account {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platform  String // telegram | whatsapp | x
+  platform  String // telegram | whatsapp | x | discord
   label     String? // phone number / @handle shown to the user
   status    String   @default("disconnected") // connected | pending | disconnected | error
   session   String? // encrypted session (Telegram StringSession, etc.)
@@ -68,6 +68,7 @@ model Contact {
   tags          ContactTag[]
   relations     ContactRelation[] @relation("ContactToRelation")
   sentMessages  Message[]         @relation("MessageSender") // group messages this person sent
+  emailCaptures EmailCapture[]
 }
 
 // A directed link from a contact to another conversation (a colleague's chat,
@@ -101,27 +102,78 @@ model ContactTag {
 }
 
 model Conversation {
-  id            String               @id @default(cuid())
-  platform      String // 'x' | 'whatsapp' | 'telegram'
-  externalId    String? // platform chat/peer id used to route replies
-  accountId     String? // which connected Account this chat belongs to (multi-account routing)
-  account       Account?             @relation(fields: [accountId], references: [id])
-  contactId     String
-  contact       Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  lastMessageAt DateTime             @default(now())
-  unread        Int                  @default(0)
-  pinned        Boolean              @default(false)
-  hidden        Boolean              @default(false) // "not a client" — hidden from the default inbox
-  status        String               @default("open") // triage: open | waiting | done
-  snoozedUntil  DateTime? // follow-up: hidden from Active until this time
-  lastOpenedAt  DateTime? // last time you opened this chat — resets the cold clock
-  messages      Message[]
-  folders       ConversationFolder[]
-  relatedFrom   ContactRelation[]    @relation("ConversationToRelation")
+  id                      String               @id @default(cuid())
+  platform                String // 'x' | 'whatsapp' | 'telegram' | 'discord'
+  externalId              String? // platform chat/peer id used to route replies
+  accountId               String? // which connected Account this chat belongs to (multi-account routing)
+  account                 Account?             @relation(fields: [accountId], references: [id])
+  contactId               String
+  contact                 Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  lastMessageAt           DateTime             @default(now())
+  unread                  Int                  @default(0)
+  hasUnreadMention        Boolean              @default(false)
+  pinned                  Boolean              @default(false)
+  hidden                  Boolean              @default(false) // "not a client" — hidden from the default inbox
+  archived                Boolean              @default(false) // archived + muted on Telegram/WhatsApp; reversible from Archived
+  inboxCategory           String               @default("general") // general | spam (X requests / low-quality inbox)
+  inboxOverride           Boolean              @default(false) // user-promoted chats stay in General on future syncs
+  status                  String               @default("open") // triage: open | waiting | done
+  intent                  String               @default("normal") // normal | prospect | onboarding | support
+  followUpAt              DateTime? // when this chat should return to the follow-up queue
+  snoozedUntil            DateTime? // follow-up: hidden from Active until this time
+  lastOpenedAt            DateTime? // last time you opened this chat — resets the cold clock
+  priority                Boolean              @default(false) // visually elevated, independent of pinning
+  todo                    Boolean              @default(false) // conversation appears in the To-do workspace
+  todoNote                String? // private action note shown beside the conversation
+  todoCompleted           Boolean              @default(false)
+  todoAddedAt             DateTime?
+  // Per-chat AI translation. The detected/selected language is kept on the
+  // conversation so the experience follows the chat across devices.
+  translationEnabled      Boolean              @default(false)
+  translationLanguageCode String?
+  translationLanguageName String?
+  messages                Message[]
+  folders                 ConversationFolder[]
+  relatedFrom             ContactRelation[]    @relation("ConversationToRelation")
+  emailCaptures           EmailCapture[]
+  keywordAlerts           KeywordAlert[]
 
   // Replies are routed by account, so a chat is unique per (account, peer) —
   // two of your own accounts can each hold a chat with the same person.
   @@unique([accountId, externalId])
+  @@index([lastMessageAt])
+}
+
+// A lightweight, alert-only watcher for Telegram group messages. A null
+// conversationId means the phrases apply to every synced Telegram group.
+model KeywordAlert {
+  id             String            @id @default(cuid())
+  conversationId String?           @unique
+  conversation   Conversation?     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  phrases        String            @default("[]") // JSON array of case-insensitive phrases
+  enabled        Boolean           @default(true)
+  lastScannedAt  DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  hits           KeywordAlertHit[]
+
+  @@index([enabled, updatedAt])
+}
+
+// A durable inbox entry created when a Telegram group message matches one of
+// the saved keyword alerts. One message appears once even if several phrases
+// or overlapping group/all-group rules match it.
+model KeywordAlertHit {
+  id            String       @id @default(cuid())
+  alertId       String
+  alert         KeywordAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  messageId     String       @unique
+  message       Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  matchedPhrase String
+  readAt        DateTime?
+  createdAt     DateTime     @default(now())
+
+  @@index([readAt, createdAt])
 }
 
 model Folder {
@@ -162,9 +214,10 @@ model Automation {
   platform     String? // filter: only this platform (null = any)
   tagId        String? // filter: only chats with this tag
   folderId     String? // filter: only chats in this folder
+  intent       String? // filter: normal | prospect | onboarding | support
   message      String // legacy/first-step message (kept for summaries)
   actions      String? // JSON array of action steps: send | tag | status
-  schedule     String          @default("manual") // manual | daily | every_n_days
+  schedule     String          @default("manual") // instant | manual | daily | every_n_days
   everyNDays   Int? // for every_n_days schedule
   cooldownDays Int             @default(7) // don't re-message the same chat within N days
   lastRunAt    DateTime?
@@ -187,18 +240,181 @@ model AutomationRun {
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id                        String            @id @default(cuid())
+  conversationId            String
+  conversation              Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   // In group chats, the member who sent this message (so the UI can show their
   // tags). Null for 1:1 and your own sends.
-  senderContactId String?
-  senderContact   Contact?    @relation("MessageSender", fields: [senderContactId], references: [id])
-  body           String
-  direction      String // 'in' | 'out'
-  mediaType      String? // 'image' | 'video' | 'audio' | 'sticker' | 'file'
-  mediaUrl       String? // served path, e.g. "/media/telegram_123_45.jpg"
-  mediaName      String? // original filename (for files)
-  externalKey    String?      @unique // e.g. "telegram:<chatId>:<msgId>" — for sync dedupe
-  createdAt      DateTime     @default(now())
+  senderContactId           String?
+  senderContact             Contact?          @relation("MessageSender", fields: [senderContactId], references: [id])
+  body                      String
+  // For translated outbound messages, body is the exact text sent to the
+  // platform and originalBody is the English draft. For inbound messages,
+  // translatedBody caches the user's English translation.
+  originalBody              String?
+  translatedBody            String?
+  translationSourceLanguage String?
+  translationTargetLanguage String?
+  direction                 String // 'in' | 'out'
+  mediaType                 String? // 'image' | 'video' | 'audio' | 'sticker' | 'file'
+  mediaUrl                  String? // served path, e.g. "/media/telegram_123_45.jpg"
+  mediaName                 String? // original filename (for files)
+  mediaIsGif                Boolean           @default(false) // native GIFs can arrive as MP4
+  // Local image OCR. The worker indexes image text with GLM-OCR through
+  // Ollama, so screenshots become searchable without uploading them.
+  ocrText                   String?
+  ocrStatus                 String? // processing | complete | failed | skipped
+  ocrModel                  String?
+  ocrError                  String?
+  ocrUpdatedAt              DateTime?
+  externalKey               String?           @unique // e.g. "telegram:<chatId>:<msgId>" — for sync dedupe
+  replyToExternalKey        String?
+  replyPreview              String?
+  replySender               String?
+  // Outbound delivery is persisted so a slow connector or page refresh cannot
+  // lose the real state of a send. Legacy/inbound rows keep this null.
+  deliveryStatus            String? // pending | sent | unconfirmed | failed
+  deliveryError             String?
+  sendAttempts              Int               @default(0)
+  lastSendAttemptAt         DateTime?
+  // OmniCRM-local pin. This intentionally does not alter the source platform,
+  // so every connector can offer the same reliable pinned-message experience.
+  pinnedAt                  DateTime?
+  createdAt                 DateTime          @default(now())
+  emailCaptures             EmailCapture[]
+  reactions                 Reaction[]
+  keywordAlertHits          KeywordAlertHit[]
+
+  @@index([conversationId, createdAt])
+  @@index([conversationId, pinnedAt])
+  @@index([mediaType, ocrStatus])
+}
+
+// An emoji reaction on a message. Stored as rows rather than a JSON blob
+// because platforms send add/remove events for a single (person, emoji) pair,
+// and a row is what you can delete.
+//
+// actorKey is the platform user key ("telegram:123"), or "me" for your own
+// reactions — your own account has no Contact row to point at.
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  emoji     String
+  // Who reacted. Platform user key ("telegram:123"), "me" for your own, or
+  // "aggregate" when the platform gives counts without identities (large
+  // Telegram channels, Discord message fetches).
+  actorKey  String
+  actorName String?
+  count     Int      @default(1)
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, actorKey, emoji])
+  @@index([messageId])
+}
+
+// Records the exact DM an email was copied from so clipboard context is never
+// lost. Repeated copies update copiedAt and increment copyCount.
+model EmailCapture {
+  id             String       @id @default(cuid())
+  email          String
+  messageId      String
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  copyCount      Int          @default(1)
+  firstCopiedAt  DateTime     @default(now())
+  copiedAt       DateTime     @default(now())
+  sourceApp      String?
+
+  @@unique([messageId, email])
+  @@index([copiedAt])
+}
+
+// Standalone work that does not need to belong to a conversation.
+model TodoTask {
+  id          String    @id @default(cuid())
+  title       String
+  note        String?
+  priority    Boolean   @default(false)
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completed, priority, createdAt])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  text      String
+  level     String   @default("info")
+  category  String   @default("event")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+
+// ── Social listening ──────────────────────────────────────────────────────
+// Leads pushed in by a configured standalone X listener.
+// It qualifies each post and POSTs the whole
+// run here — qualified and rejected alike, so the feed can be filtered rather
+// than pre-trimmed.
+//
+// This table holds identifiable people and their complaints. Treat it as
+// personal data: see the retention sweep and purge endpoint in
+// src/lib/listening.ts.
+model SocialLead {
+  id           String  @id @default(cuid())
+  platform     String  @default("twitter")
+  kind         String  @default("lead") // lead | support
+  postId       String // the tweet ID — natural key from the source
+  watcher      String? // which watcher's queries found it
+  username     String
+  displayName  String?
+  bio          String?
+  followers    String?
+  content      String
+  url          String
+  matchedQuery String?
+
+  // LLM verdict
+  tier   String // HOT | WARM | REJECT
+  reason String?
+
+  // Your workflow state, owned here rather than by the listener
+  status      String    @default("new") // new | contacted | ignored
+  rating      String? // good | bad — relayed back as LLM training feedback
+  contactedAt DateTime?
+  notes       String?
+
+  // Outbound reply posted from the CRM (see src/lib/x-reply.ts)
+  repliedAt DateTime?
+  replyText String?
+
+  postedAt   DateTime?
+  receivedAt DateTime  @default(now())
+
+  @@unique([platform, postId])
+  @@index([kind, status, receivedAt])
+  @@index([tier, receivedAt])
+  @@index([status])
+  @@index([username])
+}
+
+// One row per listener run — powers the "last run" indicator and makes a
+// silently dead scraper visible instead of looking like a quiet day.
+model SocialRun {
+  id        String   @id @default(cuid())
+  watcher   String?
+  found     Int      @default(0)
+  fresh     Int      @default(0)
+  hot       Int      @default(0)
+  warm      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

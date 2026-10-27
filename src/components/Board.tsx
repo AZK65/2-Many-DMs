@@ -7,13 +7,27 @@ import { PLATFORMS } from "@/lib/platforms";
 import { PIPELINE } from "@/lib/pipeline";
 import { loadStages } from "@/lib/settings";
 import { listTime } from "@/lib/time";
-import { Avatar } from "./Avatar";
-import ThemeToggle from "./ThemeToggle";
-import type { ContactCardDTO, TagDTO } from "@/lib/types";
 
-const UNTAGGED = "untagged";
+import { Avatar } from "./Avatar";
+import { WorkspaceHeader } from "./WorkspaceHeader";
+import type { ContactCardDTO, TagDTO } from "@/lib/types";
+import { MailIcon } from "./icons";
+
 const NO_STAGE = "none";
-type GroupBy = "stage" | "tag";
+const UNTAGGED = "untagged";
+type GroupBy = "stage" | "tag" | "email";
+
+function emailAgeHours(card: ContactCardDTO): number {
+  return card.emailActivity ? (Date.now() - new Date(card.emailActivity.firstCopiedAt).getTime()) / 3_600_000 : 0;
+}
+
+function emailWaitLabel(iso: string): string {
+  const hours = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000));
+  if (hours < 1) return "Copied less than an hour ago";
+  if (hours < 24) return `Waiting ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `Waiting ${days}d ${hours % 24}h`;
+}
 
 interface Column {
   id: string;
@@ -25,6 +39,7 @@ interface Column {
 export function Board() {
   const [contacts, setContacts] = useState<ContactCardDTO[]>([]);
   const [tags, setTags] = useState<TagDTO[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [groupBy, setGroupBy] = useState<GroupBy>("stage");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -34,36 +49,63 @@ export function Board() {
   const [stages, setStages] = useState(PIPELINE);
 
   useEffect(() => {
+    const requestedGroup = new URLSearchParams(window.location.search).get("group");
+    if (["stage", "tag", "email"].includes(requestedGroup || "")) {
+      setGroupBy(requestedGroup as GroupBy);
+    }
     setStages(loadStages());
     const onChange = () => setStages(loadStages());
     window.addEventListener("tmd-settings", onChange);
     Promise.all([
-      fetch("/api/contacts").then((r) => r.json()),
+      fetch("/api/contacts", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/tags").then((r) => r.json()),
     ]).then(([cs, tg]: [ContactCardDTO[], TagDTO[]]) => {
       setContacts(cs);
       setTags(tg);
-      setLoading(false);
-    });
+    }).catch(() => {
+      setContacts([]);
+      setTags([]);
+    }).finally(() => setLoading(false));
     return () => window.removeEventListener("tmd-settings", onChange);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadLiveBoard = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/contacts", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((data: ContactCardDTO[]) => {
+          if (active) setContacts(data);
+        })
+        .catch(() => {});
+    };
+    const interval = window.setInterval(loadLiveBoard, 5_000);
+    const onVisibilityChange = () => loadLiveBoard();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
   const columns: Column[] = useMemo(() => {
-    if (groupBy === "stage") {
+    if (groupBy === "email") {
+      const sorted = (items: ContactCardDTO[]) => [...items].sort((a, b) => emailAgeHours(b) - emailAgeHours(a));
       return [
-        {
-          id: NO_STAGE,
-          name: "No stage",
-          color: "#94a3b8",
-          cards: contacts.filter((c) => !c.stage),
-        },
-        ...stages.map((s) => ({
+        { id: "email-new", name: "New · under 24h", color: "#2563eb", cards: sorted(contacts.filter((c) => c.emailActivity && emailAgeHours(c) < 24)) },
+        { id: "email-waiting", name: "Waiting · 1–3 days", color: "#d97706", cards: sorted(contacts.filter((c) => c.emailActivity && emailAgeHours(c) >= 24 && emailAgeHours(c) < 72)) },
+        { id: "email-old", name: "Old · over 3 days", color: "#dc2626", cards: sorted(contacts.filter((c) => c.emailActivity && emailAgeHours(c) >= 72)) },
+      ];
+    }
+    if (groupBy === "stage") {
+      return [{ id: NO_STAGE, name: "No stage", color: "#94a3b8", cards: contacts.filter((c) => !stages.some((s) => s.id === c.stage)) }, ...stages.map((s) => ({
           id: s.id,
           name: s.name,
           color: s.color,
           cards: contacts.filter((c) => c.stage === s.id),
-        })),
-      ];
+        }))];
     }
     const tagged = tags.map((t) => ({
       id: t.id,
@@ -79,6 +121,7 @@ export function Board() {
   }, [groupBy, tags, contacts, stages]);
 
   async function move(contactId: string, targetCol: string) {
+    if (groupBy === "email") return;
     if (!dragSource || targetCol === dragSource) return;
 
     if (groupBy === "stage") {
@@ -129,36 +172,17 @@ export function Board() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 dark:bg-neutral-950">
-      {/* Header / nav */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon-light.png" alt="2 Many DMs" className="h-6 w-6 dark:hidden" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon-dark.png" alt="2 Many DMs" className="hidden h-6 w-6 dark:block" />
-          <nav className="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
-            <Link
-              href="/"
-              className="rounded-md px-2.5 py-1 text-slate-500 transition hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-            >
-              Inbox
-            </Link>
-            <span className="rounded-md bg-white px-2.5 py-1 text-slate-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100">
-              Board
-            </span>
-            <Link
-              href="/automations"
-              className="rounded-md px-2.5 py-1 text-slate-500 transition hover:text-slate-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-            >
-              Auto
-            </Link>
-          </nav>
+    <div className="workspace-page relative flex h-dvh flex-col overflow-hidden bg-slate-50 dark:bg-neutral-900">
+      <WorkspaceHeader />
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4 dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="flex flex-wrap items-center gap-4">
+          <h1 className="text-xl font-semibold tracking-tight">Board</h1>
           <div className="ml-1 flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
             {(
               [
                 ["stage", "Pipeline"],
                 ["tag", "Tags"],
+                ["email", "Email queue"],
               ] as [GroupBy, string][]
             ).map(([id, label]) => (
               <button
@@ -177,10 +201,9 @@ export function Board() {
         </div>
         <div className="flex items-center gap-3">
           <div className="text-xs text-slate-400 dark:text-neutral-500">
-            {contacts.length} contacts · drag a card to set its{" "}
-            {groupBy === "stage" ? "stage" : "tag"}
+            {`${contacts.length} contacts · ${groupBy === "email" ? "oldest waits first" : `drag a card to set its ${groupBy === "stage" ? "stage" : "tag"}`}`}
           </div>
-          <ThemeToggle />
+
         </div>
       </header>
 
@@ -194,6 +217,7 @@ export function Board() {
               <div
                 key={col.id}
                 onDragOver={(e) => {
+                  if (groupBy === "email") return;
                   e.preventDefault();
                   setOverCol(col.id);
                 }}
@@ -238,23 +262,22 @@ export function Board() {
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.15 }}
-                        draggable
+                        draggable={groupBy !== "email"}
                         onDragStart={() => {
                           setDragId(card.id);
                           setDragSource(col.id);
                         }}
                         onDragEnd={endDrag}
-                        className={`cursor-grab rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm transition active:cursor-grabbing dark:border-neutral-700 dark:bg-neutral-800 ${
+                        className={`cursor-grab rounded-xl border border-slate-200 bg-white p-3 transition-colors duration-200 active:cursor-grabbing dark:border-neutral-700 dark:bg-[#1F1F1F] ${
                           dragId === card.id ? "opacity-50" : "hover:shadow-md"
                         }`}
                       >
                         <div className="flex items-center gap-2.5">
-                          <Avatar
-                            name={card.name}
-                            platform={card.platform}
-                            size="sm"
-                            src={card.avatarUrl}
-                          />
+                          {card.conversationId ? (
+                            <Link href={`/?c=${card.conversationId}`} title={`Open conversation with ${card.name}`} className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                              <Avatar name={card.name} platform={card.platform} size="sm" src={card.avatarUrl} />
+                            </Link>
+                          ) : <Avatar name={card.name} platform={card.platform} size="sm" src={card.avatarUrl} />}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between gap-2">
                               <span className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">
@@ -269,6 +292,7 @@ export function Board() {
                             <div className="truncate text-xs text-slate-500 dark:text-neutral-400">
                               {card.lastMessage || card.handle}
                             </div>
+
                           </div>
                         </div>
                         {card.tags.length > 1 && (
@@ -289,6 +313,15 @@ export function Board() {
                               ))}
                           </div>
                         )}
+                        {card.emailActivity && (
+                          <div className="mt-2 ml-[42px] rounded-md bg-slate-100 px-2 py-1.5 dark:bg-neutral-700/70">
+                            <div className="truncate text-[11px] font-medium text-slate-700 dark:text-neutral-200">{card.emailActivity.email}</div>
+                            <div className={`mt-0.5 text-[10px] font-semibold ${emailAgeHours(card) >= 72 ? "text-red-600 dark:text-red-400" : emailAgeHours(card) >= 24 ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"}`}>
+                              {emailWaitLabel(card.emailActivity.firstCopiedAt)}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mt-1 flex items-center gap-1 pl-[42px] text-[10px] text-slate-400 dark:text-neutral-500">
                           <span
                             className="inline-block h-1.5 w-1.5 rounded-full"
@@ -305,6 +338,7 @@ export function Board() {
           </div>
         )}
       </div>
+
     </div>
   );
 }

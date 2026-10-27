@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY package*.json ./
+# npm's postinstall hook needs this helper before the rest of the source tree
+# is copied into the image.
+COPY scripts/copy-pdf-worker.mjs ./scripts/copy-pdf-worker.mjs
 RUN npm ci
 
 COPY . .

@@ -4,7 +4,8 @@ import path from "node:path";
 import puppeteer, { REAL_UA } from "./x-browser";
 
 const DIR = path.join(process.cwd(), ".x_auth");
-const PROFILE = path.join(process.cwd(), ".x_profile");
+// Same resolution as adapters/x.ts so this debugs the profile the worker uses.
+const PROFILE = path.join(process.env.DATA_DIR || process.cwd(), ".x_profile");
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function loadCookies(): any[] | null {

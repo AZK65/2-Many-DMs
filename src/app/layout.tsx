@@ -1,10 +1,27 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { GeistSans } from "geist/font/sans";
+import { WorkspaceMotion } from "@/components/WorkspaceMotion";
 import "./globals.css";
-import { SupportBubble } from "@/components/SupportBubble";
 
 export const metadata: Metadata = {
   title: "2 Many DMs",
-  description: "One inbox for X, WhatsApp, and Telegram with built-in CRM tags.",
+  description:
+    "One inbox for X, WhatsApp, Telegram, and Discord with built-in CRM tags.",
+  // Safari's "Add to Dock" reads these: standalone window, no browser chrome.
+  appleWebApp: {
+    capable: true,
+    title: "2 Many DMs",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+// Next 14 wants themeColor here rather than in `metadata`. Two entries so the
+// window chrome follows the system theme, matching the app's light/true-black.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
 };
 
 export default function RootLayout({
@@ -21,10 +38,9 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body>
-        {children}
+      <body className={GeistSans.variable}>
+        <WorkspaceMotion>{children}</WorkspaceMotion>
         {/* App-wide support bubble — remove this line to take it off every page. */}
-        <SupportBubble />
       </body>
     </html>
   );

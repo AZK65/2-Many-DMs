@@ -1,6 +1,7 @@
 import { prisma } from "./db";
+import { randomUUID } from "node:crypto";
 import type { Automation, Prisma } from "@prisma/client";
-import type { ActionStep, AutomationDTO } from "./types";
+import type { ActionStep, AutomationDTO, ConversationIntent } from "./types";
 import type { Platform } from "./platforms";
 
 // Parse the stored action chain; fall back to a single "send" from the legacy
@@ -31,6 +32,7 @@ export function automationToDTO(
     platform: (a.platform as Platform) ?? null,
     tagId: a.tagId,
     folderId: a.folderId,
+    intent: (a.intent as ConversationIntent) ?? null,
     message: a.message,
     actions: parseActions(a),
     schedule: a.schedule as AutomationDTO["schedule"],
@@ -46,7 +48,13 @@ export function sanitizeAutomationInput(b: Record<string, unknown>) {
   // Normalize the action chain; the first send's text doubles as `message`.
   const steps = Array.isArray(b.actions)
     ? (b.actions as ActionStep[]).filter(
-        (s) => s && (s.type === "send" || s.type === "tag" || s.type === "status")
+        (s) =>
+          s &&
+          (s.type === "send" ||
+            s.type === "tag" ||
+            s.type === "status" ||
+            s.type === "intent" ||
+            s.type === "follow_up")
       )
     : [];
   const firstSend = steps.find((s) => s.type === "send") as
@@ -76,14 +84,28 @@ export function sanitizeAutomationInput(b: Record<string, unknown>) {
   data.noReplyDays =
     typeof b.noReplyDays === "number" ? Math.max(1, Math.round(b.noReplyDays)) : null;
   data.platform =
-    b.platform === "x" || b.platform === "whatsapp" || b.platform === "telegram"
+    b.platform === "x" ||
+    b.platform === "whatsapp" ||
+    b.platform === "telegram" ||
+    b.platform === "discord"
       ? b.platform
       : null;
   data.tagId = typeof b.tagId === "string" && b.tagId ? b.tagId : null;
   data.folderId =
     typeof b.folderId === "string" && b.folderId ? b.folderId : null;
+  data.intent =
+    b.intent === "normal" ||
+    b.intent === "prospect" ||
+    b.intent === "onboarding" ||
+    b.intent === "support"
+      ? b.intent
+      : null;
   data.schedule =
-    b.schedule === "daily" || b.schedule === "every_n_days" ? b.schedule : "manual";
+    b.schedule === "instant" ||
+    b.schedule === "daily" ||
+    b.schedule === "every_n_days"
+      ? b.schedule
+      : "manual";
   data.everyNDays =
     typeof b.everyNDays === "number" ? Math.max(1, Math.round(b.everyNDays)) : null;
   data.cooldownDays =
@@ -98,6 +120,7 @@ export interface MatchConfig {
   platform?: string | null;
   tagId?: string | null;
   folderId?: string | null;
+  intent?: string | null;
 }
 
 const DAY = 86_400_000;
@@ -112,6 +135,7 @@ export async function matchConversations(cfg: MatchConfig) {
   };
   if (cfg.platform) where.platform = cfg.platform;
   if (cfg.folderId) where.folders = { some: { folderId: cfg.folderId } };
+  if (cfg.intent) where.intent = cfg.intent;
 
   // Contact sub-filter (tag + new-chat recency share this object).
   const contact: Prisma.ContactWhereInput = {};
@@ -124,7 +148,6 @@ export async function matchConversations(cfg: MatchConfig) {
     case "keyword": {
       const kw = (cfg.keyword || "").trim();
       if (!kw) return [];
-      where.messages = { some: { body: { contains: kw } } };
       break;
     }
     case "no_reply": // you sent last, they're quiet
@@ -146,7 +169,7 @@ export async function matchConversations(cfg: MatchConfig) {
     where,
     include: {
       contact: true,
-      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+      messages: { orderBy: { createdAt: "desc" }, take: 10 },
     },
     orderBy: { lastMessageAt: "asc" },
     take: 500,
@@ -158,6 +181,17 @@ export async function matchConversations(cfg: MatchConfig) {
   }
   if (cfg.trigger === "unanswered") {
     return convs.filter((c) => c.messages[0]?.direction === "in");
+  }
+  if (cfg.trigger === "keyword") {
+    const terms = (cfg.keyword || "")
+      .split(/[,|]/)
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+    return convs.filter((c) => {
+      const latestInbound = c.messages.find((m) => m.direction === "in");
+      const body = latestInbound?.body.toLowerCase() || "";
+      return terms.some((term) => body.includes(term));
+    });
   }
   return convs;
 }
@@ -172,12 +206,32 @@ type ConvForSend = {
   id: string;
   platform: string;
   externalId: string | null;
+  accountId: string | null;
 };
+
+class DeliveryUnconfirmedError extends Error {}
 
 // Send one message, reusing the sync worker's /send path, and record it locally.
 async function sendOutbound(conv: ConvForSend, text: string): Promise<void> {
-  let externalKey: string | undefined;
+  if (conv.platform === "discord") {
+    throw new Error(
+      "Discord bot messages are manual-only; automation sends are disabled for this connector."
+    );
+  }
+  const pendingMessageId = `automation_${randomUUID()}`;
   let createdAt = new Date();
+  let message = await prisma.message.create({
+    data: {
+      id: pendingMessageId,
+      conversationId: conv.id,
+      body: text,
+      direction: "out",
+      createdAt,
+      deliveryStatus: conv.externalId ? "pending" : "sent",
+      sendAttempts: conv.externalId ? 1 : 0,
+      lastSendAttemptAt: conv.externalId ? createdAt : null,
+    },
+  });
 
   if (conv.externalId) {
     const controlUrl = process.env.SYNC_CONTROL_URL || "http://localhost:4001";
@@ -186,48 +240,85 @@ async function sendOutbound(conv: ConvForSend, text: string): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         platform: conv.platform,
+        accountId: conv.accountId,
         chatExternalId: conv.externalId,
         text,
+        pendingMessageId,
       }),
     });
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
+      const d = await res.json().catch(() => ({})) as {
+        error?: string;
+        uncertain?: boolean;
+        accepted?: boolean;
+      };
+      if (d.uncertain || res.status === 504) {
+        await prisma.message.updateMany({
+          where: { id: pendingMessageId, deliveryStatus: "pending" },
+          data: {
+            deliveryStatus: "unconfirmed",
+            deliveryError:
+              "The platform did not confirm delivery. Check the native app before retrying.",
+          },
+        });
+        throw new DeliveryUnconfirmedError(
+          "Delivery is unconfirmed; the automation will not retry automatically."
+        );
+      }
+      await prisma.message.update({
+        where: { id: pendingMessageId },
+        data: {
+          deliveryStatus: "failed",
+          deliveryError: d.error || `Send failed (${res.status})`,
+        },
+      });
       throw new Error(d.error || `send failed (${res.status})`);
     }
-    const sent = await res.json();
-    externalKey = sent.messageExternalId;
+    const sent = await res.json() as { messageExternalId: string; timestamp: string };
     createdAt = new Date(sent.timestamp);
-  }
-
-  if (externalKey) {
-    await prisma.message.upsert({
-      where: { externalKey },
-      create: {
-        conversationId: conv.id,
-        body: text,
-        direction: "out",
-        externalKey,
+    message = await prisma.message.update({
+      where: { id: pendingMessageId },
+      data: {
+        externalKey: sent.messageExternalId,
         createdAt,
+        deliveryStatus: "sent",
+        deliveryError: null,
       },
-      update: {},
-    });
-  } else {
-    await prisma.message.create({
-      data: { conversationId: conv.id, body: text, direction: "out" },
     });
   }
   await prisma.conversation.update({
     where: { id: conv.id },
-    data: { lastMessageAt: createdAt, status: "open", snoozedUntil: null },
+    data: { lastMessageAt: message.createdAt, status: "open", snoozedUntil: null },
   });
 }
 
+export async function sendConversationAutomationMessage(
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      id: true,
+      platform: true,
+      externalId: true,
+      accountId: true,
+    },
+  });
+  if (!conversation) throw new Error("The linked chat could not be found.");
+  if (!conversation.externalId) throw new Error("The linked chat is not connected to a platform.");
+  await sendOutbound(conversation, text);
+}
+
 // Run an automation now: message every matched chat that isn't on cooldown.
-export async function runAutomation(id: string) {
+export async function runAutomation(id: string, onlyConversationId?: string) {
   const a = await prisma.automation.findUnique({ where: { id } });
   if (!a) throw new Error("Automation not found");
 
-  const convs = await matchConversations(a);
+  const matched = await matchConversations(a);
+  const convs = onlyConversationId
+    ? matched.filter((c) => c.id === onlyConversationId)
+    : matched;
   const actions = parseActions(a);
   const cutoff = new Date(Date.now() - a.cooldownDays * DAY);
   let sent = 0;
@@ -239,7 +330,7 @@ export async function runAutomation(id: string) {
       where: {
         automationId: a.id,
         conversationId: c.id,
-        status: "sent",
+        status: { in: ["sent", "skipped"] },
         createdAt: { gt: cutoff },
       },
     });
@@ -265,6 +356,18 @@ export async function runAutomation(id: string) {
             where: { id: c.id },
             data: { status: step.status },
           });
+        } else if (step.type === "intent") {
+          await prisma.conversation.update({
+            where: { id: c.id },
+            data: { intent: step.intent },
+          });
+        } else if (step.type === "follow_up") {
+          await prisma.conversation.update({
+            where: { id: c.id },
+            data: {
+              followUpAt: new Date(Date.now() + Math.max(0, step.days) * DAY),
+            },
+          });
         }
       }
       await prisma.automationRun.create({
@@ -276,11 +379,12 @@ export async function runAutomation(id: string) {
         data: {
           automationId: a.id,
           conversationId: c.id,
-          status: "failed",
+          status: e instanceof DeliveryUnconfirmedError ? "skipped" : "failed",
           detail: String((e as Error).message || e).slice(0, 200),
         },
       });
-      failed++;
+      if (e instanceof DeliveryUnconfirmedError) skipped++;
+      else failed++;
     }
   }
 

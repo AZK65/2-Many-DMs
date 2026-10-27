@@ -12,6 +12,7 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
     include: {
       tags: { include: { tag: true } },
+      emailCaptures: { orderBy: { copiedAt: "desc" } },
       conversations: {
         orderBy: { lastMessageAt: "desc" },
         take: 1,
@@ -27,11 +28,24 @@ export async function GET() {
       ? last.body ||
         (last.mediaType ? MEDIA_LABEL[last.mediaType as MediaType] : "")
       : null;
+    const captured = c.emailCaptures;
+    const emailActivity = captured.length ? {
+      email: captured[0].email,
+      firstCopiedAt: new Date(Math.min(...captured.map((item) => item.firstCopiedAt.getTime()))).toISOString(),
+      lastCopiedAt: new Date(Math.max(...captured.map((item) => item.copiedAt.getTime()))).toISOString(),
+      copyCount: captured.reduce((sum, item) => sum + item.copyCount, 0),
+      sourceApp: captured[0].sourceApp,
+      matchCount: captured.length,
+    } : null;
     return {
       id: c.id,
       name: c.name,
       handle: c.handle,
       avatarUrl: c.avatarUrl,
+      company: c.company,
+      email: c.email,
+      phone: c.phone,
+      notes: c.notes,
       platform: (conv?.platform ?? "telegram") as Platform,
       conversationId: conv?.id ?? null,
       lastMessage: preview,
@@ -42,6 +56,7 @@ export async function GET() {
         name: ct.tag.name,
         color: ct.tag.color,
       })),
+      emailActivity,
     };
   });
 
