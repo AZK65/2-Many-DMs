@@ -5,7 +5,8 @@ import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import ThemeToggle from "./ThemeToggle";
 import { ChangelogList } from "./ChangelogList";
-import { TG_LINK } from "@/lib/links";
+import { SUPPORT_URL } from "@/lib/links";
+import { InfoIcon } from "./icons";
 
 const GITHUB_URL = "https://github.com/AZK65/2-Many-DMs";
 
@@ -76,7 +77,7 @@ export function Landing() {
               GitHub
             </a>
             <a
-              href={TG_LINK}
+              href={SUPPORT_URL}
               target="_blank"
               rel="noreferrer"
               className="hidden rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:text-slate-900 sm:block dark:text-neutral-400 dark:hover:text-neutral-100"
@@ -386,31 +387,27 @@ export function Landing() {
           <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-accent/20 blur-3xl" />
           <div className="relative flex items-center gap-4">
             <span
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-white shadow-lg"
-              style={{ backgroundColor: PLATFORMS.telegram.bg }}
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 text-white"
             >
-              <PlatformGlyph platform="telegram" className="h-6 w-6" />
+              <InfoIcon className="h-6 w-6" />
             </span>
             <div>
               <div className="flex items-center gap-2 text-lg font-bold">
-                Want a custom integration?
-                <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-semibold">
-                  Paid
-                </span>
+                Need help or another integration?
               </div>
               <p className="mt-1 text-sm text-white/70">
-                Need another channel, a bespoke automation, or hands-on setup &
-                support? DM the developer on Telegram.
+                Report a bug or suggest a feature on GitHub. Leave out private
+                messages, account details, and login codes.
               </p>
             </div>
           </div>
           <a
-            href={TG_LINK}
+            href={SUPPORT_URL}
             target="_blank"
             rel="noreferrer"
-            className="relative shrink-0 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+            className="relative shrink-0 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:scale-[.98]"
           >
-            Message dev on Telegram →
+            Open GitHub issues →
           </a>
         </div>
       </section>
@@ -433,7 +430,7 @@ export function Landing() {
               Deploy it yourself →
             </a>
             <a
-              href={TG_LINK}
+              href={SUPPORT_URL}
               target="_blank"
               rel="noreferrer"
               className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-900"
@@ -554,7 +551,7 @@ const ICONS = {
 
 function BrowserFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5 dark:border-neutral-800 dark:bg-neutral-950 dark:ring-white/5">
+    <div data-demo-frame className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5 dark:border-neutral-800 dark:bg-neutral-950 dark:ring-white/5">
       <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 dark:border-neutral-800 dark:bg-neutral-900">
         <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
@@ -566,12 +563,14 @@ function BrowserFrame({ children }: { children: React.ReactNode }) {
           </svg>
           app.2manydms.com
         </span>
+        <span className="text-xs text-slate-500 dark:text-neutral-400">Fictional demo</span>
       </div>
       {children}
     </div>
   );
 }
 
+// Static, fictional examples only. Never use a connected account or customer export here.
 // Interactive mini version of the real app — switch between Inbox / CRM / Automations.
 type View = "inbox" | "board" | "flow";
 
@@ -637,6 +636,7 @@ function AppMock() {
             <button
               key={n.id}
               type="button"
+              aria-pressed={active}
               onClick={() => setView(n.id)}
               className={`flex w-12 flex-col items-center gap-1 rounded-lg py-2 text-[9px] font-medium transition ${
                 active

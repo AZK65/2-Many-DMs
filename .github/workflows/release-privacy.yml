@@ -1,0 +1,17 @@
+name: Release privacy
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run privacy:test
+      - run: npm run privacy:check
+      - run: node scripts/check-release-privacy.mjs --history

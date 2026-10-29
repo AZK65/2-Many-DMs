@@ -3,6 +3,9 @@
   "version": "0.6.2",
   "private": true,
   "scripts": {
+    "privacy:check": "node scripts/check-release-privacy.mjs",
+    "privacy:test": "node --test scripts/check-release-privacy.test.mjs",
+    "docs:preview": "node scripts/capture-demo-previews.mjs",
     "package:mac": "zsh mac-companion/build-dictation.sh",
     "postinstall": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",

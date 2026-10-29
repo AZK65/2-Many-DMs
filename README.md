@@ -14,6 +14,8 @@ Triage by who owes a reply, run a pipeline, and automate follow-ups.
 
 ![2 Many DM's — unified inbox](docs/hero.png)
 
+All product previews below use fictional names and messages, never connected accounts.
+
 <br/>
 
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
@@ -190,15 +192,16 @@ The repository includes a native React Native app in [`mobile/`](mobile/). The i
 
 ## Security & privacy
 
-- **Your data never leaves your server.** No third-party SaaS, no per-seat pricing.
+- Your archive is stored on your server. Connected platforms receive the requests needed to sync and send messages.
 - Login sessions are **encrypted at rest** (AES-256-GCM via `APP_ENCRYPTION_KEY`).
-- `.env`, the SQLite DB, and all session folders (`.wwebjs_auth`, `.x_auth`, …) are git-ignored and
-  never committed.
+- `.env`, databases, and session folders are excluded from Git and Docker builds.
+  Run `npm run privacy:check` before publishing; ignores do not remove files already committed.
+- Read the [release privacy checklist](docs/release-privacy.md) before sharing a fork, screenshot, or diagnostic report.
 
 ## Custom integrations & support
 
-Need another channel, a bespoke automation, or hands-on setup? Custom work and support are available
-as a **paid** option — DM the developer on Telegram (link in the app's support bubble).
+Report a bug or suggest an integration through [GitHub issues](https://github.com/AZK65/2-Many-DMs/issues).
+Do not post private messages, customer information, login codes, or session files.
 
 ## License
 
