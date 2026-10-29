@@ -255,9 +255,28 @@ body {
 .marketing-site footer a:hover { color: rgb(var(--accent-rgb)); }
 .marketing-primary { @apply inline-flex items-center justify-center gap-6 rounded-lg bg-slate-950 px-3 py-2 text-base font-semibold text-white transition-colors duration-200 hover:bg-slate-700 dark:bg-white dark:text-black dark:hover:bg-neutral-200; }
 .marketing-text-link { @apply text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4 transition-colors duration-200 hover:text-accent dark:text-neutral-100 dark:decoration-neutral-700; }
+.marketing-faq-answer { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 700ms cubic-bezier(0.32,0.72,0,1); }
+.marketing-faq-answer[data-open="true"] { grid-template-rows: 1fr; }
+/* The PNG includes a static cursor. Mask it and animate a separate cursor so
+   the actual brand artwork remains intact, with no layout shifts or timers. */
+.terminal-logo { aspect-ratio: 2466 / 546; }
+.terminal-logo-ink { clip-path: inset(0 5% 0 0); animation: terminal-wordmark 1.4s steps(10, end) both; }
+.terminal-logo-track { animation: terminal-travel 1.4s steps(10, end) both; }
+.terminal-logo-cursor { left: 96%; top: 30%; width: 2%; height: 40%; animation: terminal-blink 700ms steps(1, end) 3 1.4s; }
+@keyframes terminal-wordmark { from { clip-path: inset(0 79% 0 0); } to { clip-path: inset(0 5% 0 0); } }
+@keyframes terminal-travel { from { transform: translateX(-76%); } to { transform: translateX(0); } }
+@keyframes terminal-blink { 50% { opacity: 0; } }
+@media (max-width: 380px) {
+  .marketing-heading { @apply text-4xl; }
+}
+@media (pointer: coarse) {
+  .marketing-site button, .marketing-site select, .marketing-mobile-menu button, .marketing-dialog button { min-height: 3rem; }
+  .marketing-site input, .marketing-site select, .marketing-dialog textarea { font-size: 1rem; }
+}
 @media (prefers-reduced-motion: reduce) {
   html:has(.marketing-site) { scroll-behavior: auto; }
   .marketing-site *, .marketing-mobile-menu *, .marketing-dialog * { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+  .terminal-logo-ink, .terminal-logo-track, .terminal-logo-cursor { animation: none; }
 }
 
 /* Thin, unobtrusive scrollbars so every platform thread looks identical */

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OverlayPortal } from "../OverlayPortal";
 import { ThemeSwitch } from "./ThemeSwitch";
+import { TerminalLogo } from "./TerminalLogo";
 import { GetStartedButton, SetupPromptProvider, useSetupPrompt } from "./SetupPrompt";
 
 const navigation = [["/landing#workspace", "The workspace"], ["/landing#connections", "Connections"], ["/changelog", "Updates"]];
@@ -57,21 +58,18 @@ function MarketingLayout({ children }: { children: ReactNode }) {
   return <div className="marketing-site relative min-h-dvh bg-white text-slate-900 dark:bg-black dark:text-neutral-100">
     <div ref={sentinel} aria-hidden className="pointer-events-none absolute left-0 top-0 h-32 w-px" />
     <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-accent focus:p-4 focus:text-accent-fg">Skip to content</a>
-    <header className="sticky top-4 z-40 mx-4 h-24 max-w-7xl pt-4 sm:mx-8 xl:mx-auto" data-navbar-compact={compact}>
-      <motion.nav layout={!reduced} transition={{ layout: { duration: 0.7, ease: easing } }} aria-label="Main navigation" className={`mx-auto flex items-center justify-between gap-4 rounded-full border border-slate-200 bg-white/95 px-4 backdrop-blur-xl sm:px-6 dark:border-neutral-800 dark:bg-neutral-900/95 ${compact ? "max-w-4xl py-2 shadow-lg shadow-slate-900/5 dark:shadow-black/40" : "max-w-7xl py-4"}`}>
+    <header className="sticky top-2 z-40 mx-4 h-20 max-w-7xl pt-2 sm:top-4 sm:mx-8 sm:h-24 sm:pt-4 xl:mx-auto" data-navbar-compact={compact}>
+      <motion.nav layout={!reduced} transition={{ layout: { duration: 0.7, ease: easing } }} aria-label="Main navigation" className={`mx-auto flex items-center justify-between gap-2 rounded-full border border-slate-200 bg-white/95 px-3 backdrop-blur-xl sm:gap-4 sm:px-6 dark:border-neutral-800 dark:bg-neutral-900/95 ${compact ? "max-w-4xl py-2 shadow-lg shadow-slate-900/5 dark:shadow-black/40" : "max-w-7xl py-2 sm:py-4"}`}>
         <motion.div layout="position" className="shrink-0">
-          <Link href="/landing" aria-label="2Many DMs home" className="block rounded-lg">
-            {/* eslint-disable-next-line @next/next/no-img-element */}<img src="/brand/lockup-light.png" alt="2 Many DMs" className="h-6 w-auto dark:hidden sm:h-8" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}<img src="/brand/lockup-dark.png" alt="2 Many DMs" className="hidden h-6 w-auto dark:block sm:h-8" />
-          </Link>
+          <TerminalLogo />
         </motion.div>
         <motion.div layout="position" className="hidden items-center gap-6 lg:flex">
           {navigation.map(([href, label]) => <Link href={href} key={href} aria-current={pathname === href ? "page" : undefined} className={`whitespace-nowrap text-sm font-medium transition-colors duration-200 hover:text-accent ${pathname === href ? "text-accent" : "text-slate-500 dark:text-neutral-400"}`}>{label}</Link>)}
         </motion.div>
-        <motion.div layout="position" className="flex shrink-0 items-center gap-3">
+        <motion.div layout="position" className="flex shrink-0 items-center gap-2 sm:gap-3">
           {themePicker("Website appearance")}
           <GetStartedButton className="hidden rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-slate-700 sm:block dark:bg-white dark:text-black dark:hover:bg-neutral-200" />
-          <button type="button" aria-label="Open navigation" aria-expanded={menuOpen} aria-controls="website-mobile-menu" onClick={() => setMenuOpen(true)} className="relative h-8 w-8 rounded-lg transition-colors duration-200 hover:bg-slate-100 lg:hidden dark:hover:bg-neutral-800"><span className="absolute left-2 top-3 h-px w-4 bg-current" /><span className="absolute left-2 top-5 h-px w-4 bg-current" /></button>
+          <button type="button" aria-label="Open navigation" aria-expanded={menuOpen} aria-controls="website-mobile-menu" onClick={() => setMenuOpen(true)} className="relative h-12 w-12 shrink-0 rounded-full transition-colors duration-200 hover:bg-slate-100 lg:hidden dark:hover:bg-neutral-800"><span className="absolute left-4 top-5 h-px w-4 bg-current" /><span className="absolute left-4 top-7 h-px w-4 bg-current" /></button>
         </motion.div>
       </motion.nav>
     </header>

@@ -57,6 +57,16 @@ try {
   await page.waitForSelector('[data-navbar-compact="false"]');
   await overflow("desktop");
   await page.screenshot({ path: `${output}/desktop-dark.png` });
+  // FAQ disclosure keeps keyboard semantics and immediately settles for reduced motion.
+  assert.equal(await page.$eval(".terminal-logo-ink", element => getComputedStyle(element).animationName), "none");
+  assert.equal(await page.$eval("#faq-question-0", element => element.getAttribute("aria-expanded")), "true");
+  await click("#faq-question-0");
+  assert.equal(await page.$eval("#faq-answer-0", element => element.getBoundingClientRect().height), 0);
+  await page.focus("#faq-question-1"); await page.keyboard.press("Enter"); await settle();
+  assert.equal(await page.$eval("#faq-answer-1", element => element.getAttribute("aria-hidden")), "false");
+  assert.ok(await page.$eval("#faq-answer-1", element => element.getBoundingClientRect().height) > 0);
+  await page.keyboard.press("Space"); await settle();
+  assert.equal(await page.$eval("#faq-answer-1", element => element.getBoundingClientRect().height), 0);
   await click("#demo-tab-board");
   await page.click('[aria-label="Move Maya Chen to In conversation"]');
   assert.ok(await page.$('[aria-label="Move Maya Chen to Moving forward"]'));
@@ -137,7 +147,7 @@ try {
     await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += 700) { window.scrollTo({ top: y, behavior: "instant" }); await new Promise(resolve => setTimeout(resolve, 30)); } });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" })); await settle();
     await page.screenshot({ path: `${output}/full-${theme}.png`, fullPage: true });
-    for (const width of [390, 768]) { await page.setViewport({ width, height: 844 }); await overflow(`${theme}-${width}`); }
+    for (const width of [320, 375, 390, 768]) { await page.setViewport({ width, height: 844 }); await overflow(`${theme}-${width}`); }
     await page.setViewport({ width: 390, height: 844 });
     await visit();
     await page.screenshot({ path: `${output}/mobile-${theme}.png` });
@@ -187,6 +197,16 @@ try {
   await visit("/privacy"); await overflow("mobile-privacy");
   await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "no-preference" }]);
   await visit();
+  await page.focus('[aria-label="2Many DMs home"]');
+  assert.equal(await page.$eval(".terminal-logo-ink", element => getComputedStyle(element).animationName), "terminal-wordmark");
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.equal(await page.$eval(".terminal-logo-ink", element => getComputedStyle(element).clipPath), "inset(0px 5% 0px 0px)");
+  await click("#faq-question-1");
+  assert.equal(await page.$eval("#faq-question-1", element => element.getAttribute("aria-expanded")), "true");
+  await new Promise(resolve => setTimeout(resolve, 750));
+  await page.screenshot({ path: `${output}/faq-animated.png` });
+  await click("#faq-question-1"); await new Promise(resolve => setTimeout(resolve, 750));
+  assert.equal(await page.$eval("#faq-answer-1", element => element.getBoundingClientRect().height), 0);
   const switchSelector = '[aria-label="Website appearance: dark mode"]';
   await page.focus(switchSelector); await page.keyboard.press("Space");
   await new Promise(resolve => setTimeout(resolve, 600));
