@@ -1,6 +1,10 @@
 type IconProps = { className?: string };
 const D = "h-4 w-4";
 
+export function SettingsIcon(p: IconProps) {
+  return <Svg {...p}><path d="m9 3 1-1h4l1 1 .4 2 1.8 1 2-.6 1.4 2.4-.8 1.6v2.2l.8 1.6-1.4 2.4-2-.6-1.8 1L15 19l-1 1h-4l-1-1-.4-2-1.8-1-2 .6-1.4-2.4.8-1.6v-2.2L3.4 8.8l1.4-2.4 2 .6 1.8-1L9 3Z" /><circle cx="12" cy="11" r="3" /></Svg>;
+}
+
 export function MicrophoneIcon(p: IconProps) {
   return <Svg {...p}><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></Svg>;
 }

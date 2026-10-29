@@ -33,6 +33,7 @@ import { ChatTypeIcon } from "./ChatTypeIcon";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { OverlayPortal } from "./OverlayPortal";
 import { SettingsModal } from "./SettingsModal";
+import { ChatAssistant } from "./ChatAssistant";
 import { CreateGroupModal } from "./CreateGroupModal";
 import {
   NewMessageModal,
@@ -256,6 +257,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [keywordAlerts, setKeywordAlerts] = useState<KeywordAlertDTO[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [aiSettings, setAiSettings] = useState(false);
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const initialNavigationApplied = useRef(false);
   const [pinnedExpanded, setPinnedExpanded] = useState(false);
@@ -463,6 +465,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
         null
     );
     if (requestedConversation) setMobileThreadOpen(true);
+    if (requestedConversation && params.get("message")) setFocusMessageId(params.get("message"));
     if (requestedConversation && params.get("info") === "1") {
       setContactConversationId(requestedConversation);
       setShowContact(true);
@@ -1908,6 +1911,9 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
     <div className="workspace-shell inbox-workspace">
       <WorkspaceHeader
         rail
+        showUtilities={!readOnly}
+        onOpenSettings={() => { setAiSettings(false); setShowSettings(true); }}
+        assistant={!readOnly ? <ChatAssistant conversation={selected ?? multiViewPinned} onOpenSettings={() => { setAiSettings(true); setShowSettings(true); }} onOpenConversation={(conversationId, messageId) => { setShowHidden(false); selectConversation(conversationId); setFocusMessageId(messageId); }} /> : undefined}
         brand={!readOnly ? <SyncRestartControl onOpenSettings={() => setShowSettings(true)} expandedBrand /> : undefined}
         onOpenEmails={!readOnly ? () => setShowEmails(true) : undefined}
         actions={!readOnly ? <>
@@ -3163,7 +3169,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
       <AnimatePresence>{!readOnly && showEmails && <EmailHistory onClose={() => setShowEmails(false)} onOpen={(conversationId, messageId) => { setShowHidden(false); selectConversation(conversationId); setFocusMessageId(messageId); }} />}</AnimatePresence>
 
       <AnimatePresence>
-        {!readOnly && showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        {!readOnly && showSettings && <SettingsModal initialPage={aiSettings ? "ai" : "general"} onClose={() => { setShowSettings(false); setAiSettings(false); }} />}
       </AnimatePresence>
 
       <AnimatePresence>

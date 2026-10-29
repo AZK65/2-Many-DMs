@@ -12,6 +12,7 @@ import {
   type Platform,
 } from "@/lib/platforms";
 import { translateText } from "@/lib/translation";
+import { parseDeliveryIds } from "@/lib/message-delivery";
 
 export const runtime = "nodejs";
 
@@ -266,8 +267,23 @@ export async function GET(
     };
   });
 
+  // Resolve exact outgoing IDs independently of pagination. Busy group chats
+  // can move a pending send outside the newest window before its receipt arrives.
+  const deliveryMessageIds = parseDeliveryIds(req.nextUrl.searchParams.get("deliveryIds"));
+  const deliveries = deliveryMessageIds.length ? await prisma.message.findMany({
+    where: { conversationId: params.id, direction: "out", id: { in: deliveryMessageIds } },
+  }) : [];
   return NextResponse.json({
     messages: data,
+    deliveries: deliveries.map(message => {
+      const dto = outgoingMessageDTO(message);
+      if (message.deliveryStatus === "pending" && message.lastSendAttemptAt &&
+          message.lastSendAttemptAt < expiredPendingBefore) {
+        dto.deliveryStatus = "unconfirmed";
+        dto.deliveryError = "The platform did not confirm delivery. Check the native app before retrying.";
+      }
+      return dto;
+    }),
     hasMore: !after && hasMore,
     focusedMessageId: focusedMessage?.id ?? null,
   });
@@ -571,23 +587,29 @@ export async function POST(
         { status: 202 }
       );
     }
-    message = await prisma.message.update({
-      where: { id: message.id },
+    // A broken response socket is not proof the worker never received the
+    // request. Only a refused connection is a known pre-send failure.
+    const refused = (error as { cause?: { code?: string } })?.cause?.code === "ECONNREFUSED";
+    await prisma.message.updateMany({
+      where: { id: message.id, deliveryStatus: "pending" },
       data: {
-        deliveryStatus: "failed",
-        deliveryError: "The sync worker is offline. No message was sent.",
+        deliveryStatus: refused ? "failed" : "unconfirmed",
+        deliveryError: refused
+          ? "The sync worker is offline. No message was sent."
+          : "The connection ended before delivery was confirmed. Check the native app before retrying.",
       },
     });
+    message = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
     return NextResponse.json(
       { error: message.deliveryError, message: outgoingMessageDTO(message) },
-      { status: 502 }
+      { status: message.deliveryStatus === "failed" ? 502 : 202 }
     );
   }
 
   if (res.status === 202) {
-    // The worker owns delivery from here. Avoid immediately reading the row
-    // back: it is still the same pending message in the common case, and the
-    // delivery refresh will pick up the final state shortly afterward.
+    // The worker can finish before its acknowledgement gets back to this route.
+    // Return the latest receipt, not the original queued snapshot.
+    message = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
     return NextResponse.json(
       { pending: true, message: outgoingMessageDTO(message) },
       { status: 202 }

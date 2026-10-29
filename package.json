@@ -3,6 +3,12 @@
   "version": "0.6.2",
   "private": true,
   "scripts": {
+    "website:build": "node scripts/build-website.mjs",
+    "website:deploy": "npm run website:build && wrangler pages deploy website/out --project-name=2manydms --branch=master",
+    "setup": "npm install && npm run setup:models",
+    "setup:models": "node scripts/setup-local-models.mjs",
+    "models:check": "node scripts/setup-local-models.mjs --check",
+    "models:test": "node --test scripts/setup-local-models.test.mjs",
     "privacy:check": "node scripts/check-release-privacy.mjs",
     "privacy:test": "node --test scripts/check-release-privacy.test.mjs",
     "docs:preview": "node scripts/capture-demo-previews.mjs",

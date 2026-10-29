@@ -46,6 +46,19 @@ Personal DMs and group DMs sync live; the default last 90 days are indexed gradu
 
 Discord sign-in currently cannot be completed from a remote browser on a headless VPS. Setup explains this instead of pretending a window opened on the visitor's device.
 
+## Optional AI and local translation
+
+Onboarding offers an OpenRouter key for the chat assistant, or **Skip for now**. Relevant chat excerpts are shared with the model provider when you ask the assistant a question. This is separate from local translation.
+
+For local models, expand **Local models: setup or check** in the AI step. Guided repository setup includes translation, OCR, and autocorrect models after confirmation. Install [Ollama](https://ollama.com/download) on the computer hosting the workspace, then run the included installer from the repository folder:
+
+```sh
+npm run setup:models
+npm run models:check
+```
+
+Keep Ollama running, open a conversation, choose **Translate**, and select its language. Downloads take several GB; speed depends on the host hardware. No download starts from onboarding. The installer respects `.env` model overrides and skips installed models. A workspace on a server needs Ollama on that server, not only on your laptop. Local translation does not require an OpenRouter key. See [model setup and recovery](local-models.md) for the model list, licenses, download controls, and troubleshooting.
+
 ## Why some steps open outside the app
 
 WhatsApp's QR and Telegram's phone/code/password fields work directly in the app; they do not need an iframe. Telegram's app-creation site and X's login only allow framing by their own origins. Discord's login denies framing. Their security headers were checked on October 29, 2026. We do not remove those protections or proxy login pages.

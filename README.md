@@ -89,24 +89,21 @@ send a snippet, tag, or set status. Dry-run before you arm it.
 - **Encrypted sessions** — login sessions are encrypted at rest (AES-256-GCM).
 - **True-black dark mode** with a circular-reveal theme toggle.
 
-## Deploy in one paste
+## Guided setup
 
-The landing page has **"Deploy with Claude Code / Codex"** buttons that copy a ready-to-paste prompt.
-Drop it into your coding agent and it clones, configures the env, and ships. The prompt is simply:
+The public website's **Get started** modal has setup prompts for **Codex, Cursor, and Claude Code**. Local models are included by default in the prompt, with machine checks and download confirmation; you can defer them. The repository is currently private, so access is required first. Prompts request a new private installation, protect existing data, and keep secrets out of Git. Copying only copies text; it does not open an assistant or install anything.
 
-```
-Clone and deploy https://github.com/AZK65/2-Many-DMs for me: npm install, copy .env.example
-to .env and fill DATABASE_URL + TELEGRAM_API_ID/API_HASH + APP_ENCRYPTION_KEY (openssl rand -hex 32),
-run npx prisma db push, then deploy with the included Dockerfile (Railway works great — see railway.json).
-Run the sync worker (npm run sync) alongside the web server.
-```
+The repository includes a local model installer: **`npm run setup`** installs dependencies and offers the models for translation, image OCR search, and autocorrect. Install and open [Ollama](https://ollama.com/download) on the workspace host first. Already installed dependencies? Run **`npm run setup:models`**. Missing models download one at a time, existing models are skipped, and **`npm run models:check`** verifies the installed files. Downloads need several GB and compatible hardware. Model weights are not committed to Git and are never downloaded by `npm install` alone. Read [local model setup and recovery](docs/local-models.md).
+
+Follow [the connection guide](docs/connection-setup.md) for Telegram app credentials, WhatsApp QR scanning, X browser pairing, and local Discord sign in. AI is optional; bring an OpenRouter key or skip it. Discord currently supports reading and searching private conversations, not sending messages.
 
 ## Quick start (local)
 
 ```bash
 git clone https://github.com/AZK65/2-Many-DMs.git
 cd 2-Many-DMs
-npm install
+npm run setup                # dependencies + confirmed local model downloads
+# Or npm install if you want to defer local models
 
 cp .env.example .env          # then fill in the values below
 npx prisma db push            # create the SQLite schema
@@ -168,6 +165,8 @@ All config lives in `.env` (see [`.env.example`](.env.example)). The essentials:
 | `PROXY_URL` | Optional sticky residential proxy for the WhatsApp/X browsers. |
 
 ## Deploy (Railway / Docker)
+
+For the **public marketing website**, use the isolated [Cloudflare Pages build and deployment guide](docs/website-deployment.md). It publishes no personal workspace APIs or stored messages. The Docker instructions below are for your private messaging installation.
 
 The repo ships a `Dockerfile` (with system Chromium for the WhatsApp/X browsers), a `railway.json`,
 and a `start.js` that runs `prisma db push` on boot. One container runs both the web server and the

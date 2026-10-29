@@ -27,11 +27,11 @@ try {
   const text = await page.$eval("body", node => node.innerText);
   assert.ok(text.includes("Fictional demo"));
   assert.ok(text.includes("Maya Chen"));
-  const issueLinks = await page.$$('a[href="https://github.com/AZK65/2-Many-DMs/issues"]');
-  assert.ok(issueLinks.length >= 3);
+  const repositoryLinks = await page.$$('a[href="https://github.com/AZK65/2-Many-DMs"]');
+  assert.ok(repositoryLinks.length >= 1);
   assert.equal(await page.$('a[href^="https://t.me/"]'), null);
-  await issueLinks[1].focus();
-  assert.ok(await page.evaluate(() => document.activeElement.textContent.includes("GitHub issues")));
+  await repositoryLinks[0].focus();
+  assert.ok(await page.evaluate(() => document.activeElement.textContent.includes("repository")));
   await page.evaluate(() => { document.activeElement.blur(); window.scrollTo(0, 0); });
   await page.screenshot({ path: new URL("../docs/hero.png", import.meta.url).pathname });
   const frame = await page.$("[data-demo-frame]");
@@ -39,6 +39,7 @@ try {
     const button = await frame.evaluateHandle((node, label) => [...node.querySelectorAll("button")].find(button => button.textContent.trim() === label), label);
     await button.click();
     await page.waitForFunction(label => [...document.querySelectorAll('[data-demo-frame] button[aria-pressed="true"]')].some(button => button.textContent.trim() === label), {}, label);
+    await new Promise(resolve => setTimeout(resolve, 350));
     await frame.screenshot({ path: new URL(`../docs/${file}.png`, import.meta.url).pathname });
     await button.dispose();
   }

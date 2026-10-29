@@ -237,21 +237,27 @@ body {
 }
 .animate-icon-pop { animation: icon-pop 0.3s ease-out both; }
 
-/* Landing page atmosphere: faint blueprint grid + soft top mask. */
-.lp-grid {
-  background-image:
-    linear-gradient(to right, rgba(100, 116, 139, 0.14) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(100, 116, 139, 0.14) 1px, transparent 1px);
-  background-size: 54px 54px;
-}
-.dark .lp-grid {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-}
-.lp-grid-mask {
-  -webkit-mask-image: radial-gradient(120% 75% at 50% 0%, #000 35%, transparent 78%);
-  mask-image: radial-gradient(120% 75% at 50% 0%, #000 35%, transparent 78%);
+/* Website styles are scoped so the personal inbox keeps its own density. */
+.marketing-site h1, .marketing-site h2, .marketing-site h3 { text-wrap: balance; }
+.marketing-site p { text-wrap: pretty; }
+.marketing-site .text-slate-400 { @apply text-slate-500 dark:text-neutral-400; }
+.dark .marketing-site .dark\:text-neutral-500 { @apply text-neutral-400; }
+.marketing-site section[id] { scroll-margin-top: 8rem; }
+.marketing-heading { background: linear-gradient(to right, #000, #666); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.dark .marketing-heading { background-image: linear-gradient(to right, #fff, #9b9b9b); }
+.marketing-site :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.marketing-mobile-menu :is(a, button, select):focus-visible,
+.marketing-dialog :is(a, button, input, textarea, summary):focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 4px; }
+.marketing-dialog :is(a, button, input, summary) { transition-timing-function: cubic-bezier(0.32,0.72,0,1); }
+.marketing-dialog button:not(:disabled):active { transform: translateY(1px); }
+.marketing-site :is(a, button, select, summary), .marketing-mobile-menu :is(a, button, select) { transition-timing-function: cubic-bezier(0.32,0.72,0,1); }
+.marketing-site button:not(:disabled):active { transform: translateY(1px); }
+.marketing-site footer a:hover { color: rgb(var(--accent-rgb)); }
+.marketing-primary { @apply inline-flex items-center justify-center gap-6 rounded-lg bg-slate-950 px-3 py-2 text-base font-semibold text-white transition-colors duration-200 hover:bg-slate-700 dark:bg-white dark:text-black dark:hover:bg-neutral-200; }
+.marketing-text-link { @apply text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4 transition-colors duration-200 hover:text-accent dark:text-neutral-100 dark:decoration-neutral-700; }
+@media (prefers-reduced-motion: reduce) {
+  html:has(.marketing-site) { scroll-behavior: auto; }
+  .marketing-site *, .marketing-mobile-menu *, .marketing-dialog * { transition-duration: 0ms !important; animation-duration: 0ms !important; }
 }
 
 /* Thin, unobtrusive scrollbars so every platform thread looks identical */

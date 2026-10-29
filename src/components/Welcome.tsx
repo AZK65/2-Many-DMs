@@ -17,6 +17,9 @@ import { useSetupConnections, SavedConnection } from "./ConnectSetup";
 import { setupAccountLabel } from "@/lib/connection-setup";
 import { fetchJson } from "@/lib/fetch-json";
 import { DiscordConnect } from "./DiscordSearchConnect";
+import { AISetup } from "./AISetup";
+import { LocalTranslationHelp } from "./LocalTranslationHelp";
+import { SETUP_STEPS } from "@/lib/onboarding-steps";
 
 import {
   CheckCircleIcon,
@@ -33,12 +36,6 @@ type AccountRow = {
   status: string;
   driver?: string | null;
 };
-
-const SETUP_STEPS = [
-  { title: "Welcome", detail: "See the daily workflow" },
-  { title: "Channels", detail: "Connect your inboxes" },
-  { title: "Ready", detail: "Start with a clean queue" },
-];
 
 export function Welcome() {
   const router = useRouter();
@@ -84,7 +81,7 @@ export function Welcome() {
     setStep(next);
     try { sessionStorage.setItem("2manydms-setup-step", String(next)); } catch {}
   }
-  useEffect(() => { try { const saved = Number(sessionStorage.getItem("2manydms-setup-step")); if (saved >= 0 && saved <= 2) setStep(saved); } catch {} }, []);
+  useEffect(() => { try { const saved = Number(sessionStorage.getItem("2manydms-setup-step")); if (saved >= 0 && saved <= 3) setStep(saved); } catch {} }, []);
 
   function finish() {
     try {
@@ -142,7 +139,7 @@ export function Welcome() {
         </nav>
         <div className="mt-auto flex items-center gap-2 text-xs text-slate-400 dark:text-neutral-500">
           <CheckCircleIcon className="h-4 w-4 text-accent" />
-          Credentials stay in their platform sessions.
+          Connect your accounts first. Add optional AI on your terms.
         </div>
       </aside>
 
@@ -304,8 +301,16 @@ export function Welcome() {
               </div>
             )}
 
-            {/* ── Step 2: done ── */}
-            {step === 2 && (
+            {step === 2 && <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent">Optional</p>
+              <h2 className="mb-3 text-2xl font-semibold tracking-tight">Ask anything about your chats</h2>
+              <AISetup onContinue={() => go(3)} onSkip={() => go(3)} />
+              <LocalTranslationHelp />
+              <button type="button" onClick={() => go(1)} className="mt-5 rounded px-2 py-1 text-sm text-slate-400 hover:text-accent focus-visible:outline-accent">← Back to channels</button>
+            </div>}
+
+            {/* ── Step 3: done ── */}
+            {step === 3 && (
               <div className="text-center">
                 <motion.div
                   initial={{ scale: 0 }}

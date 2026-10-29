@@ -4,10 +4,9 @@ import type { NextRequest } from "next/server";
 // Public marketing deploy guard.
 //
 // When MARKETING_ONLY=1 (set on the public 2manydms.com Railway service), the
-// app serves only the landing page. The landing is rendered
-// at "/" (rewrite, so the address bar stays clean), "/landing" canonicalizes to
-// "/", and every other route — the inbox, board, automations, onboarding, and
-// all API routes — redirects to "/", so no conversation data is ever exposed and
+// app serves only public website pages. The root rewrites to the allowed landing
+// route (which must not redirect back). Account APIs return 404 and private app pages
+// redirect to the website, so no conversation data is ever exposed and
 // nobody can connect accounts on a public, unauthenticated instance. Leave the
 // flag unset for a normal self-hosted/personal deploy and the whole app works.
 async function validGuestCookie(value?: string): Promise<boolean> {
@@ -37,6 +36,12 @@ async function validGuestCookie(value?: string): Promise<boolean> {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Check before the static-file exception: an API path ending in .json must
+  // never become an account-data escape hatch on the public deployment.
+  if (process.env.MARKETING_ONLY === "1" && (pathname === "/api" || pathname.startsWith("/api/"))) {
+    return NextResponse.json({ error: "Not available on the public website" }, { status: 404 });
+  }
 
   const isAsset =
     pathname.startsWith("/_next") ||
@@ -99,17 +104,15 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next({ request: { headers } });
   }
 
-  // The public changelog page is part of the marketing site.
-  if (pathname === "/changelog") return NextResponse.next();
-
-  // Serve the landing page at the root URL without a visible /landing path.
+  // Keep the website entry point separate from the large private inbox bundle.
+  if (["/landing", "/changelog", "/privacy"].includes(pathname)) return NextResponse.next();
   if (pathname === "/") {
     const url = req.nextUrl.clone();
     url.pathname = "/landing";
     return NextResponse.rewrite(url);
   }
 
-  // Everything else (including /landing itself) canonicalizes to "/".
+  // Private workspace pages never render on the public site.
   const url = req.nextUrl.clone();
   url.pathname = "/";
   url.search = "";

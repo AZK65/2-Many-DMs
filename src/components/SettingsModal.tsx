@@ -1,6 +1,7 @@
 "use client";
 
 import { OverlayPortal } from "./OverlayPortal";
+import { AISetup } from "./AISetup";
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
@@ -31,6 +32,7 @@ import {
   LinkIcon,
   PlusIcon,
   SunIcon,
+  SparklesIcon,
   TrashIcon,
   UserIcon,
   ZapIcon,
@@ -73,6 +75,7 @@ const DRIVER_LABEL: Record<string, string> = {
 };
 
 type SettingsPage =
+  | "ai"
   | "general"
   | "organization"
   | "workflow"
@@ -91,6 +94,7 @@ const SETTINGS_PAGES: Array<{
   { id: "groups", label: "Groups", description: "Macros and reusable templates" },
   { id: "integrations", label: "Integrations", description: "Scheduling" },
   { id: "connections", label: "Connections", description: "Connected messaging accounts" },
+  { id: "ai", label: "AI assistant", description: "OpenRouter key and privacy" },
 ];
 
 const INPUT_CLASS =
@@ -99,8 +103,8 @@ const INPUT_CLASS =
 const ICON_BUTTON_CLASS =
   "grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-700 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-500 dark:hover:bg-[#313131] dark:hover:text-neutral-100";
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [page, setPage] = useState<SettingsPage>("general");
+export function SettingsModal({ onClose, initialPage = "general" }: { onClose: () => void; initialPage?: SettingsPage }) {
+  const [page, setPage] = useState<SettingsPage>(initialPage);
   const [s, setS] = useState<Settings>(loadSettings());
   const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
@@ -301,7 +305,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Settings
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-neutral-400">
-              Manage how OmniCRM looks, organizes work, and connects to your accounts.
+              Manage how 2Many looks, organizes work, and connects to your accounts.
             </p>
           </div>
           <div className="hidden items-center gap-2 text-xs font-medium text-slate-500 sm:flex dark:text-neutral-400">
@@ -349,7 +353,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               ))}
             </nav>
             <div className="mt-auto hidden border-t border-slate-200 px-3 pt-4 text-xs text-slate-400 md:block dark:border-neutral-800 dark:text-neutral-500">
-              Changes save on this device as you make them.
+              Preferences save on this device. AI credentials save encrypted on your server.
             </div>
           </aside>
 
@@ -364,9 +368,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
 
+              {page === "ai" && <AISetup />}
               {page === "general" && (
                 <div className="space-y-5">
-                  <SettingsPanel title="Appearance" description="Choose how OmniCRM looks on this device.">
+                  <SettingsPanel title="Appearance" description="Choose how 2Many looks on this device.">
                     <SettingsRow label="Theme" hint="Use light, dark, or your system preference.">
                       <Segmented<ThemePref>
                         value={theme}
@@ -732,6 +737,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
 function SettingsPageIcon({ page }: { page: SettingsPage }) {
   const className = "h-4 w-4 shrink-0";
+  if (page === "ai") return <SparklesIcon className={className} />;
   if (page === "general") return <SunIcon className={className} />;
   if (page === "organization") return <FolderIcon className={className} />;
   if (page === "workflow") return <ZapIcon className={className} />;

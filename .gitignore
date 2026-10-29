@@ -66,4 +66,12 @@ sync.log
 .local/sync-retention/
 .local/whatsapp-messages/
 mac-companion/.build/
+website/.next/
+website/out/
+website/public/brand/
+website/public/changelog.json
+website/public/icon-192.png
+website/public/icon-512.png
+website/app/icon.png
+.wrangler/
 public/downloads/omni-dictation-macos.zip

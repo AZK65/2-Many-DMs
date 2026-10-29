@@ -2,21 +2,26 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
+import { SettingsModal } from "./SettingsModal";
+import { ChatAssistant } from "./ChatAssistant";
 import ThemeToggle from "./ThemeToggle";
 import { MenuDetails } from "./MenuDetails";
-import { MoreIcon, MailIcon, SheetIcon, CheckCircleIcon, UserIcon } from "./icons";
+import { MoreIcon, MailIcon, SheetIcon, CheckCircleIcon, UserIcon, SettingsIcon } from "./icons";
 
 const primary = [["/", "Inbox"], ["/board", "Board"], ["/todos", "Tasks"], ["/network", "Network"]];
 const secondary = [["/reply-lab", "Reply Lab"], ["/automations", "Automations"], ["/listening", "Listening"]];
 const navIcons = [MailIcon, SheetIcon, CheckCircleIcon, UserIcon];
 
 /** One navigation vocabulary across the workspace, separate from inbox filters. */
-export function WorkspaceHeader({ brand, actions, onOpenEmails, rail = true }: { brand?: ReactNode; actions?: ReactNode; onOpenEmails?: () => void; rail?: boolean }) {
+export function WorkspaceHeader({ brand, actions, assistant, onOpenEmails, onOpenSettings, showUtilities = true, rail = true }: { brand?: ReactNode; actions?: ReactNode; assistant?: ReactNode; onOpenEmails?: () => void; onOpenSettings?: () => void; showUtilities?: boolean; rail?: boolean }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiSettings, setAiSettings] = useState(false);
   const pathname = usePathname();
   const secondaryPage = secondary.find(([href]) => pathname === href);
   const itemClass = (active: boolean) => `workspace-nav-item ${active ? "workspace-nav-active" : ""}`;
-  return <header className={`workspace-header ${rail ? "workspace-header-rail" : ""}`}>
+  return <><header className={`workspace-header ${rail ? "workspace-header-rail" : ""}`}>
     <div className="workspace-brand-slot">{brand || <Link href="/" className="workspace-brand" aria-label="Omni CRM inbox">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/brand/icon-light.png" alt="" className="h-6 w-6 dark:hidden" />
@@ -38,6 +43,9 @@ export function WorkspaceHeader({ brand, actions, onOpenEmails, rail = true }: {
       </MenuDetails>
       {secondaryPage && <span aria-current="page" title={secondaryPage[1]} className="workspace-secondary-label workspace-nav-item workspace-nav-active truncate">{secondaryPage[1]}</span>}
     </nav>
-    <div className="workspace-header-actions ml-auto flex shrink-0 items-center gap-2">{actions}</div>
-  </header>;
+    <div className="workspace-header-actions ml-auto flex shrink-0 items-center gap-2">{actions}
+      {showUtilities && <button type="button" title="Settings" aria-label="Open settings" aria-haspopup="dialog" onClick={onOpenSettings || (() => setSettingsOpen(true))} className="rail-control"><SettingsIcon className="h-5 w-5" /></button>}
+      {showUtilities && (assistant || <ChatAssistant onOpenSettings={() => { setAiSettings(true); setSettingsOpen(true); }} />)}
+    </div>
+  </header><AnimatePresence>{settingsOpen && <SettingsModal initialPage={aiSettings ? "ai" : "general"} onClose={() => { setSettingsOpen(false); setAiSettings(false); }} />}</AnimatePresence></>;
 }

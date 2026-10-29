@@ -20,6 +20,7 @@ import { canAutoLoadMedia, visibleMediaQueue } from "@/lib/automatic-media";
 import { groupPeopleLabel } from "@/lib/group-avatars";
 import { groupMessageSender, messageSenderKey } from "@/lib/message-sender";
 import { showDirectMessageTimestamp } from "@/lib/direct-message-layout";
+import { deliveryIds, mergeDelivery, mergeDeliveryReceipt } from "@/lib/message-delivery";
 import {
   MEDIA_LABEL,
   type ConversationDTO,
@@ -296,7 +297,6 @@ import {
 const IS_MAC =
   typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
-const SLOW_SEND_MS = 3500;
 const CLIENT_SEND_TIMEOUT_MS = 18000;
 const CLIENT_TRANSLATED_SEND_TIMEOUT_MS = 120000;
 const CLIENT_BACKFILL_TIMEOUT_MS = 24000;
@@ -436,7 +436,8 @@ function mergeMessageWindow(
   );
   let changed = false;
   const merged = current.map((message) => {
-    const next = incoming.get(message.id);
+    const candidate = incoming.get(message.id);
+    const next = candidate ? mergeDelivery(message, candidate) : undefined;
     if (!next || sameMessage(message, next)) return message;
     changed = true;
     return next;
@@ -666,6 +667,10 @@ export function ChatThread({
     return () => window.clearTimeout(timer);
   }, [conversation.id, draft]);
   const deliveryRefreshTimersRef = useRef(new Set<number>());
+  const deliveryMessagesRef = useRef(messages);
+  deliveryMessagesRef.current = messages;
+  const activeDeliveryConversationRef = useRef(conversation.id);
+  activeDeliveryConversationRef.current = conversation.id;
   const dragDepthRef = useRef(0);
   const onSentRef = useRef(onSent);
   const discordBotChat =
@@ -1569,7 +1574,7 @@ export function ChatThread({
         .then((data: { messages: MessageDTO[]; hasMore: boolean }) => {
           if (active) {
             loadedConversationIdRef.current = conversation.id;
-            setMessages(data.messages);
+            setMessages(current => mergeMessageWindow(current, data.messages));
             setHasMore(data.hasMore);
             if (!focusMessageId) cacheThread(conversation.id, data);
             for (const message of data.messages) {
@@ -1587,11 +1592,13 @@ export function ChatThread({
     const poll = () => {
       // Delivery updates mutate an existing row, so an `after=createdAt` poll
       // cannot see them. Refresh the latest window and merge by stable id.
-      fetch(`/api/conversations/${conversation.id}/messages?limit=40`)
+      const ids = encodeURIComponent(deliveryIds(deliveryMessagesRef.current).join(","));
+      fetch(`/api/conversations/${conversation.id}/messages?limit=40&deliveryIds=${ids}`, { cache: "no-store" })
         .then((r) => r.json())
-        .then((data: { messages: MessageDTO[] }) => {
-          if (!active || !data.messages?.length) return;
-          for (const candidate of data.messages) {
+        .then((data: { messages: MessageDTO[]; deliveries?: MessageDTO[] }) => {
+          if (!active || !data.messages) return;
+          const updates = [...data.messages, ...(data.deliveries || [])];
+          for (const candidate of updates) {
             if (
               candidate.deliveryStatus === "sent" &&
               candidate.id.startsWith("client_") &&
@@ -1605,7 +1612,13 @@ export function ChatThread({
               );
             }
           }
-          setMessages((current) => mergeMessageWindow(current, data.messages));
+          setMessages((current) => {
+            const receipts = new Map((data.deliveries || []).map(message => [message.id, message]));
+            return mergeMessageWindow(current, data.messages).map(message => {
+              const receipt = receipts.get(message.id);
+              return receipt ? mergeDeliveryReceipt(message, receipt) : message;
+            });
+          });
           // A notification deep-link owns the scroll position. Do not let the
           // background poll pull the user back to the newest message while the
           // matched message is being revealed.
@@ -1728,7 +1741,7 @@ export function ChatThread({
     setMessages((current) => {
       const serverIds = new Set(data.messages.map((message) => message.id));
       const temporaryMessages = current.filter(
-        (message) => message.deliveryStatus === "sending" && !serverIds.has(message.id)
+        (message) => deliveryIds([message]).length > 0 && !serverIds.has(message.id)
       );
       return temporaryMessages.length
         ? [...data.messages, ...temporaryMessages]
@@ -2032,21 +2045,24 @@ export function ChatThread({
     if (delay === undefined) return;
     const timer = window.setTimeout(async () => {
       deliveryRefreshTimersRef.current.delete(timer);
+      if (activeDeliveryConversationRef.current !== conversation.id) return;
       try {
         const response = await fetch(
-          `/api/conversations/${conversation.id}/messages?limit=40`,
+          `/api/conversations/${conversation.id}/messages?limit=1&deliveryIds=${encodeURIComponent(messageId)}`,
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Delivery refresh failed");
-        const data = (await response.json()) as { messages: MessageDTO[] };
-        const refreshed = data.messages.find((message) => message.id === messageId);
+        const data = (await response.json()) as { deliveries?: MessageDTO[] };
+        if (activeDeliveryConversationRef.current !== conversation.id) return;
+        const refreshed = data.deliveries?.find((message) => message.id === messageId);
         if (refreshed) {
           setMessages((current) =>
             current.map((message) =>
-              message.id === messageId ? refreshed : message
+              message.id === messageId ? mergeDeliveryReceipt(message, refreshed) : message
             )
           );
           if (refreshed.deliveryStatus === "sent") {
+            setAttachError(null);
             if (!notifiedSentRef.current.has(refreshed.id)) {
               notifiedSentRef.current.add(refreshed.id);
               onSentRef.current(preview);
@@ -2140,17 +2156,6 @@ export function ChatThread({
     );
 
     const controller = new AbortController();
-    const slowTimer = window.setTimeout(
-      () =>
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === tempId && message.deliveryStatus === "sending"
-              ? { ...message, deliveryStatus: "pending" }
-              : message
-          )
-        ),
-      SLOW_SEND_MS
-    );
     const requestTimer = window.setTimeout(
       () => controller.abort("timeout"),
       translationConfig.enabled
@@ -2190,15 +2195,16 @@ export function ChatThread({
         "The request ended before delivery was confirmed. Check the native app before retrying.";
       setMessages((current) =>
         current.map((message) =>
-          message.id === tempId
+          message.id === tempId && message.deliveryStatus !== "sent"
             ? { ...message, deliveryStatus: "unconfirmed", deliveryError }
             : message
         )
       );
-      setAttachError(deliveryError);
+      if (!deliveryMessagesRef.current.some(message => message.id === tempId && message.deliveryStatus === "sent"))
+        setAttachError(deliveryError);
+      scheduleDeliveryRefresh(tempId, preview);
       return;
     } finally {
-      window.clearTimeout(slowTimer);
       window.clearTimeout(requestTimer);
       sendInFlightRef.current = false;
     }
@@ -2211,11 +2217,12 @@ export function ChatThread({
       if (pending.message) {
         setMessages((current) =>
           current.map((message) =>
-            message.id === tempId ? pending.message! : message
+            message.id === tempId ? mergeDelivery(message, pending.message!) : message
           )
         );
       }
       if (pending.message?.deliveryStatus === "sent") {
+        setAttachError(null);
         if (!notifiedSentRef.current.has(pending.message.id)) {
           notifiedSentRef.current.add(pending.message.id);
           onSentRef.current(preview);
@@ -2237,7 +2244,7 @@ export function ChatThread({
       };
       if (err.message) {
         setMessages((current) =>
-          current.map((message) => (message.id === tempId ? err.message! : message))
+          current.map((message) => (message.id === tempId ? mergeDelivery(message, err.message!) : message))
         );
       }
       setAttachError(err.error || "Couldn't send message.");
@@ -2245,7 +2252,7 @@ export function ChatThread({
       if (!err.message) {
         setMessages((current) =>
           current.map((message) =>
-            message.id === tempId
+            message.id === tempId && message.deliveryStatus !== "sent"
               ? {
                   ...message,
                   deliveryStatus: "failed",
@@ -2264,14 +2271,15 @@ export function ChatThread({
     } catch {
       setMessages((current) =>
         current.map((message) =>
-          message.id === tempId
+          message.id === tempId && message.deliveryStatus !== "sent"
             ? { ...message, deliveryStatus: "unconfirmed" }
             : message
         )
       );
+      scheduleDeliveryRefresh(tempId, preview);
       return;
     }
-    setMessages((m) => m.map((item) => (item.id === tempId ? msg : item)));
+    setMessages((m) => m.map((item) => (item.id === tempId ? mergeDelivery(item, msg) : item)));
     notifiedSentRef.current.add(msg.id);
     onSentRef.current(preview);
   }
@@ -3568,7 +3576,7 @@ export function ChatThread({
                     >
                       <time dateTime={m.createdAt}>{clockTime(m.createdAt)}</time>
                       {!conversation.isGroup && (deliveryStatus === "sending" || deliveryStatus === "pending") && (
-                        <span> · {deliveryStatus === "sending" ? "Sending…" : "Queued"}</span>
+                        <span> · Sending…</span>
                       )}
                       {(deliveryStatus === "unconfirmed" || deliveryStatus === "failed") && (
                         <button
