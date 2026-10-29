@@ -18,6 +18,8 @@ export interface InboundMessage {
   // History imports must not increment unread counts or fire live-message
   // automations. Connectors set this for explicit/initial backfills.
   historical?: boolean;
+  // An exact native edit event, not an inferred text match.
+  sourceEdited?: boolean;
   // True when the native platform says this account was directly mentioned.
   // The inbox keeps this as a durable unread signal until the chat is opened.
   mentionsMe?: boolean;
@@ -68,7 +70,11 @@ export interface ResolvedDirectContact {
   name: string;
   handle: string;
   avatarUrl?: string;
+  /** Equivalent IDs verified by the platform, not inferred from a name. */
+  aliases?: string[];
 }
+
+export type DirectContactContext = { groupExternalId?: string; senderMessageExternalId?: string };
 
 export type GroupParticipantStatus = "added" | "invite_sent" | "not_added";
 
@@ -231,9 +237,9 @@ export interface Adapter {
   // Resolve one exact platform recipient before the CRM creates a new empty
   // conversation. This is intentionally read-only: nothing is sent until the
   // normal composer calls send().
-  resolveDirectContact?(target: string): Promise<ResolvedDirectContact>;
+  resolveDirectContact?(target: string, context?: DirectContactContext): Promise<ResolvedDirectContact>;
   // Photo-only work: never fetch message history, mark read, or send anything.
-  refreshAvatar?(chatExternalId: string, isGroup: boolean): Promise<AvatarRefreshResult>;
+  refreshAvatar?(chatExternalId: string, isGroup: boolean, context?: DirectContactContext): Promise<AvatarRefreshResult>;
   getStatus(): AdapterStatus;
   stop(): Promise<void>;
 }

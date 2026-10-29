@@ -277,6 +277,12 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
     }
     // Enrich a previously-synced row (media support, or group-sender backfill).
     const patch: Record<string, unknown> = {};
+    if (m.platform === "discord" && m.sourceEdited) {
+      patch.body = m.body;
+      patch.translatedBody = null;
+      patch.translationSourceLanguage = null;
+      patch.translationTargetLanguage = null;
+    }
     if (m.media?.isGif && !existing.mediaIsGif) patch.mediaIsGif = true;
     if (m.platform === "x" && m.timestampVerified && !existing.id.startsWith("client_")) {
       patch.createdAt = m.timestamp;

@@ -6,6 +6,7 @@ import { avatarErrorCode } from "./avatar-errors";
 export type AvatarJob = {
   accountId: string; contactId: string; externalKey: string | null;
   chatId: string; isGroup: boolean; platform: string; attempts: number;
+  groupExternalId?: string; senderMessageExternalId?: string;
 };
 type Counts = { downloaded: number; cached: number; unavailable: number; failed: number; skipped: number };
 type State = { startedAt: number; total: number; jobs: AvatarJob[]; counts: Counts; retryAt: Record<string, number>; errors?: Record<string, string> };
@@ -34,8 +35,12 @@ export class AvatarBackfill {
     fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.state));
     fs.renameSync(`${this.file}.tmp`, this.file);
   }
-  start(jobs: AvatarJob[]) {
-    if (this.state.jobs.length || this.busy.size) return this.snapshot();
+  start(jobs: AvatarJob[], restart = false) {
+    if (this.busy.size) {
+      if (restart) throw new Error("Avatar requests are active; retry the fresh pass after they finish.");
+      return this.snapshot();
+    }
+    if (this.state.jobs.length && !restart) return this.snapshot();
     const seen = new Set<string>();
     this.state = { startedAt: Date.now(), total: 0, jobs: jobs.filter(job => {
       const key = `${job.accountId}:${job.contactId}`;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient, utils } from "telegram";
 import bigInt from "big-integer";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
@@ -9,10 +9,12 @@ import { existingAvatar, saveAvatarBuffer } from "../avatars";
 import { TelegramHistorySync } from "../telegram-history-sync";
 import { MediaRecoveryQueue } from "../media-recovery";
 import { reuseTelegramPrimarySender } from "../telegram-media-sender";
+import { TelegramMediaDownloader } from "../telegram-media-download";
 import type {
   Adapter,
   AdapterStatus,
   ArchiveChatContext,
+  DirectContactContext,
   InboundMessage,
   MediaType,
   OutboundMedia,
@@ -159,6 +161,8 @@ export class TelegramAdapter implements Adapter {
   private historySync?: TelegramHistorySync;
   private historyTimer?: ReturnType<typeof setInterval>;
   private mediaRecovery = new MediaRecoveryQueue();
+  private mediaDownloader = new TelegramMediaDownloader();
+  private avatarDownloader = new TelegramMediaDownloader(undefined, 45_000);
 
   private prioritizeOutbound(): void {
     this.backgroundPauseUntil = Math.max(
@@ -195,7 +199,7 @@ export class TelegramAdapter implements Adapter {
     }
   }
 
-  constructor(apiId: number, apiHash: string, session: string, private accountId?: string) {
+  constructor(private apiId: number, private apiHash: string, session: string, private accountId?: string) {
     this.client = new TelegramClient(
       new StringSession(session),
       apiId,
@@ -232,7 +236,8 @@ export class TelegramAdapter implements Adapter {
     ext: string,
     // Animated (.tgs) stickers are gzipped Lottie — useless to an <img>. Their
     // thumbnail is a plain image, so grab that instead of showing a text label.
-    thumb = false
+    thumb = false,
+    maxBytes = MAX_BYTES
   ): Promise<string | null> {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
     const filename = `${messageExternalId.replace(/:/g, "_")}.${ext}`;
@@ -245,10 +250,14 @@ export class TelegramAdapter implements Adapter {
         (candidate: any) => !(candidate instanceof Api.PhotoPathSize)
       );
       if (thumb && thumbs.length === 0) return null;
-      const buf = await this.client.downloadMedia(
-        msg,
-        thumb ? { thumb: thumbs.length - 1 } : {}
-      );
+      const buf = await this.mediaDownloader.download({
+        apiId: this.apiId,
+        apiHash: this.apiHash,
+        session: String(this.client.session.save()),
+        media: msg.media.getBytes(),
+        ...(thumb ? { thumb: thumbs.length - 1 } : {}),
+        maxBytes,
+      });
       if (!Buffer.isBuffer(buf) || !buf.length) return null;
       const temporary = `${fullPath}.${randomUUID()}.part`;
       try {
@@ -275,29 +284,47 @@ export class TelegramAdapter implements Adapter {
     return undefined;
   }
 
-  async refreshAvatar(chatExternalId: string, isGroup: boolean): Promise<import("./types").AvatarRefreshResult> {
+  async refreshAvatar(chatExternalId: string, isGroup: boolean, context?: DirectContactContext): Promise<import("./types").AvatarRefreshResult> {
     await this.waitForOutboundPriority();
     const { id } = parseTarget(chatExternalId);
-    let entity = this.avatarEntities.get(String(Math.abs(id)));
-    if (!entity) {
-      // Use typed cached peers, not a fresh 500-dialog scan for every photo.
-      const peers = isGroup
-        ? [new Api.PeerChannel({ channelId: bigInt(Math.abs(id)) }), new Api.PeerChat({ chatId: bigInt(Math.abs(id)) })]
-        : [new Api.PeerUser({ userId: bigInt(Math.abs(id)) })];
+    const exactId = String(Math.abs(id));
+    const cachedPeer = (value: number, group: boolean): Api.TypeInputPeer | undefined => {
+      const entity = this.avatarEntities.get(String(Math.abs(value)));
+      if (entity && Boolean(entity.title) === group) {
+        try { return utils.getInputPeer(entity); } catch { /* incomplete entity */ }
+      }
+      const peers = group
+        ? [new Api.PeerChannel({ channelId: bigInt(Math.abs(value)) }), new Api.PeerChat({ chatId: bigInt(Math.abs(value)) })]
+        : [new Api.PeerUser({ userId: bigInt(Math.abs(value)) })];
       for (const peer of peers) {
-        let input;
-        try { input = await this.client.getInputEntity(peer); } catch { continue; }
-        try { entity = await this.client.getEntity(input); break; }
-        catch (error) {
-          if (/CHANNEL_INVALID|CHANNEL_PRIVATE|CHAT_ID_INVALID|USER_ID_INVALID|PEER_ID_INVALID/i.test(String(error))) continue;
-          throw error;
-        }
+        try {
+          // MemorySession tries to cast TL Peer objects directly and throws
+          // before consulting its entity cache. Pass the marked numeric ID.
+          const markedId = utils.getPeerId(peer);
+          const input = this.client.session.getInputEntity(markedId);
+          if (utils.getPeerId(input) === markedId) return input;
+        } catch { /* not cached */ }
+      }
+      return undefined;
+    };
+    let peer = cachedPeer(id, isGroup);
+    if (!peer && !isGroup && context?.groupExternalId && context.senderMessageExternalId) {
+      const groupId = parseTarget(context.groupExternalId).id;
+      const match = /^telegram:(\d+):(\d+)$/.exec(context.senderMessageExternalId);
+      const group = cachedPeer(groupId, true);
+      if (group && match && match[1] === String(Math.abs(groupId))) {
+        peer = new Api.InputPeerUserFromMessage({ peer: group, msgId: Number(match[2]), userId: bigInt(exactId) });
       }
     }
-    if (!entity || !!entity.title !== isGroup) return { source: "unavailable" };
-    const buf = await this.client.downloadProfilePhoto(entity, { isBig: false });
-    if (!buf || !(buf as Buffer).length) return { source: "unavailable" };
-    return { url: saveAvatarBuffer(`telegram_${entity.id}`, buf as Buffer), source: "downloaded" };
+    // A zero-hash user lookup is supported for saved contacts. Never guess a
+    // channel type or resolve a similar display name for an unknown group.
+    if (!peer && !isGroup) peer = new Api.InputPeerUser({ userId: bigInt(exactId), accessHash: bigInt.zero });
+    if (!peer) return { source: "unavailable" };
+    const buf = await this.avatarDownloader.download({ apiId: this.apiId, apiHash: this.apiHash,
+      session: this.client.session.save() as unknown as string, media: peer.getBytes(),
+      profile: { id: exactId, isGroup }, maxBytes: 5_000_000 });
+    if (!buf.length) return { source: "unavailable" };
+    return { url: saveAvatarBuffer(`telegram_${exactId}`, buf), source: "downloaded" };
   }
 
   // Fetch a forum channel's topic list (id → title), cached per channel.
@@ -461,6 +488,7 @@ export class TelegramAdapter implements Adapter {
               : await this.avatarFor(senderEntity)
             : undefined,
         };
+        if (senderEntity) this.avatarEntities.set(String(senderId), senderEntity);
       }
     }
 
@@ -484,7 +512,8 @@ export class TelegramAdapter implements Adapter {
           msg,
           messageExternalId,
           resolved.ext,
-          resolved.thumb
+          resolved.thumb,
+          options.mediaLimitBytes ?? MAX_BYTES
         ).catch(error => { if (options.throwMediaErrors) throw error; return null; });
       }
       base.media = { type: resolved.type, url, name: resolved.name,
@@ -1404,6 +1433,8 @@ export class TelegramAdapter implements Adapter {
     this.historyTimer = undefined;
     this.onMessage = undefined;
     this.onReaction = undefined;
+    await this.mediaDownloader.stop();
+    await this.avatarDownloader.stop();
     await this.client.disconnect();
   }
 }

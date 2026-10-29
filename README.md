@@ -7,7 +7,7 @@
 
 ### One inbox for every DM — with a CRM built in.
 
-Sync **Telegram**, **WhatsApp**, **X**, **Gmail**, and permitted **Discord bot** channels into a single, self-hosted workspace.
+Sync **Telegram**, **WhatsApp**, **X**, **Gmail**, permitted **Discord bot** channels, and optional **read-only Discord private-message search** into a self-hosted workspace.
 Triage by who owes a reply, run a pipeline, and automate follow-ups.
 
 <br/>
@@ -35,6 +35,13 @@ contacts through a deal pipeline, and fires automations off keywords — all run
 with **your** keys, no SaaS in the middle.
 
 ## Features
+
+### New in 0.6.2
+
+Live Discord private-message search with a guided local sign-in, clearer onboarding for all four
+messaging platforms, X photo and voice-note recovery, Telegram media recovery, better avatar fetching,
+and correct direct-chat identity when opening WhatsApp group members. Read the
+[complete connection walkthrough](docs/connection-setup.md) for exact steps, troubleshooting, and hosting limitations.
 
 ### New in 0.6.1
 
@@ -128,7 +135,7 @@ Set `ALLOW_SELF_UPDATE=0` to disable one-click updates. Supervised production in
 | **Telegram** | Open **Connect Telegram**. The wizard helps you create your own app at [Telegram API tools](https://my.telegram.org/apps), then enter its API ID/hash, international phone number, login code, and two-step password if enabled. App credentials and the session are encrypted on your server after sign-in. Existing environment-based setups still work. |
 | **WhatsApp** | Choose **Connect WhatsApp**, have your phone ready, and scan the live QR from **WhatsApp → Linked devices → Link a device**. On Android, Linked devices is in the three-dot menu; on iPhone, in Settings. Expired QR codes can be regenerated without deleting saved sessions. |
 | **X / Twitter** | Choose **Connect X**. Download the bundled connector, install it unpacked in Chrome/Edge, sign in on X, then copy the exact App URL and short-lived pairing code into the connector. Return to setup to confirm live sync. If X Chat is locked, enter your existing numeric X Chat passcode—not your account password. |
-| **Discord** | In **Connections**, paste an official bot token, enable Message Content Intent, then use the generated install link. The bot reads only channels it can view and DMs sent directly to it; personal-account archives remain read-only. |
+| **Discord** | Choose **Open Discord sign-in** on the host computer for live, read-only private-message search. A desktop and Chrome are required; headless VPS login is not supported. Official server bots remain a separate option. See the [full guide](docs/connection-setup.md#discord-private-search). |
 
 Start at `/welcome`, or add another account from **Connections**. Saved accounts can be reopened to finish linking.
 Setup shows **Connected and ready** only after the sync worker confirms it. Older messages may
@@ -174,7 +181,7 @@ Sync worker (tsx)         ──┘
   ├── Telegram  (GramJS / MTProto)
   ├── WhatsApp  (Baileys or whatsapp-web.js + Puppeteer)
   ├── X         (Puppeteer + stealth + fingerprint injection)
-  └── Discord   (official Bot API + Gateway)
+  └── Discord   (official bot connector; optional read-only private-message search)
 ```
 
 ### iOS / TestFlight

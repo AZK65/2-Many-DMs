@@ -110,13 +110,14 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
   </div>;
 }
 
-export function SavedConnection({ accountId, platform, onClose, driver }: { accountId: string; platform: Platform; driver?: string | null; onClose: () => void }) {
+export function SavedConnection({ accountId, platform, onClose, driver, onReconnect }: { accountId: string; platform: Platform; driver?: string | null; onClose: () => void; onReconnect?: () => void }) {
   const { connections } = useSetupConnections();
   const live = connections?.platforms.accounts?.find(a => a.accountId === accountId);
   return <ConnectShell platform={platform} subtitle="Check the account you already saved." steps={["Account saved", "Sync"]} current={1} onClose={onClose}>
     {platform === "whatsapp" && live?.state === "qr"
       ? <WhatsAppLinkCode qr={live.qr} label="WhatsApp" accountId={accountId} canRefresh={driver === "web" || driver === "baileys"} />
       : <ConnectionProgress platform={platform} accountId={accountId} />}
+    {onReconnect && platform !== "whatsapp" && live?.state === "disconnected" && <button type="button" className={`${setupSecondary} mt-4 w-full`} onClick={onReconnect}>Sign in again</button>}
     <button type="button" className={`${setupButton} mt-6 w-full`} onClick={onClose}>Done</button>
   </ConnectShell>;
 }

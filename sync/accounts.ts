@@ -1,5 +1,6 @@
 import { prisma } from "./store";
 import { decrypt } from "../src/lib/crypto";
+import { decryptDiscordSearchSession } from "./discord-search-secrets";
 
 /* Bridges the env-configured single session into the Account table and routes
    conversations per account, so the worker can fan out to N accounts. The
@@ -111,7 +112,7 @@ export async function listRunnableAccounts(): Promise<RunnableAccount[]> {
 
 function safeDecrypt(blob: string): string | null {
   try {
-    return decrypt(blob);
+    return blob.startsWith("discord-search:v1:") ? decryptDiscordSearchSession(blob) : decrypt(blob);
   } catch {
     return null;
   }

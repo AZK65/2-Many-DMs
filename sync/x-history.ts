@@ -66,6 +66,14 @@ export function parseXDate(raw: string | undefined, now = Date.now(), day?: stri
 
 export type XHistoryMessage = { id: string; text: string; direction: "in" | "out"; timestamp?: number | null; minutePrecision?: boolean; attachments?: Array<{ url: string | null; type?: string }> };
 
+// Unlike a bare timeline time, the native Message info sheet omits the date
+// only for today's messages. Older messages explicitly say e.g. Oct 15 at 3:30 PM.
+export function parseXMessageInfoDate(sent: string, now = Date.now()): number | null {
+  const label = sent.trim().replace(/^Sent\s+/i, '').replace(/[\u200e\u200f\u202f]/g, ' ');
+  return /^\d{1,2}:\d{2}\s*(?:AM|PM)$/i.test(label)
+    ? parseXDate(label, now, 'Today') : parseXDate(label, now);
+}
+
 export function stableXInboxDate(label: string, parsed: number | null, previous: number | undefined): number | null {
   const relative = label.match(/^(\d+)\s*([smhdw])$/i);
   const granularity = relative ? ({ s:1000, m:60000, h:3600000, d:86400000, w:604800000 }[relative[2].toLowerCase()] || 0) : /^now$/i.test(label) ? 60000 : 0;
@@ -95,9 +103,11 @@ export function xHistoryMatchesPreview(
     if (message.direction !== preview.direction) return false;
     if (preview.timestamp && (!message.timestamp || Math.abs(message.timestamp - preview.timestamp) > tolerance)) return false;
     if (normalize(message.text) === body) return true;
-    const kind = /^(?:sent|shared) (?:a |an )?(photo|image|video|gif|voice message|audio message|file|document|attachment)$/i.exec(body)?.[1]?.toLowerCase();
-    return Boolean(kind && message.attachments?.some(media =>
-      /photo|image/.test(kind) ? media.type === "image" : /video|gif/.test(kind) ? media.type === "video" : /voice|audio/.test(kind) ? media.type === "audio" : media.type === "file"));
+    const mediaPreview = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|file|document|attachment)s?$/i.exec(body);
+    const kind = mediaPreview?.[2]?.toLowerCase();
+    const expected = Number(mediaPreview?.[1]) || 1;
+    return Boolean(kind && (message.attachments?.filter(media =>
+      /photo|image/.test(kind) ? media.type === "image" : /video|gif/.test(kind) ? media.type === "video" : /voice|audio/.test(kind) ? media.type === "audio" : media.type === "file").length || 0) >= expected);
   });
 }
 
@@ -110,7 +120,11 @@ export function mergeXHistory<T extends XHistoryMessage>(windows: T[][]): T[] {
       const existing = found.get(message.id);
       if (!existing) found.set(message.id, message);
       else {
-        const attachments = (message.attachments?.filter((media) => media.url).length || 0) > (existing.attachments?.filter((media) => media.url).length || 0) ? message.attachments : existing.attachments || message.attachments;
+        const attachments = existing.attachments || message.attachments ? Array.from({ length: Math.max(existing.attachments?.length || 0, message.attachments?.length || 0) }, (_, index) => {
+          const previous = existing.attachments?.[index];
+          const current = message.attachments?.[index];
+          return current?.url ? current : previous || current!;
+        }) : undefined;
         found.set(message.id, { ...existing, timestamp: existing.timestamp || message.timestamp, attachments });
       }
     }

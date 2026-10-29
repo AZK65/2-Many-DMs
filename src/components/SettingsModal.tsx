@@ -17,6 +17,7 @@ import {
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
+import { DiscordSearchConnect, DiscordConnect } from "./DiscordSearchConnect";
 import { TelegramConnect } from "./TelegramConnect";
 import { XConnect } from "./XConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
@@ -67,6 +68,8 @@ const DRIVER_LABEL: Record<string, string> = {
   api: "cookie API (browser-free)",
   browser: "XChat (browser)",
   mtproto: "MTProto",
+  "personal-readonly": "Live read-only search",
+  archive: "Saved archive",
 };
 
 type SettingsPage =
@@ -101,7 +104,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<Settings>(loadSettings());
   const [theme, setThemeState] = useState<ThemePref>("system");
   const [accounts, setAccounts] = useState<Acct[]>([]);
-  const [connecting, setConnecting] = useState<"telegram" | "whatsapp" | "x" | null>(null);
+  const [connecting, setConnecting] = useState<"telegram" | "whatsapp" | "x" | "discord" | null>(null);
   const [setupAccount, setSetupAccount] = useState<Acct | null>(null);
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
   const [liveAccounts, setLiveAccounts] = useState<Record<string, LiveAcct>>({});
@@ -655,11 +658,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         <option value="telegram">Telegram</option>
                         <option value="whatsapp">WhatsApp</option>
                         <option value="x">X</option>
+                        <option value="discord">Discord</option>
                       </select>
                     </div>
                   </div>
 
-                  {PLATFORM_ORDER.filter((platform) => accounts.some((account) => account.platform === platform)).map((platform) => {
+                  {PLATFORM_ORDER.filter((platform) => platform === "discord" || accounts.some((account) => account.platform === platform)).map((platform) => {
                     const platformAccounts = accounts.filter((account) => account.platform === platform);
                     return (
                       <SettingsPanel
@@ -702,6 +706,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                               </div>
                             );
                           })}
+                          {platform === "discord" && <div className="pt-2"><DiscordSearchConnect /></div>}
                         </div>
                       </SettingsPanel>
                     );
@@ -715,10 +720,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
       </motion.div>
       <AnimatePresence>
-        {setupAccount && <SavedConnection accountId={setupAccount.id} platform={setupAccount.platform as Platform} driver={setupAccount.driver} onClose={() => setSetupAccount(null)} />}
+        {setupAccount && <SavedConnection accountId={setupAccount.id} platform={setupAccount.platform as Platform} driver={setupAccount.driver} onClose={() => setSetupAccount(null)} onReconnect={() => { setConnecting(setupAccount.platform as "telegram" | "whatsapp" | "x" | "discord"); setSetupAccount(null); }} />}
         {connecting === "telegram" && <TelegramConnect onClose={() => setConnecting(null)} />}
         {connecting === "whatsapp" && <WhatsAppConnect onClose={() => setConnecting(null)} />}
         {connecting === "x" && <XConnect onClose={() => setConnecting(null)} />}
+        {connecting === "discord" && <DiscordConnect onClose={() => setConnecting(null)} />}
       </AnimatePresence>
     </motion.div></OverlayPortal>
   );

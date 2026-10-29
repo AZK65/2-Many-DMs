@@ -52,6 +52,7 @@ function connectorHarness() {
       url: () => url,
       isClosed: () => false,
       browser: () => browser,
+      $: async () => null,
       goto: async function (target: string) { this.navigations.push(target); url = target; },
     };
   });

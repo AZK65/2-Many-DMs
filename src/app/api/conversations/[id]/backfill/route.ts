@@ -48,9 +48,9 @@ export async function POST(
       { status: 409 }
     );
   }
-  if (conversation.platform === "discord" && conversation.account?.driver !== "bot") {
+  if (conversation.platform === "discord" && !["bot", "personal-readonly"].includes(conversation.account?.driver || "")) {
     return NextResponse.json(
-      { error: "Legacy Discord archives cannot be refreshed. Connect an official bot for live channels." },
+      { error: "Connect Discord search to refresh your personal archive, or connect a bot for server channels." },
       { status: 409 }
     );
   }

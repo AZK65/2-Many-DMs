@@ -1,6 +1,6 @@
 {
   "name": "2manydms",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "scripts": {
     "package:mac": "zsh mac-companion/build-dictation.sh",

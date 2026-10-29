@@ -1,6 +1,18 @@
 {
-  "current": "0.6.1",
+  "current": "0.6.2",
   "entries": [
+    {
+      "version": "0.6.2",
+      "date": "2026-10-29",
+      "title": "Clearer setup, live Discord search, and recovered media",
+      "notes": [
+        "Guided local Discord sign-in with live read-only private-message search and background history indexing",
+        "Detailed Telegram app creation, WhatsApp scan instructions, X pairing and chat unlock guidance",
+        "Honest live connection checks, provider cooldowns, recoverable errors, and explicit browser versus headless-server requirements",
+        "X photo and voice-note recovery and improved Telegram media fetching",
+        "Improved avatar backfill and WhatsApp group-member direct-chat identity"
+      ]
+    },
     {
       "version": "0.6.1",
       "date": "2026-10-27",

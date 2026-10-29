@@ -670,7 +670,8 @@ export function ChatThread({
   const onSentRef = useRef(onSent);
   const discordBotChat =
     conversation.platform === "discord" && conversation.account?.driver === "bot";
-  const canSyncConversation = conversation.platform !== "discord" || discordBotChat;
+  const discordSearchChat = conversation.platform === "discord" && conversation.account?.driver === "personal-readonly";
+  const canSyncConversation = conversation.platform !== "discord" || discordBotChat || discordSearchChat;
   const historyIssue = chatSyncIssue(conversation.externalId, syncStatus?.sync);
   const nativeChatUrl = sourceChatUrl(conversation);
   const syncDelayed = syncStatus && (syncStatus.state !== "ready" || (syncStatus.sync?.retryAt || 0) > Date.now() || Boolean(syncStatus.sync?.lastCheckedAt && Date.now() - syncStatus.sync.lastCheckedAt > 15 * 60_000));
@@ -1280,7 +1281,7 @@ export function ChatThread({
 
   async function openOrStartMemberConversation(member: GroupMemberProfile) {
     if (!onOpenConversation || openingMemberConversation) return;
-    if (memberConversation) {
+    if (memberConversation && (conversation.platform !== "whatsapp" || memberConversation.messages.length > 0)) {
       setMemberProfile(null);
       onOpenConversation(memberConversation.id);
       return;
@@ -2649,10 +2650,10 @@ export function ChatThread({
                   ) : (
                     <div className="py-4 text-center">
                       <p className="text-xs font-medium text-slate-600 dark:text-neutral-300">
-                        No private conversation yet
+                        No private messages saved yet
                       </p>
                       <p className="mt-1 text-[11px] leading-4 text-slate-400 dark:text-neutral-500">
-                        Start one here without leaving this profile first.
+                        Open the private chat to message them. Group messages stay in the group.
                       </p>
                     </div>
                   )}
@@ -3112,14 +3113,18 @@ export function ChatThread({
                 <DownloadIcon className="h-5 w-5" />
               </div>
               <div className="mt-4 text-sm font-semibold text-slate-800 dark:text-neutral-100">
-                No messages are synced yet
+                {conversation.platform === "whatsapp" && !conversation.isGroup
+                  ? `Private chat with ${conversation.contact.name}`
+                  : "No messages are synced yet"}
               </div>
               <p className="mt-2 text-pretty text-xs leading-5 text-slate-500 dark:text-neutral-400">
-                Ask the connected account for this conversation’s recent history.
+                {conversation.platform === "whatsapp" && !conversation.isGroup
+                  ? "You can message them here. No private messages are saved in Omni yet. Group messages stay in the group; older DMs appear when WhatsApp shares them with this device."
+                  : "Ask the connected account for this conversation’s recent history."}
               </p>
-              <div className="mt-4">
+              {conversation.platform !== "whatsapp" && <div className="mt-4">
                 <BackfillButton />
-              </div>
+              </div>}
             </div>
           )}
           {hasMore && (!compactMessageLimit || showFullContext) && (
@@ -3682,10 +3687,11 @@ export function ChatThread({
       </div>
 
       {/* Composer */}
-      {readOnly || !canSyncConversation ? (
+      {readOnly || !canSyncConversation || discordSearchChat ? (
         <div className="flex items-center justify-center gap-3 border-t border-slate-200 bg-white px-4 py-3 text-center text-xs font-medium text-slate-400 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-500">
           <span>
-            {!canSyncConversation
+            {discordSearchChat ? syncStatus?.state === "ready" ? "Discord search · live updates · reply in Discord" : "Discord search · saved messages · checking connection"
+              : !canSyncConversation
               ? "Legacy Discord archive · saved messages are read only"
               : "Read-only guest view · messages update live"}
           </span>

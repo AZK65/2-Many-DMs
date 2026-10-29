@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, prismaReady } from "@/lib/db";
 import { clientIp, getCurrentUser } from "@/lib/currentUser";
+import { directRecipientIds, isGenericDirectIdentity, preserveDirectIdentity } from "@/lib/direct-contact-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ type ResolveResponse = {
   name?: string;
   handle?: string;
   avatarUrl?: string;
+  aliases?: string[];
   error?: string;
 };
 
@@ -80,50 +82,43 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const contact = await prisma.contact.upsert({
-    where: { externalKey: resolved.externalKey },
-    create: {
-      externalKey: resolved.externalKey,
-      name: resolved.name,
-      handle: resolved.handle,
-      avatarUrl: resolved.avatarUrl || null,
-      isGroup: false,
-    },
-    update: {
-      name: resolved.name,
-      handle: resolved.handle,
-      ...(resolved.avatarUrl ? { avatarUrl: resolved.avatarUrl } : {}),
-    },
-    select: { id: true },
-  });
-
-  const existing = await prisma.conversation.findUnique({
-    where: {
-      accountId_externalId: {
-        accountId: account.id,
-        externalId: resolved.chatExternalId,
-      },
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    await prisma.conversation.update({
-      where: { id: existing.id },
-      data: { hidden: false, contactId: contact.id },
+  const recipientIds = directRecipientIds(platform, resolved.chatExternalId, resolved.aliases);
+  const canonicalId = recipientIds[0];
+  if (!canonicalId) return NextResponse.json({ error: "That recipient could not be verified." }, { status: 502 });
+  const externalKeys = recipientIds.map(id => `${platform}:${id}`);
+  const result = await prisma.$transaction(async tx => {
+    // Reuse real history on this sending account. A newly created empty LID
+    // thread must not hide an established phone-ID thread, or another account.
+    const candidates = await tx.conversation.findMany({
+      where: { platform, accountId: account.id, externalId: { in: recipientIds }, contact: { isGroup: false } },
+      include: { contact: true, _count: { select: { messages: true } } },
+      orderBy: { lastMessageAt: "desc" },
     });
-    return NextResponse.json({ conversationId: existing.id, created: false });
-  }
-
-  const conversation = await prisma.conversation.create({
-    data: {
-      platform,
-      accountId: account.id,
-      externalId: resolved.chatExternalId,
-      contactId: contact.id,
-      lastMessageAt: new Date(),
-    },
-    select: { id: true },
+    const existing = candidates.find(candidate => candidate._count.messages > 0) ||
+      candidates.find(candidate => candidate.externalId === canonicalId) || candidates[0];
+    const savedContacts = await tx.contact.findMany({ where: { externalKey: { in: externalKeys }, isGroup: false } });
+    const saved = existing?.contact || savedContacts.find(contact => contact.externalKey === `${platform}:${canonicalId}`) || savedContacts[0];
+    const knownIdentity = saved && !isGenericDirectIdentity(saved.name) ? saved
+      : savedContacts.find(contact => !isGenericDirectIdentity(contact.name)) || saved || null;
+    const identity = preserveDirectIdentity(knownIdentity, { name: resolved.name!, handle: resolved.handle! });
+    const phoneId = platform === "whatsapp" ? recipientIds.find(id => id.endsWith("@c.us")) : undefined;
+    const data = {
+      ...identity,
+      ...(resolved.avatarUrl && !saved?.avatarUrl ? { avatarUrl: resolved.avatarUrl } : {}),
+      ...(phoneId && !saved?.phone ? { phone: `+${phoneId.split("@")[0]}` } : {}),
+    };
+    const contact = saved ? await tx.contact.update({ where: { id: saved.id }, data }) : await tx.contact.create({
+      data: { ...data, externalKey: `${platform}:${canonicalId}`, isGroup: false },
+    });
+    if (existing) {
+      await tx.conversation.update({ where: { id: existing.id }, data: { hidden: false } });
+      return { conversationId: existing.id, created: false };
+    }
+    const conversation = await tx.conversation.create({
+      data: { platform, accountId: account.id, externalId: canonicalId, contactId: contact.id, lastMessageAt: new Date() },
+      select: { id: true },
+    });
+    return { conversationId: conversation.id, created: true };
   });
-
-  return NextResponse.json({ conversationId: conversation.id, created: true });
+  return NextResponse.json(result);
 }

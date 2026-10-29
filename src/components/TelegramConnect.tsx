@@ -68,13 +68,16 @@ export function TelegramConnect({ onClose, onConnected }: { onClose: () => void;
         <p className="mt-2 text-slate-500 dark:text-neutral-400">This is a personal Telegram connection, not a bot. Telegram requires an API ID and API hash.</p>
         <ol className="mt-3 list-inside list-decimal space-y-2">
           <li>Open <a className="text-accent underline" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer">Telegram API development tools ↗</a> and sign in with your phone.</li>
-          <li>Create an app if you do not have one. Use a name such as “My messaging workspace” and a unique short name.</li>
+          <li>Choose <b>API development tools</b>. If an app already exists, reuse its credentials; each phone number can have one API ID.</li>
+          <li>For a new app, enter an <b>App title</b> such as “My messaging workspace”, a <b>Short name</b> such as “myinbox123”, and choose <b>Desktop</b>. Describe it as a personal messaging client, then select <b>Create application</b>.</li>
           <li>Copy <b>App api_id</b> and <b>App api_hash</b> below.</li>
         </ol>
         <a className="mt-3 inline-block text-xs text-accent underline" href="https://core.telegram.org/api/obtaining_api_id" target="_blank" rel="noreferrer">Telegram’s official setup guide</a>
       </div>
+      <p className="text-xs text-slate-500 dark:text-neutral-400">Telegram’s app creation page must open in a separate tab. Return here with the two values; your phone code and password steps happen inside this app. No bot token is needed.</p>
       <SetupField label="API ID" inputMode="numeric" autoComplete="off" value={apiId} onChange={e => setApiId(e.target.value.replace(/\D/g, ""))} placeholder="e.g. 12345678" autoFocus />
-      <SetupField label="API hash" type="password" autoComplete="off" value={apiHash} onChange={e => setApiHash(e.target.value.trim())} hint="32 characters. Keep this private. It is saved encrypted after you sign in, never in your browser storage." />
+      <SetupField label="API hash" type="password" spellCheck={false} autoComplete="off" value={apiHash} onChange={e => setApiHash(e.target.value.trim())} hint="32 characters. Keep this private. It is saved encrypted after you sign in, never in your browser storage." />
+      <details className="text-sm text-slate-500 dark:text-neutral-400"><summary className="cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Telegram’s app page shows an error?</summary><p className="mt-2">Check that you are using the phone number for your existing Telegram account and that every required field is filled in. The website login code arrives in Telegram, not in this app. If Telegram temporarily blocks requests, wait before retrying. Never share your API hash or login code with someone offering to create the app for you.</p></details>
       <button className={`${setupButton} w-full`} disabled={!telegramCredentials(apiId, apiHash) || !storageReady}>Continue to sign in</button>
     </form>}
     {step === "phone" && <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (normalizeTelegramPhone(phone)) void request(); }}>

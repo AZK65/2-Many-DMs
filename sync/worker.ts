@@ -8,6 +8,7 @@ import { XAdapter } from "./adapters/x";
 import { XApiAdapter } from "./adapters/x-api";
 import { GmailAdapter } from "./adapters/gmail";
 import { DiscordBotAdapter } from "./adapters/discord";
+import { DiscordSearchAdapter } from "./adapters/discord-search";
 import { persistInbound, persistReaction, persistRead, prisma, prismaReady, repairWhatsAppIdentities } from "./store";
 import {
   ensureAndBackfill,
@@ -30,6 +31,8 @@ import { recordDeliveryReceipt } from "./delivery-receipt";
 import { MessageRetention, canonicalWhatsAppMessage } from "./retention";
 import fs from "node:fs";
 import { AvatarBackfill } from "./avatar-backfill";
+import { avatarContactWhere, collectAvatarJobs } from "./avatar-targets";
+import { directRecipientIds } from "../src/lib/direct-contact-identity";
 import { resolveTelegramSession } from "../src/lib/telegram-session";
 import { createHash } from "node:crypto";
 
@@ -324,6 +327,9 @@ function buildAdapter(acc: RunnableAccount): Adapter | null {
     return new XAdapter({ accountId: acc.id, session: acc.session ? safeJson(acc.session) : undefined });
   }
   if (acc.platform === "discord") {
+    if (acc.driver === "personal-readonly" && acc.session) {
+      return new DiscordSearchAdapter(JSON.parse(acc.session), acc.id);
+    }
     if (acc.driver !== "bot") {
       console.log("[sync] legacy Discord archive skipped — connect an official bot to sync");
       return null;
@@ -360,7 +366,10 @@ async function reconcileAdapters() {
   // /reload is used after connect/remove. Reconcile removed accounts as well as
   // starting newly added ones so an old bot does not keep syncing in memory.
   for (const [accountId, adapter] of adapters) {
-    if (runnableIds.has(accountId)) continue;
+    const updated = accounts.find(account => account.id === accountId);
+    const discordSearchChanged = adapter instanceof DiscordSearchAdapter &&
+      (updated?.driver !== "personal-readonly" || !adapter.matchesSession(updated.session));
+    if (runnableIds.has(accountId) && !discordSearchChanged) continue;
     try {
       await withDeadline(adapter.stop(), 10_000, `${adapter.platform} removal`);
     } catch (error) {
@@ -436,6 +445,7 @@ async function reconcileAdapters() {
           conversationId &&
           m.inboxCategory !== "spam" &&
           !m.historical &&
+          acc.driver !== "personal-readonly" &&
           Date.now() - new Date(m.timestamp).getTime() < 5 * 60 * 1000
         ) {
           const webUrl =
@@ -505,7 +515,7 @@ function resolveAdapter(body: {
 function startControlServer(): Promise<void> {
   const port = Number(process.env.SYNC_CONTROL_PORT || 4001);
   controlServer = http.createServer(async (req, res) => {
-      if (req.url === "/avatars/backfill" && ["GET", "POST"].includes(req.method || "")) {
+      if (["/avatars/backfill", "/avatars/backfill?restart=1"].includes(req.url || "") && ["GET", "POST"].includes(req.method || "")) {
         // Operational endpoint is local-only; browser cross-origin requests
         // cannot trigger downloads, and a second POST resumes the same pass.
         const remote = req.socket.remoteAddress || "";
@@ -518,15 +528,8 @@ function startControlServer(): Promise<void> {
               res.writeHead(503, { "Content-Type": "application/json" });
               return res.end(JSON.stringify({ error: "Wait for connected accounts to finish starting." }));
             }
-            const rows = await prisma.conversation.findMany({ where: {
-              accountId: { in: [...adapters.entries()].filter(([, a]) => !!a.refreshAvatar).map(([id]) => id) },
-              externalId: { not: null },
-            }, orderBy: [{ lastMessageAt: "desc" }], include: { contact: true } });
-            // Missing pictures first, newest chats first within each tier.
-            rows.sort((a, b) => Number(!!a.contact.avatarUrl) - Number(!!b.contact.avatarUrl));
-            avatarBackfill.start(rows.map(c => ({ accountId: c.accountId!, contactId: c.contactId,
-              externalKey: c.contact.externalKey, chatId: c.externalId!, isGroup: c.contact.isGroup,
-              platform: c.platform, attempts: 0 })));
+            avatarBackfill.start(await collectAvatarJobs(prisma,
+              [...adapters.entries()].filter(([, a]) => !!a.refreshAvatar).map(([id]) => id)), req.url?.endsWith("?restart=1"));
           }
           res.writeHead(req.method === "POST" ? 202 : 200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify(avatarBackfill.snapshot()));
@@ -947,8 +950,21 @@ function startControlServer(): Promise<void> {
                 })
               );
             }
+            // Exact sender evidence helps recover a group member's identity
+            // even after the connector's in-memory contacts cache was restarted.
+            const senderEvidence = platform === "whatsapp" ? await prisma.message.findFirst({
+              where: {
+                senderContact: { externalKey: { in: directRecipientIds(platform, String(target || "")).map(id => `whatsapp:${id}`) } },
+                conversation: { accountId, contact: { isGroup: true } },
+              },
+              orderBy: { createdAt: "desc" },
+              select: { externalKey: true, conversation: { select: { externalId: true } } },
+            }) : null;
             const contact = await withDeadline(
-              adapter.resolveDirectContact(String(target || "")),
+              adapter.resolveDirectContact(String(target || ""), {
+                groupExternalId: senderEvidence?.conversation.externalId || undefined,
+                senderMessageExternalId: senderEvidence?.externalKey || undefined,
+              }),
               Number(process.env.SYNC_CONTACT_RESOLVE_TIMEOUT_MS || 20_000),
               `${platform || "Platform"} recipient lookup`
             );
@@ -1190,13 +1206,14 @@ async function main() {
         const activity = connectorOperations.snapshot(adapter);
         if (!adapter.refreshAvatar || adapter.getStatus().state !== "ready" || activity.activeSends || activity.operation) continue;
         void avatarBackfill.runOne(accountId, async job => {
-          const contact = await prisma.contact.findFirst({ where: { id: job.contactId, externalKey: job.externalKey,
-            conversations: { some: { accountId, externalId: job.chatId } } }, select: { id: true } });
+          const where = avatarContactWhere(job);
+          const contact = await prisma.contact.findFirst({ where, select: { id: true } });
           if (!contact) return "skipped";
-          const result = await adapter.refreshAvatar!(job.chatId, job.isGroup);
+          const result = await adapter.refreshAvatar!(job.chatId, job.isGroup, {
+            groupExternalId: job.groupExternalId, senderMessageExternalId: job.senderMessageExternalId,
+          });
           // Missing/private photos do not erase an existing good picture.
-          if (result.url) await prisma.contact.updateMany({ where: { id: contact.id, externalKey: job.externalKey,
-            conversations: { some: { accountId, externalId: job.chatId } } }, data: { avatarUrl: result.url } });
+          if (result.url) await prisma.contact.updateMany({ where, data: { avatarUrl: result.url } });
           return result;
         }).catch(error => console.error("[avatars] queue persistence failed:", error));
       }

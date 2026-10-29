@@ -43,14 +43,14 @@ export function XConnect({ onClose, onConnected }: { onClose: () => void; onConn
     {step === 0 && <div className="space-y-4">
       <div className="rounded-xl bg-slate-50 p-4 text-sm dark:bg-neutral-800">
         <h3 className="font-semibold">One small browser connector</h3>
-        <p className="mt-2 text-slate-500 dark:text-neutral-400">Use Chrome or Edge on a computer. Sign in to X yourself; you do not give 2manydms your X password.</p>
+        <p className="mt-2 text-slate-500 dark:text-neutral-400">Use Chrome or Edge on a computer. Sign in on x.com yourself. Your X password stays on X’s login page.</p>
         <ol className="mt-4 list-inside list-decimal space-y-3">
           <li><a href="/api/accounts/x/extension" download className="font-medium text-accent underline">Download the connector</a> and unzip it.</li>
           <li>Open <code className="select-all">chrome://extensions</code> (or <code className="select-all">edge://extensions</code>). Turn on <b>Developer mode</b>, choose <b>Load unpacked</b>, and select the unzipped folder.</li>
           <li><a href="https://x.com" target="_blank" rel="noreferrer" className="font-medium text-accent underline">Open X ↗</a> and sign in to the account you want to connect.</li>
         </ol>
       </div>
-      <p className="text-xs text-slate-500 dark:text-neutral-400">This uses your browser session, not an official X DM integration. X can require a security check or pause requests. Rate limits remain respected.</p>
+      <p className="text-xs text-slate-500 dark:text-neutral-400">X blocks login inside other sites, so sign in in a normal tab. Return here after pairing; the connection check updates automatically. This is an unofficial browser session connection. X may require security checks or pause requests; rate limits remain respected.</p>
       <button className={`${setupButton} w-full`} onClick={pairing} disabled={busy}>{busy ? "Preparing pairing…" : "Connector installed. Continue"}</button>
     </div>}
     {step === 1 && <div className="space-y-4">

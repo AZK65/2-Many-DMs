@@ -8,7 +8,7 @@ export function normalizeTelegramPhone(value: unknown): string | null {
 export function telegramCredentials(apiId: unknown, apiHash: unknown) {
   const id = Number(apiId);
   const hash = typeof apiHash === "string" ? apiHash.trim() : "";
-  return Number.isSafeInteger(id) && id > 0 && /^[a-f0-9]{32}$/i.test(hash)
+  return (typeof apiId === "number" || (typeof apiId === "string" && /^\d+$/.test(apiId.trim()))) && Number.isSafeInteger(id) && id > 0 && /^[a-f0-9]{32}$/i.test(hash)
     ? { apiId: id, apiHash: hash } : null;
 }
 /** Never expose raw provider errors, which may contain user inputs. */
@@ -17,7 +17,7 @@ export function telegramSetupError(cause: unknown): SetupError {
   const message = e?.errorMessage || e?.message || "";
   if (/FLOOD|too many/i.test(message)) {
     const seconds = Number(e?.seconds) || Number(message.match(/WAIT_?(\d+)/)?.[1]) || 60;
-    return { error: "Telegram has paused login attempts. Wait for the timer before trying again.", retryAfter: Math.max(1, Math.min(seconds, 86400)) };
+    return { error: "Telegram has paused login attempts. Wait for the timer before trying again.", retryAfter: Number.isFinite(seconds) ? Math.max(1, Math.ceil(seconds)) : 60 };
   }
   if (/API_ID|API_HASH/.test(message)) return { error: "Telegram did not accept the app credentials. Copy the API ID and API hash from API development tools.", action: "credentials" };
   if (/PHONE_NUMBER_INVALID/.test(message)) return { error: "Check the phone number and include its country code, starting with +." };

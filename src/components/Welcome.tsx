@@ -16,6 +16,7 @@ import { WhatsAppConnect } from "./WhatsAppConnect";
 import { useSetupConnections, SavedConnection } from "./ConnectSetup";
 import { setupAccountLabel } from "@/lib/connection-setup";
 import { fetchJson } from "@/lib/fetch-json";
+import { DiscordConnect } from "./DiscordSearchConnect";
 
 import {
   CheckCircleIcon,
@@ -48,6 +49,7 @@ export function Welcome() {
   const { connections } = useSetupConnections();
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [showX, setShowX] = useState(false);
+  const [showDiscord, setShowDiscord] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<AccountRow | null>(null);
   const [accountError, setAccountError] = useState("");
 
@@ -71,6 +73,7 @@ export function Welcome() {
   // Re-trigger the connect flow for one more account of this platform.
   function addAnother(p: string) {
     if (p === "telegram") return setShowTelegram(true);
+    if (p === "discord") return setShowDiscord(true);
     if (p === "x") {
       return setShowX(true);
     }
@@ -252,6 +255,7 @@ export function Welcome() {
                   {(
                     [
                       ["telegram", "Telegram", "Guided app setup, then phone sign in", () => setShowTelegram(true)],
+                      ["discord", "Discord", "Live, read-only search from this computer", () => setShowDiscord(true)],
                       ["whatsapp", "WhatsApp", "Scan a QR code with your phone", () => setShowWhatsApp(true)],
                       [
                         "x",
@@ -362,7 +366,8 @@ export function Welcome() {
         )}
       </AnimatePresence>
       <AnimatePresence>{showX && <XConnect onClose={() => setShowX(false)} />}</AnimatePresence>
-      <AnimatePresence>{selectedAccount && <SavedConnection platform={selectedAccount.platform as Platform} accountId={selectedAccount.id} driver={selectedAccount.driver} onClose={() => setSelectedAccount(null)} />}</AnimatePresence>
+      <AnimatePresence>{showDiscord && <DiscordConnect onClose={() => setShowDiscord(false)} />}</AnimatePresence>
+      <AnimatePresence>{selectedAccount && <SavedConnection platform={selectedAccount.platform as Platform} accountId={selectedAccount.id} driver={selectedAccount.driver} onClose={() => setSelectedAccount(null)} onReconnect={() => { const platform = selectedAccount.platform; setSelectedAccount(null); addAnother(platform); }} />}</AnimatePresence>
       <AnimatePresence>
         {showWhatsApp && (
           <WhatsAppConnect

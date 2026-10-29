@@ -50,3 +50,23 @@ test("photo refresh respects flood waits and serializes work per account", async
     assert.ok(queue.snapshot().retryAt.a >= Date.now() + 120_000);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("an explicit fresh pass preserves cooldowns and cannot overlap an in-flight photo", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-avatar-restart-test-"));
+  try {
+    const queue = new AvatarBackfill(path.join(dir, "jobs.json"));
+    queue.start([job]);
+    let release!: () => void;
+    const running = queue.runOne("a", async () => {
+      await new Promise<void>(resolve => { release = resolve; });
+      throw { seconds: 120 };
+    });
+    assert.throws(() => queue.start([job], true), /active/);
+    release(); await running;
+    const deadline = queue.snapshot().retryAt.a;
+    queue.start([job, { ...job, contactId: "new" }], true);
+    assert.equal(queue.snapshot().total, 2);
+    assert.equal(queue.snapshot().retryAt.a, deadline);
+    await queue.runOne("a", async () => assert.fail("restart must not bypass platform backoff"));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

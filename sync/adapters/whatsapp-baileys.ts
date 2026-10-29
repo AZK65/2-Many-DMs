@@ -16,6 +16,7 @@ import { extFromMime, saveMediaStream, MAX_BYTES } from "../media";
 import { DurableRecords } from "../retention";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { avatarUnavailable } from "../avatar-errors";
+import { isGenericDirectIdentity } from "../../src/lib/direct-contact-identity";
 import type {
   Adapter,
   AdapterStatus,
@@ -25,6 +26,7 @@ import type {
   OutboundMedia,
   OutboundReaction,
   ResolvedDirectContact,
+  DirectContactContext,
   SentMessage,
   InboundReaction,
 } from "./types";
@@ -133,6 +135,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
   private selfJids = new Set<string>();
   // group jid -> subject (fetched once, cached)
   private groupSubjects = new Map<string, string>();
+  private avatarGroupMembers = new Map<string, { expiresAt: number; participants: Array<{ id: string; lid?: string; jid?: string }> }>();
   private authDir: string;
   private proxyUrl?: string;
   private stopped = false;
@@ -620,6 +623,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
           name: msg.pushName || numberFromJid(pnorm),
           avatarUrl: senderAvatarUrl,
         };
+        if (msg.pushName && !isGenericDirectIdentity(msg.pushName)) this.contacts.set(pnorm, msg.pushName);
       }
     }
 
@@ -1072,22 +1076,38 @@ export class WhatsAppBaileysAdapter implements Adapter {
     return { chatExternalId: res.id, inviteUrl, participantOutcomes };
   }
 
-  async refreshAvatar(chatExternalId: string): Promise<import("./types").AvatarRefreshResult> {
+  async refreshAvatar(chatExternalId: string, _isGroup?: boolean, context?: DirectContactContext): Promise<import("./types").AvatarRefreshResult> {
     if (!this.sock || this.getStatus().state !== "ready") throw new Error("WhatsApp is reconnecting");
     const jid = jidNormalizedUser(chatExternalId.replace(/@c\.us$/, "@s.whatsapp.net"));
-    try {
-      const picture = await this.sock.profilePictureUrl(jid, "image");
-      if (!picture) return { source: "unavailable" };
+    const pictureFor = async (id: string) => {
+      try { return await this.sock!.profilePictureUrl(id, "image", 15_000); }
+      catch (error) { if (avatarUnavailable(error)) return undefined; throw error; }
+    };
+    let picture = await pictureFor(jid);
+    if (!picture && jid.endsWith("@lid") && context?.groupExternalId?.endsWith("@g.us")) {
+      // LIDs are not phone numbers. Retry a phone alias only when WhatsApp's
+      // membership record explicitly links it to this exact LID.
+      let group = this.avatarGroupMembers.get(context.groupExternalId);
+      if (!group || group.expiresAt < Date.now()) {
+        try {
+          const metadata = await this.sock.groupMetadata(context.groupExternalId);
+          group = { participants: metadata.participants, expiresAt: Date.now() + 5 * 60_000 };
+          this.avatarGroupMembers.set(context.groupExternalId, group);
+        } catch (error) { if (!avatarUnavailable(error)) throw error; }
+      }
+      const member = group?.participants.find(item => [item.id, item.lid, item.jid].some(id => id && jidNormalizedUser(id) === jid));
+      const phone = [member?.id, member?.jid].find(id => id && /@(s\.whatsapp\.net|c\.us)$/.test(id));
+      if (phone) picture = await pictureFor(jidNormalizedUser(phone));
+    }
+    if (picture) {
       const url = await saveAvatarFromUrl(`whatsapp_${jid}`, picture);
       if (!url) throw new Error("Avatar download failed");
       return { url, source: "downloaded" };
-    } catch (error: any) {
-      if (avatarUnavailable(error)) return { source: "unavailable" };
-      throw error;
     }
+    return { source: "unavailable" };
   }
 
-  async resolveDirectContact(target: string): Promise<ResolvedDirectContact> {
+  async resolveDirectContact(target: string, context?: DirectContactContext): Promise<ResolvedDirectContact> {
     await this.ensureReady();
     const exactId = target
       .trim()
@@ -1095,9 +1115,27 @@ export class WhatsAppBaileysAdapter implements Adapter {
       .replace(/@c\.us$/, "@s.whatsapp.net");
     if (/@(?:s\.whatsapp\.net|lid)$/.test(exactId)) {
       const chatExternalId = jidNormalizedUser(exactId);
-      const fallback = numberFromJid(chatExternalId);
-      const name = this.contacts.get(chatExternalId) || "WhatsApp member";
-      const handle = chatExternalId.endsWith("@lid") ? name : `+${fallback}`;
+      const aliases = new Set([chatExternalId]);
+      // Names come from this exact sender's message, never another member or
+      // a display-name match. Raw messages survive connector restarts.
+      const evidence = context?.senderMessageExternalId ? this.readMessage(context.senderMessageExternalId) : undefined;
+      const participant = evidence?.key?.participant || evidence?.participant;
+      const senderName = participant && jidNormalizedUser(participant) === chatExternalId ? evidence?.pushName : undefined;
+      if (context?.groupExternalId?.endsWith("@g.us")) {
+        try {
+          const metadata = await this.sock!.groupMetadata(context.groupExternalId);
+          const member = metadata.participants.find(member => [member.id, member.lid, member.jid]
+            .some(id => id && jidNormalizedUser(id) === chatExternalId));
+          for (const id of [member?.id, member?.lid, member?.jid]) {
+            if (id && /@(lid|s\.whatsapp\.net|c\.us)$/.test(id)) aliases.add(jidNormalizedUser(id));
+          }
+        } catch { /* Exact LID remains messageable when metadata is unavailable. */ }
+      }
+      const name = [...aliases].map(id => this.contacts.get(id)).concat(senderName)
+        .find(name => name && !isGenericDirectIdentity(name)) || "WhatsApp member";
+      if (!isGenericDirectIdentity(name)) for (const id of aliases) this.contacts.set(id, name);
+      const phoneId = [...aliases].find(id => id.endsWith("@s.whatsapp.net"));
+      const handle = phoneId ? `+${numberFromJid(phoneId)}` : name;
       const avatarKey = `whatsapp_${chatExternalId}`;
       let avatarUrl = existingAvatar(avatarKey) || undefined;
       if (!avatarUrl) {
@@ -1115,6 +1153,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
         name,
         handle,
         avatarUrl,
+        aliases: [...aliases],
       };
     }
     const digits = target.replace(/\D/g, "");

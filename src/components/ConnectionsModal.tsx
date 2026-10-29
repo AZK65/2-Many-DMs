@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { PLATFORMS, PLATFORM_ORDER, type Platform } from "@/lib/platforms";
 import { PlatformGlyph } from "./PlatformIcon";
 import { TelegramConnect } from "./TelegramConnect";
+import { DiscordSearchConnect } from "./DiscordSearchConnect";
 import { XConnect } from "./XConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
 import { SavedConnection } from "./ConnectSetup";
@@ -347,6 +348,9 @@ export function ConnectionsModal({
 
           {connectorPlatform === "discord" && (
             <div className="mt-3 rounded-xl border border-[#5865f2]/30 bg-[#5865f2]/10 p-3 text-xs text-slate-700 dark:text-neutral-200">
+              <DiscordSearchConnect />
+              <details className="mt-3 border-t border-slate-200 pt-3 dark:border-neutral-700">
+              <summary className="cursor-pointer rounded py-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Connect a server bot instead</summary>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="font-semibold">Connect an official Discord bot</div>
@@ -410,6 +414,7 @@ export function ConnectionsModal({
               <p className="mt-2 text-[11px] leading-relaxed text-slate-500 dark:text-neutral-400">
                 The token is encrypted at rest. The bot can only read server channels it is invited to and permitted to view, plus DMs sent directly to the bot. Existing personal-account archives stay read-only.
               </p>
+              </details>
             </div>
           )}
 
@@ -467,7 +472,7 @@ export function ConnectionsModal({
                       onClick={() => setConnectorPlatform("discord")}
                       className="rounded-lg bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#4752c4]"
                     >
-                      {state === "ready" ? "Reconnect" : "Connect bot"}
+                      {state === "ready" ? "Manage Discord" : "Set up Discord"}
                     </button>
                   )}
                 </div>
@@ -510,12 +515,14 @@ export function ConnectionsModal({
                         ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
                         : "border-slate-200 bg-slate-50 text-slate-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
                   }`}>
-                    {state === "ready" ? (
+                    {accounts.some(a => a.platform === "discord" && a.driver === "personal-readonly") ? (
+                      <><span className="font-semibold">Read-only search.</span> {state === "ready" ? "New private messages sync live. History is indexed separately; replies stay in Discord." : status?.detail || "Waiting for the live search connection. Saved messages remain searchable."}</>
+                    ) : state === "ready" ? (
                       <><span className="font-semibold">Official bot connected.</span> New messages sync live; manual replies and history backfill are enabled in channels the bot can access.</>
                     ) : state === "disconnected" ? (
-                      <><span className="font-semibold">Bot needs attention.</span> {status?.detail || "Check its token, Message Content Intent, and channel permissions."}</>
+                      <><span className="font-semibold">Discord needs attention.</span> {status?.detail || "Reconnect from the Discord setup panel."}</>
                     ) : (
-                      <><span className="font-semibold">Connect an official bot.</span> Personal-account archives remain searchable but read-only.</>
+                      <><span className="font-semibold">Connect Discord search.</span> Existing saved messages remain searchable. Server bot connections are also available.</>
                     )}
                   </div>
                 )}
@@ -534,7 +541,7 @@ export function ConnectionsModal({
       </motion.div>
 
       <AnimatePresence>
-        {selectedAccount && <SavedConnection platform={selectedAccount.platform as Platform} accountId={selectedAccount.id} driver={selectedAccount.driver} onClose={() => setSelectedAccount(null)} />}
+        {selectedAccount && <SavedConnection platform={selectedAccount.platform as Platform} accountId={selectedAccount.id} driver={selectedAccount.driver} onClose={() => setSelectedAccount(null)} onReconnect={() => { const platform = selectedAccount.platform; setSelectedAccount(null); void addAccount(platform); }} />}
         {connectorPlatform === "x" && <XConnect onClose={() => { setConnectorPlatform(null); loadAccounts(); }} />}
         {connectingWhatsApp && <WhatsAppConnect onClose={() => { setConnectingWhatsApp(false); loadAccounts(); }} />}
         {connectingTelegram && (

@@ -33,7 +33,7 @@ export function readXMessageDom() {
       const described = contentId ? Array.from(bubble.querySelectorAll<HTMLElement>('[id]')).find(element => element.id === contentId) : null;
       if (described && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(described.textContent || '') && !described.querySelector('img,video,audio,a')) textElement = described;
     }
-    const attachments: Array<{ type: 'image' | 'video' | 'audio' | 'file'; source: string | null; name?: string; isGif?: boolean }> = [];
+    const attachments: Array<{ type: 'image' | 'video' | 'audio' | 'file'; source: string | null; name?: string; isGif?: boolean; nativeDownload?: boolean }> = [];
     const seen = new Set<string>();
     for (const element of bubble.querySelectorAll<HTMLImageElement | HTMLVideoElement | HTMLAudioElement | HTMLAnchorElement>('img,video,audio,a[download]')) {
       const isLink = element.tagName === 'A';
@@ -55,6 +55,12 @@ export function readXMessageDom() {
       attachments.push({ type, source, isGif, name: isLink ? (element.getAttribute('download') || element.textContent?.trim() || 'Attachment') : undefined });
       seen.add(source);
     }
+    // XChat's voice player uses Web Audio, not an <audio> element. Its native
+    // Download control is the source of the decrypted file; never treat the
+    // waveform/duration or the sender avatar as the message itself.
+    if (!attachments.length && bubble.querySelector('[data-testid="audio-waveform"]')) {
+      attachments.push({ type: 'audio', source: null, name: 'Voice message', nativeDownload: true });
+    }
     // Do not silently discard a file whose native download button hasn't
     // exposed a URL yet. Keep an honest unavailable-file placeholder.
     if (!attachments.length) {
@@ -63,11 +69,12 @@ export function readXMessageDom() {
     }
     const timeElements = [bubble, ...Array.from(bubble.querySelectorAll('time,[datetime],[data-timestamp],[title],[aria-label]'))];
     const dateHints = timeElements.flatMap((element) => [element.getAttribute('datetime'), element.getAttribute('data-timestamp'), element.getAttribute('title'), element.getAttribute('aria-label')]).filter((value): value is string => Boolean(value));
-    const timeText = (bubble.innerText || '').match(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/gi)?.at(-1);
+    const timeText = bubble.querySelector('[id$="-time"]')?.textContent?.trim() || (bubble.innerText || '').match(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/gi)?.at(-1);
     const day = dateLabels.filter((label) => Boolean(label.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1)?.textContent?.trim();
     const content = textElement || bubble.querySelector('img,video,audio,a[download]') || bubble;
     const bounds = content.getBoundingClientRect();
-    const direction: 'in' | 'out' = bounds.left + bounds.width / 2 > middle ? 'out' : 'in';
+    const side = bubble.querySelector('[data-side]')?.getAttribute('data-side');
+    const direction: 'in' | 'out' = side === 'start' ? 'in' : side === 'end' ? 'out' : bounds.left + bounds.width / 2 > middle ? 'out' : 'in';
     const text = (textElement?.innerText || '').replace(/(\s*\d{1,2}:\d{2}\s*(AM|PM))+\s*$/i, '').trim();
     return { id, direction, text, dateHints, timeText, day, attachments };
   }).filter((row) => row.text || row.attachments.length);

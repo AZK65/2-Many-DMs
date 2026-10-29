@@ -22,10 +22,12 @@ test("phone validation normalizes international numbers but rejects missing coun
   for (const input of ["2025550147", "+00012345678", "+123", "+1234567890123456", "phone +12025550147", null]) assert.equal(normalizeTelegramPhone(input), null);
 });
 test("Telegram app credentials require a valid ID and hash", () => {
+  for (const id of [true, [1234], "1e3", "0x12"]) assert.equal(telegramCredentials(id, "a".repeat(32)), null);
   assert.deepEqual(telegramCredentials("1234", "a".repeat(32)), { apiId: 1234, apiHash: "a".repeat(32) });
   for (const [id, hash] of [[0,"a".repeat(32)],[-1,"a".repeat(32)],[1.5,"a".repeat(32)],[2,"secret"],["NaN","a".repeat(32)]]) assert.equal(telegramCredentials(id, hash), null);
 });
 test("Telegram errors give recovery actions and honor flood deadlines without leaking provider text", () => {
+  assert.equal(telegramSetupError({ errorMessage: "FLOOD_WAIT_172800", seconds: 172800 }).retryAfter, 172800);
   assert.equal(telegramSetupError({ errorMessage: "PHONE_CODE_EXPIRED" }).action, "restart");
   assert.equal(telegramSetupError({ errorMessage: "API_ID_INVALID" }).action, "credentials");
   assert.equal(telegramSetupError({ errorMessage: "FLOOD_WAIT_172", seconds: 172 }).retryAfter, 172);

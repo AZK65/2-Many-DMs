@@ -47,7 +47,7 @@ export async function GET(
     : null;
   const conversation =
     exact ||
-    (await prisma.conversation.findFirst({
+    (!accountId && await prisma.conversation.findFirst({
       where,
       orderBy: { lastMessageAt: "desc" },
       select,

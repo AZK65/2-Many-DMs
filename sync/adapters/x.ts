@@ -6,14 +6,16 @@ import { accountStoragePath, xSessionCookies } from "../account-session";
 import type { Browser, Page } from "puppeteer";
 import puppeteer, { REAL_UA } from "../x-browser";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
+import { XAvatarSources } from "../x-avatar-sources";
 import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
 import { isLocked, tryUnlock, type UnlockResult } from "../x-passcode";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
-import { mergeXHistory, orderXMinuteMessages, parseXDate, stableXInboxDate, xSnowflakeDate, xHistoryMatchesPreview, type XLatestPreview } from "../x-history";
+import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xSnowflakeDate, xHistoryMatchesPreview, type XLatestPreview } from "../x-history";
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
+import { downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
 import { reconcileXPreviewCopies } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
@@ -95,7 +97,7 @@ interface AutomaticRepair {
 }
 
 function previewSignature(conversation: ScrapedConversation): string {
-  const mediaVersion = /(?:sent|shared) (?:a |an )?(?:photo|image|video|attachment|file|document)/i.test(conversation.preview) ? "media-v1:" : "";
+  const mediaVersion = /(?:sent|shared) (?:(?:a|an|\d+) )?(?:photo|image|video|gif|voice|audio|attachment|file|document)/i.test(conversation.preview) ? "media-v2:" : "";
   return `${mediaVersion}${conversation.direction}:${conversation.preview}:${conversation.timestamp || "undated"}`;
 }
 
@@ -129,7 +131,7 @@ export class XAdapter implements Adapter {
   // composer while a message is being delivered.
   private pageRun = 0;
   private conversationPreviews = new Map<string, string>();
-  private avatarSources = new Map<string, string>();
+  private avatarSources: XAvatarSources;
 
   async refreshAvatar(chatExternalId: string): Promise<import("./types").AvatarRefreshResult> {
     this.assertNotCoolingDown();
@@ -174,11 +176,15 @@ export class XAdapter implements Adapter {
   private lastInboxCheckedAt = 0;
   private attachmentCache = new Map<string, NonNullable<InboundMessage["media"]>>();
   private attachmentRetryAt = new Map<string, number>();
+  private nativeMessageTimes = new Map<string, number>();
+  private nativeTimeRetryAt = new Map<string, number>();
 
   // Per-account ready: pass the account's proxy. Falls back to global PROXY_URL.
   constructor(opts: { proxyUrl?: string; accountId?: string; session?: { authToken: string; ct0: string; passcode?: string } } = {}) {
     this.proxyUrl = opts.proxyUrl;
     this.accountId = opts.accountId;
+    this.avatarSources = new XAvatarSources(opts.accountId ? path.join(process.env.DATA_DIR || process.cwd(),
+      ".local", `x-avatar-sources-${opts.accountId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`) : undefined);
     this.session = opts.session;
   }
 
@@ -1083,9 +1089,7 @@ export class XAdapter implements Adapter {
         )
       ).filter((item) => !generalIds.has(item.id));
       if (run !== this.pageRun) return;
-      for (const conv of [...generalConversations, ...requestConversations]) {
-        if (conv.avatar) this.avatarSources.set(conv.id, conv.avatar);
-      }
+      this.avatarSources.remember([...generalConversations, ...requestConversations]);
       const changedGeneral = generalConversations.filter(
         (conversation) =>
           this.conversationPreviews.get(`general:${conversation.id}`) !==
@@ -1172,8 +1176,13 @@ export class XAdapter implements Adapter {
     const key = `${conversation.inboxCategory}:${conversation.id}`;
     const previewKey = previewSignature(conversation);
     if (this.repairedPreviews.get(key) === previewKey && !dailyAudit && Date.now() - (this.lastRepairAt.get(key) || 0) < 24 * 60 * 60_000) return;
-    if ((this.repairRetryAt.get(key) || 0) > Date.now()) return;
     const existing = this.automaticRepairQueue.get(key);
+    if ((this.repairRetryAt.get(key) || 0) > Date.now()) {
+      // A new message must not inherit the failure cooldown of an older
+      // missing attachment. The shared account/network pace still applies.
+      if (!existing || existing.previewKey === previewKey || dailyAudit) return;
+      this.repairRetryAt.delete(key);
+    }
     if (dailyAudit && existing) return;
     if (existing?.previewKey === previewKey) return;
     this.automaticRepairQueue.set(key, {
@@ -1531,18 +1540,46 @@ export class XAdapter implements Adapter {
     const rows = await page.evaluate(readXMessageDom);
     const now = Date.now();
     const messages: ScrapedMessage[] = [];
+    let infoReads = 0;
     for (const { dateHints, timeText, day, attachments, ...message } of rows) {
       const media: NonNullable<InboundMessage["media"]>[] = [];
       for (const [index, attachment] of attachments.entries()) {
         media.push(await this.downloadAttachment(page, message.id, index, attachment));
       }
       const explicitTimestamp = dateHints.map((hint) => parseXDate(hint, now)).find((value) => value !== null);
+      let timestamp = explicitTimestamp ?? parseXDate(timeText, now, day) ?? (!timeText ? parseXDate(day, now) : null) ?? xSnowflakeDate(message.id, now);
+      // A day label alone is not a photo's sent time. X suppresses timestamps
+      // inside sender groups, so recover the exact row's native Info instead.
+      if (!explicitTimestamp && !timeText && !xSnowflakeDate(message.id, now)) timestamp = null;
+      if (!timestamp) {
+        timestamp = this.nativeMessageTimes.get(message.id) || null;
+        if (!timestamp) {
+          const saved = await prisma.message.findUnique({ where: { externalKey: `x:${message.id}` }, select: { createdAt: true } });
+          timestamp = saved?.createdAt.getTime() || null;
+        }
+        if (!timestamp && infoReads < 12 && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
+          this.assertNotCoolingDown();
+          if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
+          infoReads++;
+          try {
+            const sent = await readNativeXMessageTime(page, message.id);
+            timestamp = sent ? parseXMessageInfoDate(sent, Date.now()) : null;
+            if (timestamp) this.nativeMessageTimes.set(message.id, timestamp);
+          } catch (error) {
+            // Keep the native ID pending, but retain an actionable reason when
+            // X changes the Info controls rather than silently losing media.
+            console.warn("[x] native message time deferred:", message.id, error instanceof Error ? error.message : "Unavailable");
+          }
+          if (!timestamp) this.nativeTimeRetryAt.set(message.id, now + 5 * 60_000);
+          if (this.nativeMessageTimes.size > 3000) this.nativeMessageTimes.delete(this.nativeMessageTimes.keys().next().value!);
+          if (this.nativeTimeRetryAt.size > 3000) this.nativeTimeRetryAt.delete(this.nativeTimeRetryAt.keys().next().value!);
+        }
+      }
       messages.push({
         ...message,
         attachments: media,
-        minutePrecision: !explicitTimestamp && Boolean(/\d{1,2}:\d{2}\s*(?:AM|PM)/i.test(timeText || day || "")),
-        timestamp: explicitTimestamp ??
-          parseXDate(timeText, now, day) ?? (!timeText ? parseXDate(day, now) : null) ?? xSnowflakeDate(message.id, now),
+        minutePrecision: !explicitTimestamp && !xSnowflakeDate(message.id, now) && Boolean(timestamp && timestamp % 60_000 === 0),
+        timestamp,
       });
     }
     if (messages.some((message) => !message.timestamp)) {
@@ -1567,15 +1604,18 @@ export class XAdapter implements Adapter {
       return result;
     }
     const unavailable = { type: attachment.type, url: null, name: attachment.name, isGif: attachment.isGif };
-    if (!attachment.source || (this.attachmentRetryAt.get(externalKey) || 0) > Date.now()) return unavailable;
+    if ((!attachment.source && !attachment.nativeDownload) || (this.attachmentRetryAt.get(externalKey) || 0) > Date.now()) return unavailable;
     try {
-      const file = await page.evaluate(readXAttachmentBytes, { url: attachment.source, maxBytes: MAX_BYTES });
+      const native = attachment.nativeDownload && attachment.type === "audio" && index === 0
+        ? await downloadNativeXVoice(page, messageId, MAX_BYTES) : null;
+      const file = native ? { mime: native.mime, base64: native.bytes.toString('base64') }
+        : await page.evaluate(readXAttachmentBytes, { url: attachment.source!, maxBytes: MAX_BYTES });
       if (attachment.type !== "file" && !file.mime.startsWith(`${attachment.type}/`)) throw new Error("X returned an unexpected attachment format");
       const namedExt = path.extname(attachment.name || "").slice(1).replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "bin";
       const mimeExt = file.mime === "application/octet-stream" ? namedExt : extFromMime(file.mime, namedExt);
       const ext = mimeExt.length <= 12 ? mimeExt : namedExt;
       const url = saveMedia(`x_${messageId}_${index}`, ext, Buffer.from(file.base64, "base64"));
-      const result = { type: attachment.type, url, name: attachment.name || `Attachment.${ext}`, isGif: attachment.isGif || file.mime === "image/gif" };
+      const result = { type: attachment.type, url, name: native ? `Voice message.${ext}` : attachment.name || `Attachment.${ext}`, isGif: attachment.isGif || file.mime === "image/gif" };
       this.attachmentRetryAt.delete(externalKey);
       this.attachmentCache.set(externalKey, result);
       if (this.attachmentCache.size > 1000) this.attachmentCache.delete(this.attachmentCache.keys().next().value!);
