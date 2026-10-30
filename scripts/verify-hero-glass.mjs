@@ -33,8 +33,6 @@ try {
       const dark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
       if (dark !== (theme === "dark")) {
         await page.click('[aria-label="Website appearance"]');
-        await page.waitForSelector('[role="menuitemradio"]');
-        await page.$$eval('[role="menuitemradio"]', (nodes, value) => nodes.find(node => node.getAttribute("aria-label") === value)?.click(), theme === "dark" ? "Dark" : "Light");
       }
       await scroll(0);
       assert.ok(await opacity() < 0.01, "Hero starts clear");

@@ -136,8 +136,7 @@ try {
   assert.match(await page.$eval('[data-onboarding-preview]', element => element.innerText), /Selected in preview/);
   await clickText("Restart preview");
   for (const theme of ["light", "dark"]) {
-    await click('[aria-label="Website appearance"]');
-    await page.click(`[role="menuitemradio"][aria-label="${theme === "dark" ? "Dark" : "Light"}"]`);
+    if (await page.evaluate(() => document.documentElement.classList.contains("dark")) !== (theme === "dark")) await click('[aria-label="Website appearance"]');
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), theme === "dark");
     assert.equal(await page.evaluate(() => localStorage.getItem("2many-site-theme")), theme);
     await settle();
@@ -208,7 +207,8 @@ try {
   await click("#faq-question-1"); await new Promise(resolve => setTimeout(resolve, 750));
   assert.equal(await page.$eval("#faq-answer-1", element => element.getBoundingClientRect().height), 0);
   const switchSelector = '[aria-label="Website appearance"]';
-  await page.focus(switchSelector); await page.keyboard.press("ArrowDown");
+  if (!await page.evaluate(() => document.documentElement.classList.contains("dark"))) await click(switchSelector);
+  await page.focus(switchSelector);
   await page.keyboard.press("Enter");
   await new Promise(resolve => setTimeout(resolve, 600));
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), false);

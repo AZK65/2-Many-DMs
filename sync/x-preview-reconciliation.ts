@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { normalizeXMessageText } from "./x-message-text";
+import { normalizeXMessageText, xPreviewMatchesText } from "./x-message-text";
 
 const nativeXKey = /^x:(?:[a-f0-9]{8}-[a-f0-9-]{27}|\d{10,})$/i;
 
@@ -30,7 +30,8 @@ export function xSnapshotProofs(previews: Iterable<[string, string]>, checked: M
 // A successful latest-history checkpoint also covers a ONE-message request.
 // Its preview clock can drift by hours/days, so a two-minute time join is not
 // appropriate. Require one unique native anchor and an uninterrupted run of
-// exact same-direction copies. Never infer across distinct messages/repeats.
+// same-direction copies of that snapshot (including X's 200-character clip).
+// Never infer across distinct messages/repeats or ambiguous full-body prefixes.
 export async function reconcileXVerifiedSnapshot(db: PrismaClient, accountId: string, chatExternalId: string, proof: VerifiedXSnapshot): Promise<number> {
   const body = normalizeXMessageText(proof.preview);
   if (!body || !Number.isFinite(proof.checkedAt)) return 0;
@@ -41,7 +42,7 @@ export async function reconcileXVerifiedSnapshot(db: PrismaClient, accountId: st
       _count: { select: { reactions: true, emailCaptures: true, keywordAlertHits: true } },
     } });
     const same = (row: typeof rows[number]) => !row.mediaType && row.direction === proof.direction && normalizeXMessageText(row.body) === body;
-    const natives = rows.filter(row => nativeXKey.test(row.externalKey || "") && same(row));
+    const natives = rows.filter(row => nativeXKey.test(row.externalKey || "") && !row.mediaType && row.direction === proof.direction && xPreviewMatchesText(proof.preview, row.body));
     if (natives.length !== 1 || natives[0].createdAt.getTime() > proof.checkedAt) return 0;
     const native = natives[0], anchor = rows.indexOf(native);
     const duplicates = [];
@@ -88,14 +89,25 @@ export async function coalesceXPreviewRuns(db: PrismaClient, accountId: string, 
       _count: { select: { reactions: true, emailCaptures: true, keywordAlertHits: true } },
     } })).reverse();
     let anchor: typeof rows[number] | undefined;
+    let allNativeRows: Array<Pick<typeof rows[number], "externalKey" | "body" | "direction" | "mediaType">> | undefined;
     let firstCopy = true;
     const duplicates = [];
     for (const row of rows) {
       if (nativeXKey.test(row.externalKey || "") && !row.mediaType && row.body.trim()) { anchor = row; firstCopy = true; continue; }
       const generated = row.externalKey?.startsWith("x:preview:") && !row.id.startsWith("client_");
       const delta = anchor ? row.createdAt.getTime() - anchor.createdAt.getTime() : Infinity;
-      if (!anchor || !generated || row.mediaType || row.direction !== anchor.direction || normalizeXMessageText(row.body) !== normalizeXMessageText(anchor.body) || delta < 0 || delta > (firstCopy ? 130000 : 3600000)) {
+      if (!anchor || !generated || row.mediaType || row.direction !== anchor.direction || !xPreviewMatchesText(row.body, anchor.body) || delta < 0 || delta > (firstCopy ? 130000 : 3600000)) {
         anchor = undefined; continue;
+      }
+      if (normalizeXMessageText(row.body) !== normalizeXMessageText(anchor.body)) {
+        // A clipped prefix may belong to multiple genuine messages, even
+        // outside the bounded run above. Do not guess which one it represents.
+        allNativeRows ??= (await tx.message.findMany({ where: { conversationId: conversation.id }, select: {
+          externalKey: true, body: true, direction: true, mediaType: true,
+        } })).filter(candidate => nativeXKey.test(candidate.externalKey || ""));
+        if (allNativeRows.filter(candidate => !candidate.mediaType && candidate.direction === row.direction && xPreviewMatchesText(row.body, candidate.body)).length !== 1) {
+          anchor = undefined; continue;
+        }
       }
       firstCopy = false;
       if (row.pinnedAt || row.originalBody || row.translatedBody || Object.values(row._count).some(Boolean)) continue;
@@ -132,9 +144,13 @@ export async function reconcileXPreviewCopies(db: PrismaClient, accountId: strin
     } });
     const duplicates = [];
     for (const preview of previews) {
-      const matches = natives.filter(native => !native.mediaType && native.direction === preview.direction && normalizeXMessageText(native.body) === normalizeXMessageText(preview.body));
+      const matches = natives.filter(native => !native.mediaType && native.direction === preview.direction && xPreviewMatchesText(preview.body, native.body));
       if (matches.length !== 1 || !preview.body.trim()) continue;
       const native = matches[0];
+      if (normalizeXMessageText(preview.body) !== normalizeXMessageText(native.body)) {
+        const candidates = await tx.message.findMany({ where: { conversationId: conversation.id, direction: preview.direction, mediaType: null }, select: { externalKey: true, body: true } });
+        if (candidates.filter(row => nativeXKey.test(row.externalKey || "") && xPreviewMatchesText(preview.body, row.body)).length !== 1) continue;
+      }
       const drift = preview.createdAt.getTime() - native.createdAt.getTime();
       // A complete, freshly read interval can prove that a request preview's
       // rounded clock drifted. Never widen fuzzy matching over unread history,

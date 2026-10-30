@@ -108,7 +108,7 @@ export function xHistoryMatchesPreview(
   return messages.some(message => {
     if (message.direction !== preview.direction) return false;
     if (preview.timestamp && (!message.timestamp || Math.abs(message.timestamp - preview.timestamp) > tolerance)) return false;
-    if (xPreviewMatchesText(body, normalize(message.text))) return true;
+    if (xPreviewMatchesText(preview.preview, message.text) || xPreviewMatchesText(body, normalize(message.text))) return true;
     const mediaPreview = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|file|document|attachment)s?$/i.exec(body);
     const kind = mediaPreview?.[2]?.toLowerCase();
     const expected = Number(mediaPreview?.[1]) || 1;

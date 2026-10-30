@@ -4,7 +4,9 @@ export function normalizeXMessageText(text: string): string {
   return text.replace(/\bhttps?:\/\/(?=[a-z0-9.-]+\.[a-z]{2,}\b)/gi, "").replace(/\s+/g, " ").trim();
 }
 
-// Only an explicitly truncated, substantial preview may match a full body.
+// X also clips request previews at 200 characters WITHOUT an ellipsis. Match
+// that exact rendering boundary (including trimmed whitespace and emoji), not
+// arbitrary prefixes. Older captures count UTF-16 units; X counts code points.
 // Callers must also verify direction, time and a unique candidate. A bare
 // prefix ("yes" vs "yes please") is never enough to combine messages.
 export function xPreviewMatchesText(preview: string, full: string): boolean {
@@ -12,7 +14,10 @@ export function xPreviewMatchesText(preview: string, full: string): boolean {
   const complete = normalizeXMessageText(full);
   if (short === complete) return true;
   const prefix = short.replace(/(?:…|\.{3})$/, "").trimEnd();
-  return prefix !== short && prefix.length >= 24 && complete.length > prefix.length && complete.startsWith(prefix);
+  if (prefix !== short && prefix.length >= 24 && complete.length > prefix.length && complete.startsWith(prefix)) return true;
+  if (short.length < 24 || complete.length <= short.length) return false;
+  return [full.trim(), complete].some(text =>
+    [text.slice(0, 200), Array.from(text).slice(0, 200).join("")].some(capped => normalizeXMessageText(capped) === short));
 }
 
 // Repeated reads of the SAME native ID can race decryption/hydration. Promote

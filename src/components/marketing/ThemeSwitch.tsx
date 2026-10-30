@@ -1,65 +1,17 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { MoonIcon, SunIcon } from "../icons";
+import { motion, useReducedMotion } from "motion/react";
 
-const choices = [{ value: "light", label: "Light", Icon: SunIcon }, { value: "dark", label: "Dark", Icon: MoonIcon }];
 const easing = [0.32, 0.72, 0, 1] as const;
 
-export function ThemeSwitch({ theme, onChange, label, placement = "bottom", open: controlledOpen, onOpenChange }: { theme: string; onChange: (theme: string) => void; label: string; placement?: "top" | "bottom"; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function ThemeSwitch({ theme, onChange, label }: { theme: string; onChange: (theme: string) => void; label: string }) {
   const dark = theme === "dark";
   const reduced = useReducedMotion();
-  const [localOpen, setLocalOpen] = useState(false);
-  const open = controlledOpen ?? localOpen;
-  function setOpen(value: boolean) { setLocalOpen(value); onOpenChange?.(value); }
-  const id = useId();
-  const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const items = useRef<(HTMLButtonElement | null)[]>([]);
-  const openingIndex = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!open) {
-      if (root.current?.contains(document.activeElement)) trigger.current?.focus({ preventScroll: true });
-      return;
-    }
-    items.current[openingIndex.current ?? (dark ? 1 : 0)]?.focus({ preventScroll: true });
-    openingIndex.current = null;
-    const outside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [open, dark]);
-
-  function closeAndFocus() { setOpen(false); trigger.current?.focus({ preventScroll: true }); }
-
-  return <div ref={root} className="relative shrink-0" onBlur={event => {
-    if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-  }} onKeyDown={event => {
-    if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); closeAndFocus(); }
-  }}>
-    <button ref={trigger} id={`${id}-trigger`} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${id}-menu` : undefined} aria-label={label} title={`Appearance: ${dark ? "Dark" : "Light"}`} onClick={() => setOpen(!open)} onKeyDown={event => {
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault(); openingIndex.current = event.key === "ArrowDown" ? 0 : choices.length - 1; setOpen(true);
-      }
-    }} className={`group flex h-12 w-12 items-center justify-center rounded-full ring-1 ring-inset transition-colors duration-200 sm:h-10 sm:w-10 ${open ? "bg-slate-100 text-slate-900 ring-slate-300 dark:bg-neutral-800 dark:text-white dark:ring-neutral-600" : "bg-transparent text-slate-500 ring-slate-200 hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:ring-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-white"}`}>
-      <motion.svg aria-hidden viewBox="0 0 24 24" className="h-5 w-5 shrink-0" initial={false} animate={{ rotate: dark ? 180 : 0 }} transition={{ duration: reduced ? 0 : 0.5, ease: easing }}>
-        <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" />
-      </motion.svg>
-    </button>
-    <AnimatePresence>{open && <motion.div id={`${id}-menu`} role="menu" aria-orientation="horizontal" aria-labelledby={`${id}-trigger`} className={`absolute right-0 z-50 flex w-max gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-black/40 ${placement === "top" ? "bottom-full mb-2 origin-bottom-right" : "top-full mt-2 origin-top-right"}`} initial={{ opacity: 0, y: reduced ? 0 : placement === "top" ? 4 : -4, scale: reduced ? 1 : 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: reduced ? 1 : 0.96 }} transition={{ duration: reduced ? 0 : 0.2, ease: easing }} onKeyDown={event => {
-      const current = items.current.indexOf(document.activeElement as HTMLButtonElement);
-      const offset = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
-      if (!offset && event.key !== "Home" && event.key !== "End") return;
-      event.preventDefault();
-      items.current[event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (current + offset + choices.length) % choices.length]?.focus();
-    }}>
-      {choices.map(({ value, label: optionLabel, Icon }, index) => <button key={value} ref={element => { items.current[index] = element; }} type="button" role="menuitemradio" aria-label={optionLabel} title={`${optionLabel} mode`} aria-checked={theme === value} tabIndex={-1} onClick={() => { onChange(value); closeAndFocus(); }} className={`flex h-12 w-12 items-center justify-center rounded-xl transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${theme === value ? "bg-slate-100 text-slate-900 dark:bg-neutral-800 dark:text-white" : "text-slate-500 hover:bg-slate-50 dark:text-neutral-400 dark:hover:bg-neutral-800/60"}`}>
-        <Icon aria-hidden className="h-5 w-5" />
-      </button>)}
-    </motion.div>}</AnimatePresence>
-  </div>;
+  return <button type="button" aria-label={label} aria-pressed={dark} title={`Switch to ${dark ? "light" : "dark"} mode`} onClick={() => onChange(dark ? "light" : "dark")} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-transparent text-slate-500 ring-1 ring-inset ring-slate-200 transition-[color,background-color,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-slate-100 hover:text-slate-900 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:h-10 sm:w-10 dark:text-neutral-400 dark:ring-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-white">
+    <motion.svg aria-hidden viewBox="0 0 24 24" className="h-5 w-5 shrink-0" initial={false} animate={{ rotate: dark ? 180 : 0 }} transition={{ duration: reduced ? 0 : 0.5, ease: easing }}>
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" />
+    </motion.svg>
+  </button>;
 }

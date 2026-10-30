@@ -51,6 +51,20 @@ The same reconciliation runs after future successful history reads. Preserve
 all existing annotation/reference protections and write recovery copies first.
 No provider navigation is needed for the startup scan.
 
+## Clipped request previews
+
+X can cut inbox previews at exactly 200 characters without an ellipsis. Match
+that known boundary against the complete native body, including trimmed trailing
+spaces and Unicode code points. Do not treat arbitrary short prefixes as proof.
+Use the same matcher for live snapshot suppression, native-history promotion,
+history verification, and account-wide repair. Keep direction, unique-native,
+time/checkpoint, annotation, reference, and recovery-copy safeguards. If two
+native messages share the same clipped prefix, leave the preview unresolved.
+
+Regression tests use synthetic messages only:
+
+`npx tsx --test sync/x-truncated-preview.test.ts`
+
 ## Verification
 
 `npx tsx --test sync/x-history.test.ts sync/x-live-inbox.test.ts sync/x-attachment.test.ts sync/x-store.test.ts`
