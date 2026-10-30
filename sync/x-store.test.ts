@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { InboundMessage } from "./adapters/types";
 import { recordDeliveryReceipt } from "./delivery-receipt";
-import { coalesceXPreviewRuns, reconcileXPreviewCopies } from "./x-preview-reconciliation";
+import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapshot, reconcileXAccountPreviews, xSnapshotProofs } from "./x-preview-reconciliation";
 
 test("X history repairs dates without unread inflation, duplicates, or changing local sends", async () => {
   // A new empty database, never a copy of the user's chats or the live DB.
@@ -209,7 +209,10 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
     await persistInbound({ ...message, body: "A genuinely changed preview", timestampVerified: false, timestamp: new Date(roundedAt.getTime() + 30 * 60000), messageExternalId: "x:preview:changed" });
     assert.ok(await prisma.message.findUnique({ where: { externalKey: "x:preview:changed" } }));
     await persistInbound({ ...message, body: "A genuinely changed preview", timestampVerified: true, timestamp: new Date(roundedAt.getTime() + 40 * 60000), messageExternalId: "x:preview:verified-repeat" });
-    assert.ok(await prisma.message.findUnique({ where: { externalKey: "x:preview:verified-repeat" } }), "a distinct verified clock still permits a repeat");
+    assert.equal(await prisma.message.findUnique({ where: { externalKey: "x:preview:verified-repeat" } }), null, "a changed inbox clock alone cannot prove a second identical DM");
+    const repeatKey = "x:99999999-9999-4999-8999-999999999999";
+    await persistInbound({ ...message, body: "A genuinely changed preview", timestampVerified: true, timestamp: new Date(roundedAt.getTime() + 40 * 60000), messageExternalId: repeatKey, historical: true });
+    assert.ok(await prisma.message.findUnique({ where: { externalKey: repeatKey } }), "a distinct native ID still creates the genuine repeat");
     await prisma.message.create({ data: { conversationId: conversation.id, externalKey: "x:preview:legacy-duplicate", body: "rounded preview", direction: "in", createdAt: new Date(roundedAt.getTime() + 64027) } });
     const pinned = await prisma.message.create({ data: { conversationId: conversation.id, externalKey: "x:preview:pinned-duplicate", body: "rounded preview", direction: "in", createdAt: roundedAt, pinnedAt: roundedAt } });
     const previousDataDir = process.env.DATA_DIR;
@@ -256,6 +259,48 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
       await coalesceXPreviewRuns(prisma, account.id, "test-chat");
       assert.equal(await prisma.message.count({ where: { externalKey: { in: [0, 1, 2].map(i => `x:preview:run-${i}`) } } }), 0);
       for (const key of [runKey, "x:77777777-7777-4777-8777-777777777777", "x:preview:run-pinned", "x:preview:run-unanchored"]) assert.ok(await prisma.message.findUnique({ where: { externalKey: key } }), key);
+
+      // One-message requests have no min/max history interval. Reconcile them
+      // globally from completed native-history checkpoints, not clock proximity.
+      const requestAt = runStart + 86400000;
+      for (const chat of ["request-a", "request-b"]) {
+        const c = await prisma.conversation.create({ data: { platform: "x", accountId: account.id, contactId: conversation.contactId, externalId: chat } });
+        await prisma.message.createMany({ data: [
+          { conversationId: c.id, direction: "in", body: "A complete\n\nrequest: with details", externalKey: chat === "request-a" ? "x:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" : "x:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", createdAt: new Date(requestAt) },
+          { conversationId: c.id, direction: "in", body: "A complete\nrequest: with details", externalKey: `x:preview:${chat}`, createdAt: new Date(requestAt + 61 * 60000) },
+        ] });
+      }
+      const checkedAt = requestAt + 2 * 86400000;
+      const signature = `in:A complete\nrequest: with details:${requestAt + 61 * 60000}`;
+      const proofs = xSnapshotProofs([["spam:request-a", signature], ["general:request-b", signature], ["spam:partial-request", signature]], new Map([["spam:request-a", checkedAt], ["general:request-b", checkedAt]]));
+      assert.equal(proofs.has("partial-request"), false, "uncompleted history reads are not evidence");
+      const report = await reconcileXAccountPreviews(prisma, account.id, proofs);
+      assert.ok(report.changed >= 2, "repair scans multiple idle chats, not only the opened DM");
+      for (const chat of ["request-a", "request-b"]) assert.equal(await prisma.message.count({ where: { externalKey: `x:preview:${chat}` } }), 0);
+      assert.equal((await reconcileXAccountPreviews(prisma, account.id, proofs)).removed, 0, "repair is idempotent");
+
+      const c = await prisma.conversation.findFirstOrThrow({ where: { externalId: "request-a" } });
+      const copy = { conversationId: c.id, direction: "in", body: "A complete\nrequest: with details", createdAt: new Date(requestAt + 61 * 60000) };
+      const proof = proofs.get("request-a")!;
+      await prisma.message.create({ data: { ...copy, externalKey: "x:preview:future-proof" } });
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, account.id, "request-a", { ...proof, checkedAt: requestAt }), 0, "stale evidence cannot remove a newer observation");
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, "another-account", "request-a", proof), 0, "account isolation");
+      await prisma.message.create({ data: { ...copy, body: "Different reply", direction: "out", externalKey: "x:cccccccc-cccc-4ccc-8ccc-cccccccccccc", createdAt: new Date(requestAt + 60000) } });
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, account.id, "request-a", proof), 0, "never infer across an intervening different message");
+      await prisma.message.delete({ where: { externalKey: "x:cccccccc-cccc-4ccc-8ccc-cccccccccccc" } });
+      await prisma.message.create({ data: { ...copy, externalKey: "x:dddddddd-dddd-4ddd-8ddd-dddddddddddd", createdAt: new Date(requestAt + 60000) } });
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, account.id, "request-a", proof), 0, "multiple genuine native repeats remain ambiguous and intact");
+      await prisma.message.delete({ where: { externalKey: "x:dddddddd-dddd-4ddd-8ddd-dddddddddddd" } });
+      await prisma.message.update({ where: { externalKey: "x:preview:future-proof" }, data: { pinnedAt: new Date(requestAt) } });
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, account.id, "request-a", proof), 0, "pinned copies remain intact");
+      await prisma.message.update({ where: { externalKey: "x:preview:future-proof" }, data: { pinnedAt: null } });
+      await prisma.message.create({ data: { ...copy, body: "Quoted reply", direction: "out", externalKey: "x:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", replyToExternalKey: "x:preview:future-proof", createdAt: new Date(checkedAt + 60000) } });
+      assert.equal(await reconcileXVerifiedSnapshot(prisma, account.id, "request-a", proof), 0, "quoted previews remain intact");
+      await prisma.message.delete({ where: { externalKey: "x:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" } });
+      process.env.DATA_DIR = path.join(directory, "test.db");
+      await assert.rejects(reconcileXVerifiedSnapshot(prisma, account.id, "request-a", proof));
+      assert.ok(await prisma.message.findUnique({ where: { externalKey: "x:preview:future-proof" } }), "backup failure aborts deletion");
+      process.env.DATA_DIR = directory;
     } finally {
       if (previousDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = previousDataDir;

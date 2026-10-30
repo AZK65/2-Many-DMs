@@ -34,6 +34,23 @@ duplicates. Backup failure aborts deletion. The directory is excluded from Git.
 The existing 60-second history pace, request cooldowns, and retry limits remain.
 No extra frequent history poll or account reset is introduced.
 
+## Account-wide snapshot reconciliation
+
+Inbox rows are observations, not native message events. A changed clock alone
+must not insert another identical preview, including absolute clock labels and
+re-rendered request rows. Successful observation checkpoints survive restarts;
+changed content still publishes immediately and native IDs retain true repeats.
+
+On connector startup, scan every saved X conversation with preview rows in that
+account. Completed history checkpoints can reconcile a single-message request
+even when its preview clock drifted by more than two minutes. Require one
+unambiguous native match and uninterrupted exact-text, same-direction copies
+observed before that completed read. Failed/partial reads, newer observations,
+different intervening messages, and multiple native repeats are not proof.
+The same reconciliation runs after future successful history reads. Preserve
+all existing annotation/reference protections and write recovery copies first.
+No provider navigation is needed for the startup scan.
+
 ## Verification
 
 `npx tsx --test sync/x-history.test.ts sync/x-live-inbox.test.ts sync/x-attachment.test.ts sync/x-store.test.ts`

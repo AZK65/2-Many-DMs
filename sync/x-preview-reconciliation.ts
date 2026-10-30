@@ -6,6 +6,75 @@ import { normalizeXMessageText } from "./x-message-text";
 
 const nativeXKey = /^x:(?:[a-f0-9]{8}-[a-f0-9-]{27}|\d{10,})$/i;
 
+export type VerifiedXSnapshot = { preview: string; direction: "in" | "out"; checkedAt: number };
+
+// These checkpoints are written ONLY after a complete native history pass
+// matches the latest inbox snapshot. A queued/failed/partial read is not proof.
+export function verifiedXSnapshot(signature: string | undefined, checkedAt: number | undefined): VerifiedXSnapshot | undefined {
+  const match = signature?.match(/^(in|out):([\s\S]+):(\d+)$/);
+  if (!match || !checkedAt || !Number.isFinite(checkedAt)) return undefined;
+  return { direction: match[1] as "in" | "out", preview: match[2], checkedAt };
+}
+
+export function xSnapshotProofs(previews: Iterable<[string, string]>, checked: Map<string, number>): Map<string, VerifiedXSnapshot> {
+  const proofs = new Map<string, VerifiedXSnapshot>();
+  for (const [key, signature] of previews) {
+    if (!/^(?:general|spam):/.test(key)) continue;
+    const proof = verifiedXSnapshot(signature, checked.get(key));
+    const chatId = key.slice(key.indexOf(":") + 1);
+    if (proof && proof.checkedAt > (proofs.get(chatId)?.checkedAt || 0)) proofs.set(chatId, proof);
+  }
+  return proofs;
+}
+
+// A successful latest-history checkpoint also covers a ONE-message request.
+// Its preview clock can drift by hours/days, so a two-minute time join is not
+// appropriate. Require one unique native anchor and an uninterrupted run of
+// exact same-direction copies. Never infer across distinct messages/repeats.
+export async function reconcileXVerifiedSnapshot(db: PrismaClient, accountId: string, chatExternalId: string, proof: VerifiedXSnapshot): Promise<number> {
+  const body = normalizeXMessageText(proof.preview);
+  if (!body || !Number.isFinite(proof.checkedAt)) return 0;
+  const conversation = await db.conversation.findFirst({ where: { accountId, platform: "x", externalId: chatExternalId }, select: { id: true } });
+  if (!conversation) return 0;
+  return db.$transaction(async tx => {
+    const rows = await tx.message.findMany({ where: { conversationId: conversation.id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: {
+      _count: { select: { reactions: true, emailCaptures: true, keywordAlertHits: true } },
+    } });
+    const same = (row: typeof rows[number]) => !row.mediaType && row.direction === proof.direction && normalizeXMessageText(row.body) === body;
+    const natives = rows.filter(row => nativeXKey.test(row.externalKey || "") && same(row));
+    if (natives.length !== 1 || natives[0].createdAt.getTime() > proof.checkedAt) return 0;
+    const native = natives[0], anchor = rows.indexOf(native);
+    const duplicates = [];
+    for (const step of [-1, 1]) {
+      for (let i = anchor + step; i >= 0 && i < rows.length; i += step) {
+        const row = rows[i];
+        if (!row.externalKey?.startsWith("x:preview:") || row.id.startsWith("client_") || !same(row)) break;
+        // Observations newer than the successful read remain provisional.
+        if (row.createdAt.getTime() > proof.checkedAt) continue;
+        if (row.pinnedAt || row.originalBody || row.translatedBody || Object.values(row._count).some(Boolean)) continue;
+        if (await tx.message.count({ where: { replyToExternalKey: row.externalKey } })) continue;
+        duplicates.push({ preview: row, nativeId: native.id });
+      }
+    }
+    if (!duplicates.length) return 0;
+    saveRecoveryCopy(conversation.id, duplicates);
+    return (await tx.message.deleteMany({ where: { id: { in: duplicates.map(item => item.preview.id) } } })).count;
+  });
+}
+
+// Apply the same repair to every saved chat, including idle requests that may
+// never be opened again. This is local DB work; it does not poll/navigate X.
+export async function reconcileXAccountPreviews(db: PrismaClient, accountId: string, proofs: Map<string, VerifiedXSnapshot>): Promise<{ scanned: number; changed: number; removed: number }> {
+  const chats = await db.conversation.findMany({ where: { platform: "x", accountId, externalId: { not: null }, messages: { some: { externalKey: { startsWith: "x:preview:" } } } }, select: { externalId: true } });
+  let changed = 0, removed = 0;
+  for (const chat of chats) {
+    const proof = proofs.get(chat.externalId!);
+    const count = await coalesceXPreviewRuns(db, accountId, chat.externalId!) + (proof ? await reconcileXVerifiedSnapshot(db, accountId, chat.externalId!, proof) : 0);
+    if (count) { changed++; removed += count; }
+  }
+  return { scanned: chats.length, changed, removed };
+}
+
 // A run of generated inbox copies is not a run of native messages. The first
 // copy must closely match a saved native anchor; every following row must be
 // the same generated preview. Stop at ANY distinct/native message. This also

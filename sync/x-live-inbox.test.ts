@@ -177,6 +177,17 @@ test("overlapping preview writes deduplicate and failed writes can retry", async
   assert.equal(saved.length, 2);
 });
 
+test("an unchanged inbox snapshot never becomes another event from a changed clock", async () => {
+  const { adapter, saved } = fixture();
+  const row = { ...conversation(), timeLabel: "10:07 AM", timestamp: Date.now() - 86400000 };
+  await adapter.persistPreview(row, adapter.onMessage, false, () => true);
+  await adapter.persistPreview({ ...row, timeLabel: "11:08 AM", timestamp: row.timestamp + 61 * 60000 }, adapter.onMessage, false, () => true);
+  assert.equal(saved.length, 1);
+  assert.ok(adapter.automaticRepairQueue.has("general:live"), "native history must still recover genuine identical repeats");
+  await adapter.persistPreview({ ...row, preview: "A different new reply" }, adapter.onMessage, false, () => true);
+  assert.equal(saved.length, 2, "different content is never dropped");
+});
+
 test("fresh replies take priority over the old daily audit at the same network pace", async () => {
   const { adapter } = fixture();
   adapter.busy = false;

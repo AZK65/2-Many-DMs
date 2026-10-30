@@ -367,10 +367,14 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       if (
         latest?.direction === m.direction &&
         (xPreviewMatchesText(m.body, latest.body) || Boolean(latest.mediaType && X_MEDIA_PREVIEWS[latest.mediaType]?.includes(m.body.trim()))) &&
-        // A rounded inbox clock cannot prove a second identical message. Keep
-        // one preview until a real native ID distinguishes a genuine repeat.
-        (m.timestampVerified === false || Math.abs(latest.createdAt.getTime() - m.timestamp.getTime()) <= 130_000)
+        // Generic attachment labels cannot identify two different photos.
+        ((!latest.mediaType && !Object.values(X_MEDIA_PREVIEWS).some(labels => labels.includes(m.body.trim()))) ||
+          m.timestampVerified === false || Math.abs(latest.createdAt.getTime() - m.timestamp.getTime()) <= 130_000)
       ) {
+        // An inbox row is a snapshot, NOT a new message event. Even an absolute
+        // clock can change when X re-renders the same request. Only a native
+        // message ID proves an identical repeat; history still saves those IDs
+        // separately. Do not mint another bubble from a changed clock alone.
         // A matching native inbox echo is also a send receipt. Previously we
         // discarded it as a duplicate, leaving the provisional key in place
         // for the watchdog to incorrectly downgrade 90 seconds later. Require

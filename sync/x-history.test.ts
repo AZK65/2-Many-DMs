@@ -83,6 +83,7 @@ test("repair progress, dates, and deferred work survive a worker restart", () =>
     const before = new XAdapter() as any;
     before.automaticRepairQueue.set("general:pending", { id: "pending", name: "Test", inboxCategory: "general", previewKey: "in:test:1", attempts: 1 });
     before.repairedPreviews.set("general:done", "in:done:2");
+    before.conversationPreviews.set("general:observed", "in:already saved:3");
     before.lastRepairAt.set("general:done", now);
     before.inboxDates.set("general:pending", { preview: "in:test", timestamp: now });
     before.repairRetryAt.set("general:deferred", now + 3600000);
@@ -92,6 +93,7 @@ test("repair progress, dates, and deferred work survive a worker restart", () =>
     after.loadRepairState();
     assert.deepEqual([...after.automaticRepairQueue], [...before.automaticRepairQueue]);
     assert.deepEqual([...after.repairedPreviews], [...before.repairedPreviews]);
+    assert.deepEqual([...after.conversationPreviews], [...before.conversationPreviews]);
     assert.deepEqual([...after.lastRepairAt], [...before.lastRepairAt]);
     assert.deepEqual([...after.inboxDates], [...before.inboxDates]);
     assert.deepEqual([...after.repairRetryAt], [...before.repairRetryAt]);

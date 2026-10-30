@@ -16,7 +16,7 @@ import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
 import { downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
-import { coalesceXPreviewRuns, reconcileXPreviewCopies } from "../x-preview-reconciliation";
+import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapshot, reconcileXAccountPreviews, xSnapshotProofs } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
 import { normalizeXMessageText } from "../x-message-text";
@@ -248,6 +248,15 @@ export class XAdapter implements Adapter {
   async start(onMessage: (m: InboundMessage) => Promise<void>): Promise<void> {
     this.stopping = false;
     this.onMessage = onMessage;
+    this.loadRepairState();
+    if (this.accountId) {
+      try {
+        const report = await reconcileXAccountPreviews(prisma, this.accountId, xSnapshotProofs(this.repairedPreviews, this.lastRepairAt));
+        if (report.removed) console.log(`[x] repaired ${report.removed} saved preview copies across ${report.changed}/${report.scanned} chats; recovery copies saved`);
+      } catch (error) {
+        console.warn("[x] saved preview repair deferred; existing messages preserved:", error);
+      }
+    }
     await this.connect().catch((error) => {
       console.error("[x] initial connection failed:", error);
       this.scheduleReconnect();
@@ -269,6 +278,7 @@ export class XAdapter implements Adapter {
       const saved = JSON.parse(fs.readFileSync(this.repairStateFile(), "utf8")) as {
         version?: number;
         previews?: Record<string, string>;
+        observations?: Array<[string, string]>;
         queue?: Array<[string, AutomaticRepair]>;
         dates?: Array<[string, { preview: string; timestamp: number }]>;
         retryAt?: Array<[string, number]>;
@@ -279,6 +289,9 @@ export class XAdapter implements Adapter {
       if (saved.version !== 2) return; // Old checkpoints marked partial viewport reads as complete.
       for (const [key, value] of Object.entries(saved.previews || {})) {
         if (typeof value === "string") this.repairedPreviews.set(key, value);
+      }
+      for (const [key, signature] of saved.observations || []) {
+        if (typeof signature === "string") this.conversationPreviews.set(key, signature);
       }
       for (const [key, repair] of saved.queue || []) {
         if (repair?.id && typeof repair.previewKey === "string") this.automaticRepairQueue.set(key, repair);
@@ -296,7 +309,7 @@ export class XAdapter implements Adapter {
   private persistRepairState(): void {
     try {
       const target = this.repairStateFile();
-      fs.writeFileSync(`${target}.tmp`, JSON.stringify({ version: 2, previews: Object.fromEntries(this.repairedPreviews), queue: [...this.automaticRepairQueue], dates: [...this.inboxDates], retryAt: [...this.repairRetryAt], offsets: this.discoveryOffsets, lastRepairAt: [...this.lastRepairAt], lastHistoryAuditAt: this.lastHistoryAuditAt }));
+      fs.writeFileSync(`${target}.tmp`, JSON.stringify({ version: 2, previews: Object.fromEntries(this.repairedPreviews), observations: [...this.conversationPreviews], queue: [...this.automaticRepairQueue], dates: [...this.inboxDates], retryAt: [...this.repairRetryAt], offsets: this.discoveryOffsets, lastRepairAt: [...this.lastRepairAt], lastHistoryAuditAt: this.lastHistoryAuditAt }));
       fs.renameSync(`${target}.tmp`, target);
     } catch {
       // A read-only install can still use the in-memory queue for this run.
@@ -857,6 +870,15 @@ export class XAdapter implements Adapter {
       const key = `${conv.inboxCategory}:${conv.id}`;
       const previewKey = previewSignature(conv);
       if (!current() || this.conversationPreviews.get(key) === previewKey) return false;
+      const prior = this.conversationPreviews.get(key);
+      if (prior && !previewKey.startsWith("media-v2:") && normalizeXMessageText(prior.replace(/:[^:]*$/, "")) === normalizeXMessageText(previewKey.replace(/:[^:]*$/, ""))) {
+        // Re-rendered inbox clocks are not message events, even if a newer
+        // outgoing message now sits at the end of the saved conversation.
+        // Still verify native history: a genuine identical repeat gets its ID.
+        this.conversationPreviews.set(key, previewKey);
+        this.enqueueAutomaticRepair(conv);
+        return false;
+      }
       if (!conv.preview || !conv.timestamp) {
         this.enqueueAutomaticRepair(conv);
         this.conversationPreviews.set(key, previewKey);
@@ -2029,7 +2051,9 @@ export class XAdapter implements Adapter {
           (!("direction" in conversation) || xHistoryMatchesPreview(messages, conversation as XLatestPreview))
           ? { since: Math.min(...dated.map(message => message.timestamp!)), until: Math.max(...dated.map(message => message.timestamp!)) } : undefined;
         const removed = await coalesceXPreviewRuns(prisma, this.accountId, chatExternalId) +
-          await reconcileXPreviewCopies(prisma, this.accountId, chatExternalId, dated.map(message => `x:${message.id}`), coverage);
+          await reconcileXPreviewCopies(prisma, this.accountId, chatExternalId, dated.map(message => `x:${message.id}`), coverage) +
+          (covered && !undated && "direction" in conversation && xHistoryMatchesPreview(messages, conversation as XLatestPreview)
+            ? await reconcileXVerifiedSnapshot(prisma, this.accountId, chatExternalId, { preview: conversation.preview, direction: conversation.direction, checkedAt: Date.now() }) : 0);
         if (removed) console.log(`[x] reconciled ${removed} duplicate inbox previews; recovery copies saved`);
       }
       console.log(`[x] history saved ${messages.length - undated}/${messages.length} dated messages`);
