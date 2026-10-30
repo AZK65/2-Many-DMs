@@ -19,6 +19,9 @@ export function xPreviewMatchesText(preview: string, full: string): boolean {
 // a longer compatible body, but never replace full text with a short viewport.
 export function richerXMessageText(previous: string, incoming: string): string {
   if (!previous) return incoming;
+  // Repair the known wrapper regression ONLY when a fresh read of this SAME
+  // native ID proves that its suffix was the duplicated timestamp UI.
+  if (previous.startsWith(incoming) && /^(?:\r?\n)(\d{1,2}:\d{2}\s*[AP]M)\r?\n\1\s*$/i.test(previous.slice(incoming.length))) return incoming;
   const before = normalizeXMessageText(previous);
   const after = normalizeXMessageText(incoming);
   return after.length > before.length && (after.startsWith(before) || xPreviewMatchesText(previous, incoming)) ? incoming : previous;

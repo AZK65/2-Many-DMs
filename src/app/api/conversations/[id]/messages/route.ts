@@ -270,11 +270,20 @@ export async function GET(
   // Resolve exact outgoing IDs independently of pagination. Busy group chats
   // can move a pending send outside the newest window before its receipt arrives.
   const deliveryMessageIds = parseDeliveryIds(req.nextUrl.searchParams.get("deliveryIds"));
+  // Reconciliation can remove a generated preview after its native copy was
+  // already visible. Tell this client which of its observed IDs truly vanished;
+  // absence from the newest page alone is NOT evidence of deletion.
+  const observedIds = parseDeliveryIds(req.nextUrl.searchParams.get("observedIds"));
+  const observedRows = observedIds.length ? await prisma.message.findMany({
+    where: { conversationId: params.id, id: { in: observedIds } }, select: { id: true },
+  }) : [];
+  const presentIds = new Set(observedRows.map(message => message.id));
   const deliveries = deliveryMessageIds.length ? await prisma.message.findMany({
     where: { conversationId: params.id, direction: "out", id: { in: deliveryMessageIds } },
   }) : [];
   return NextResponse.json({
     messages: data,
+    missingObservedIds: observedIds.filter(id => !presentIds.has(id)),
     deliveries: deliveries.map(message => {
       const dto = outgoingMessageDTO(message);
       if (message.deliveryStatus === "pending" && message.lastSendAttemptAt &&

@@ -19,6 +19,7 @@ import { downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media"
 import { reconcileXPreviewCopies } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
+import { normalizeXMessageText } from "../x-message-text";
 import type {
   Adapter,
   AdapterStatus,
@@ -2395,54 +2396,18 @@ export class XAdapter implements Adapter {
       let confirmedMessage: ScrapedMessage | undefined;
       const isGroupChat = chatExternalId.startsWith("g");
       let acceptedWithoutId = false;
-      const knownMessageIds = [...beforeMessageIds];
-      const confirmationResult = await waitForXSendConfirmation(async () =>
-        (await page.evaluate(
-          (knownIds, expected, composer) => {
-            const known = new Set(knownIds);
-            const root =
-              document.querySelector<HTMLElement>('[data-testid="xchatEmbedRoute"]')
-                ?.shadowRoot ?? document;
-            const list =
-              (root.querySelector('[data-testid="dm-message-list"]') as HTMLElement) ||
-              (root.querySelector('[data-testid="dm-message-list-container"]') as HTMLElement);
-            const listRect = list?.getBoundingClientRect();
-            const mid = listRect ? listRect.left + listRect.width / 2 : window.innerWidth / 2;
-            const candidates = Array.from(
-              root.querySelectorAll('[data-testid^="message-text-"]')
-            ) as HTMLElement[];
-            for (const element of candidates.reverse()) {
-              const id = (element.getAttribute("data-testid") || "").replace(
-                "message-text-",
-                ""
-              );
-              if (!id || known.has(id)) continue;
-              const rect = element.getBoundingClientRect();
-              if (rect.left + rect.width / 2 <= mid) continue;
-              const text = (element.innerText || "").trim();
-              const normalizedText = text.replace(/\bhttps?:\/\/(?=[a-z0-9.-]+\.[a-z]{2,}\b)/gi, "").replace(/\s+/g, " ").trim();
-              const normalizedExpected = expected.replace(/\bhttps?:\/\/(?=[a-z0-9.-]+\.[a-z]{2,}\b)/gi, "").replace(/\s+/g, " ").trim();
-              if (!expected || normalizedText === normalizedExpected) {
-                return { kind: "message", id, text };
-              }
-            }
-            const input = root.querySelector(composer) as
-              | HTMLTextAreaElement
-              | HTMLInputElement
-              | HTMLElement
-              | null;
-            const value = input
-              ? "value" in input
-                ? String(input.value)
-                : input.textContent || ""
-              : "";
-            if (input && !value.trim()) return { kind: "accepted" };
-            return false;
-          },
-          knownMessageIds,
-          body,
-          composerSelector
-        ).catch(() => false)) as XSendConfirmation,
+      const confirmationResult = await waitForXSendConfirmation(async (): Promise<XSendConfirmation> => {
+        // One reader for history AND send receipts; otherwise native timestamp
+        // wrappers can break receipt matching while history uses clean text.
+        const rows = await page.evaluate(readXMessageDom).catch(() => []);
+        const native = rows.reverse().find(row => row.direction === "out" && !beforeMessageIds.has(row.id) &&
+          (!body || normalizeXMessageText(row.text) === normalizeXMessageText(body)));
+        if (native) return { kind: "message", id: native.id, text: native.text };
+        const value = await page.$eval(xchatSelector(composerSelector), element =>
+          "value" in element ? String((element as HTMLTextAreaElement).value) : element.textContent || ""
+        ).catch(() => null);
+        return value !== null && !value.trim() ? { kind: "accepted" } : false;
+      },
         isGroupChat ? 12_000 : 8_000
       );
       if (confirmationResult && confirmationResult.kind === "message") {

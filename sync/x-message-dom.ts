@@ -75,9 +75,11 @@ export function readXMessageDom() {
     const bounds = content.getBoundingClientRect();
     const side = bubble.querySelector('[data-side]')?.getAttribute('data-side');
     const direction: 'in' | 'out' = side === 'start' ? 'in' : side === 'end' ? 'out' : bounds.left + bounds.width / 2 > middle ? 'out' : 'in';
-    // message-text contains the body, not the separate native timestamp.
-    // Stripping a clock suffix here truncated real replies such as "at 5:30 PM".
-    const text = (textElement?.innerText || '').trim();
+    // X's message-text wrapper also contains BOTH a hidden timestamp spacer
+    // and the visible timestamp/checkmarks. The direction-aware text span is
+    // the actual authored body. Never strip clock-looking text from that span.
+    const authored = textElement?.querySelector<HTMLElement>('[dir="auto"]');
+    const text = (authored?.innerText ?? textElement?.innerText ?? '').trim();
     return { id, direction, text, dateHints, timeText, day, attachments };
   }).filter((row) => row.text || row.attachments.length);
 }

@@ -27,6 +27,17 @@ export function parseDeliveryIds(raw: string | null): string[] {
   return [...new Set((raw || "").split(",").filter(id => /^[a-zA-Z0-9_-]{1,160}$/.test(id)))].slice(0, 50);
 }
 
+/** Only durable observed rows can be reconciled away; never an unsaved draft. */
+export function observedMessageIds(messages: Pick<MessageDTO, "id" | "externalKey">[]): string[] {
+  return messages.filter(message => message.externalKey && !message.id.startsWith("client_")).slice(-50).map(message => message.id);
+}
+
+export function removeMissingMessages<T extends { id: string }>(messages: T[], missing: string[] = []): T[] {
+  if (!missing.length) return messages;
+  const removed = new Set(missing);
+  return messages.filter(message => !removed.has(message.id));
+}
+
 /** A delivery-only refresh must not erase reactions, media, or sender metadata. */
 export function mergeDeliveryReceipt(current: MessageDTO, receipt: MessageDTO): MessageDTO {
   return mergeDelivery(current, { ...current,

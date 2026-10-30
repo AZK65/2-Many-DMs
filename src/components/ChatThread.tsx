@@ -20,7 +20,7 @@ import { canAutoLoadMedia, visibleMediaQueue } from "@/lib/automatic-media";
 import { groupPeopleLabel } from "@/lib/group-avatars";
 import { groupMessageSender, messageSenderKey } from "@/lib/message-sender";
 import { showDirectMessageTimestamp } from "@/lib/direct-message-layout";
-import { deliveryIds, mergeDelivery, mergeDeliveryReceipt } from "@/lib/message-delivery";
+import { deliveryIds, mergeDelivery, mergeDeliveryReceipt, observedMessageIds, removeMissingMessages } from "@/lib/message-delivery";
 import {
   MEDIA_LABEL,
   type ConversationDTO,
@@ -1598,9 +1598,10 @@ export function ChatThread({
       // Delivery updates mutate an existing row, so an `after=createdAt` poll
       // cannot see them. Refresh the latest window and merge by stable id.
       const ids = encodeURIComponent(deliveryIds(deliveryMessagesRef.current).join(","));
-      fetch(`/api/conversations/${conversation.id}/messages?limit=40&deliveryIds=${ids}`, { cache: "no-store" })
+      const observed = encodeURIComponent(observedMessageIds(deliveryMessagesRef.current).join(","));
+      fetch(`/api/conversations/${conversation.id}/messages?limit=40&deliveryIds=${ids}&observedIds=${observed}`, { cache: "no-store" })
         .then((r) => r.json())
-        .then((data: { messages: MessageDTO[]; deliveries?: MessageDTO[] }) => {
+        .then((data: { messages: MessageDTO[]; deliveries?: MessageDTO[]; missingObservedIds?: string[] }) => {
           if (!active || !data.messages) return;
           const updates = [...data.messages, ...(data.deliveries || [])];
           for (const candidate of updates) {
@@ -1619,7 +1620,7 @@ export function ChatThread({
           }
           setMessages((current) => {
             const receipts = new Map((data.deliveries || []).map(message => [message.id, message]));
-            return mergeMessageWindow(current, data.messages).map(message => {
+            return mergeMessageWindow(removeMissingMessages(current, data.missingObservedIds), data.messages).map(message => {
               const receipt = receipts.get(message.id);
               return receipt ? mergeDeliveryReceipt(message, receipt) : message;
             });

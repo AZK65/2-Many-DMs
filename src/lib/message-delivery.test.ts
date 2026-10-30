@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deliveryIds, mergeDelivery, mergeDeliveryReceipt, parseDeliveryIds } from "./message-delivery";
+import { deliveryIds, mergeDelivery, mergeDeliveryReceipt, parseDeliveryIds, observedMessageIds, removeMissingMessages } from "./message-delivery";
 import type { MessageDTO } from "./types";
 
 const message = (status: MessageDTO["deliveryStatus"], externalKey: string | null = null): MessageDTO => ({
@@ -53,4 +53,12 @@ test("receipt lookup IDs are bounded, validated and deduplicated", () => {
   assert.deepEqual(parseDeliveryIds("client_1,client_1,,../bad,one two,client-2"), ["client_1", "client-2"]);
   assert.equal(parseDeliveryIds(Array.from({ length: 200 }, (_, i) => `client_${i}`).join(",")).length, 50);
   assert.deepEqual(parseDeliveryIds(null), []);
+});
+
+test("only confirmed missing durable rows are removed; pagination and unsaved drafts stay intact", () => {
+  const rows = [message("pending"), { ...message("sent", "x:native"), id: "older-native" }, { ...message(undefined, "x:preview:one"), id: "preview" }];
+  assert.deepEqual(observedMessageIds(rows), ["older-native", "preview"]);
+  assert.deepEqual(removeMissingMessages(rows, ["preview"]).map(row => row.id), ["client_test", "older-native"]);
+  assert.equal(removeMissingMessages(rows), rows);
+  assert.deepEqual(removeMissingMessages(rows, ["unrelated"]), rows);
 });

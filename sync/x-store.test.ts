@@ -88,6 +88,10 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
     await persistInbound({ ...message, messageExternalId: "x:hydrating-native", body: fullText, historical: true });
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:hydrating-native" } })).body, fullText);
 
+    await prisma.message.update({ where: { id: fullRow.id }, data: { body: `${fullText}\n11:45 AM\n11:45 AM` } });
+    await persistInbound({ ...message, messageExternalId: "x:full-reply", body: fullText, historical: true });
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: fullRow.id } })).body, fullText, "fresh native text repairs the known timestamp-wrapper corruption");
+
     const { XAdapter } = await import("./adapters/x");
     const warm = new XAdapter() as any;
     const warmPage = { isClosed: () => false, url: () => "https://x.com/i/chat/test-chat" };
