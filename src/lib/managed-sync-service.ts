@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_LABEL = "com.2manydms.omnicrm.sync";
 
 function launchTarget(): string | null {
+  if (process.env.OMNI_WORKSPACE_ID) return null;
   if (process.platform !== "darwin" || typeof process.getuid !== "function") {
     return null;
   }

@@ -345,7 +345,7 @@ async function runRestart(): Promise<void> {
       // A plain kickstart is idempotent; -k would kill that fresh worker again.
       await kickstartManagedSyncService();
       state().pid = null;
-    } else {
+    } else if (process.env.OMNI_WORKSPACE_SUPERVISED !== "1") {
       state().pid = spawnWorker();
     }
     if (!(await waitForWorker(true, 30_000))) {

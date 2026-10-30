@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import type { InboundMessage, InboundReaction } from "./adapters/types";
 import { isPlaceholderIdentity, type WhatsAppIdentity } from "./whatsapp-identity";
 import { normalizeXMessageText } from "./x-message-text";
+import { telegramPlaceholderRepair } from "./telegram-message-content";
 
 const X_MEDIA_PREVIEWS: Record<string, string[]> = {
   image: ["Sent a photo", "Sent an image", "Photo", "Image"],
@@ -317,6 +318,14 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
         patch.ocrError = null;
         patch.ocrUpdatedAt = null;
       }
+    }
+    // Exact native-message dedupe used to leave unsupported service rows
+    // untouched forever. Repair only the old placeholder, never real content.
+    if (telegramPlaceholderRepair(m.platform, existing.body, m.body)) {
+      patch.body = m.body;
+      patch.translatedBody = null;
+      patch.translationSourceLanguage = null;
+      patch.translationTargetLanguage = null;
     }
     if (senderContactId && !existing.senderContactId)
       patch.senderContactId = senderContactId;

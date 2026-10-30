@@ -1001,6 +1001,7 @@ function startControlServer(): Promise<void> {
           JSON.stringify({
             ok: !shuttingDown,
             pid: process.pid,
+            workspaceId: process.env.OMNI_WORKSPACE_ID || "default",
             initialized,
             avatars: avatarBackfill?.snapshot(),
             accounts: [...adapters.keys()],
@@ -1045,7 +1046,7 @@ function startControlServer(): Promise<void> {
     });
   return new Promise((resolve, reject) => {
     controlServer!.once("error", reject);
-    controlServer!.listen(port, () => {
+    controlServer!.listen(port, process.env.SYNC_CONTROL_HOST || undefined, () => {
       console.log(`[sync] control server on :${port}`);
       resolve();
     });

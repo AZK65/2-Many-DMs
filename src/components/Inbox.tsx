@@ -1911,6 +1911,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
     <div className="workspace-shell inbox-workspace">
       <WorkspaceHeader
         rail
+        workspaceControls={!readOnly}
         showUtilities={!readOnly}
         onOpenSettings={() => { setAiSettings(false); setShowSettings(true); }}
         assistant={!readOnly ? <ChatAssistant conversation={selected ?? multiViewPinned} onOpenSettings={() => { setAiSettings(true); setShowSettings(true); }} onOpenConversation={(conversationId, messageId) => { setShowHidden(false); selectConversation(conversationId); setFocusMessageId(messageId); }} /> : undefined}

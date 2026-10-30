@@ -5,13 +5,13 @@ import { AnimatePresence, motion } from "motion/react";
 import type {
   ConversationDTO,
   ContactDTO,
-  RelationDTO,
   TagDTO,
 } from "@/lib/types";
 import { PLATFORMS } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
 
 import { GroupMembers } from "./GroupMembers";
+import { LinkedChats } from "./LinkedChats";
 
 import {
   MESSAGE_PIN_CHANGED_EVENT,
@@ -62,9 +62,6 @@ export function ContactPanel({
   const [picker, setPicker] = useState(false);
   const [editing, setEditing] = useState(false);
   const [newTag, setNewTag] = useState("");
-  const [relations, setRelations] = useState<RelationDTO[]>([]);
-  const [relPicker, setRelPicker] = useState(false);
-  const [relQuery, setRelQuery] = useState("");
 
   const [sharedContent, setSharedContent] = useState<SharedContentDTO>({
     pinned: [],
@@ -96,12 +93,6 @@ export function ContactPanel({
     });
     setNotes(contact.notes ?? "");
     setEditing(false);
-    setRelPicker(false);
-    setRelQuery("");
-    fetch(`/api/contacts/${contact.id}/relations`)
-      .then((r) => r.json())
-      .then((rels: RelationDTO[]) => setRelations(rels))
-      .catch(() => setRelations([]));
   }, [contact.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSharedContent(showLoading = false) {
@@ -139,51 +130,6 @@ export function ContactPanel({
   const assigned = new Set(contact.tags.map((t) => t.id));
   const available = allTags.filter((t) => !assigned.has(t.id));
   const platform = PLATFORMS[conversation.platform];
-  // Conversations available to relate: everything except this chat and ones
-  // already linked, filtered by the picker search.
-  const relatedIds = new Set(relations.map((r) => r.conversationId));
-  const relatableConvs = conversations.filter((c) => {
-    if (c.id === conversation.id || relatedIds.has(c.id)) return false;
-    if (!relQuery) return true;
-    const q = relQuery.toLowerCase();
-    return (
-      c.contact.name.toLowerCase().includes(q) ||
-      c.contact.handle.toLowerCase().includes(q)
-    );
-  });
-
-  async function addRelation(target: ConversationDTO) {
-    setRelQuery("");
-    setRelPicker(false);
-    const res = await fetch(`/api/contacts/${contact.id}/relations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetConversationId: target.id }),
-    });
-    const rel: RelationDTO = await res.json();
-    setRelations((rs) =>
-      rs.some((r) => r.id === rel.id) ? rs : [...rs, rel]
-    );
-  }
-
-  async function removeRelation(id: string) {
-    setRelations((rs) => rs.filter((r) => r.id !== id));
-    await fetch(`/api/contacts/${contact.id}/relations?id=${id}`, {
-      method: "DELETE",
-    }).catch(() => {});
-  }
-
-  async function saveRelationLabel(id: string, label: string) {
-    setRelations((rs) =>
-      rs.map((r) => (r.id === id ? { ...r, label: label || null } : r))
-    );
-    await fetch(`/api/contacts/${contact.id}/relations`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, label }),
-    }).catch(() => {});
-  }
-
   async function saveField(field: EditableField) {
     const rawValue = fields[field].trim();
     const value = rawValue;
@@ -478,131 +424,7 @@ export function ContactPanel({
         </div>
       </Section>
 
-      <Section
-        title="Relations"
-        action={
-          readOnly ? undefined : <button
-            onClick={() => {
-              setRelPicker((v) => !v);
-              setRelQuery("");
-            }}
-            className="text-xs font-medium text-accent hover:text-accent dark:text-accent dark:hover:text-accent"
-          >
-            {relPicker ? "Done" : "+ Add"}
-          </button>
-        }
-      >
-        {relations.length === 0 && !relPicker && (
-          <span className="text-sm text-slate-400 dark:text-neutral-500">
-            No linked chats yet
-          </span>
-        )}
-
-        <div className="space-y-1.5">
-          <AnimatePresence initial={false}>
-            {relations.map((r) => (
-              <motion.div
-                key={r.id}
-                layout
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.15 }}
-                className="group flex items-center gap-2.5 rounded-lg border border-slate-200 p-2 transition hover:border-slate-300 dark:border-neutral-800 dark:hover:border-neutral-700"
-              >
-                <button
-                  onClick={() => onSelectConversation(r.conversationId)}
-                  title="Open this chat"
-                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                >
-                  <Avatar
-                    name={r.contactName}
-                    platform={r.platform}
-                    size="sm"
-                    src={r.avatarUrl}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-800 dark:text-neutral-100">
-                      {r.contactName}
-                    </span>
-                    <input
-                      value={r.label ?? ""}
-                      onChange={(e) =>
-                        setRelations((rs) =>
-                          rs.map((x) =>
-                            x.id === r.id
-                              ? { ...x, label: e.target.value }
-                              : x
-                          )
-                        )
-                      }
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={(e) => saveRelationLabel(r.id, e.target.value.trim())}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                      }}
-                      placeholder="Add label (e.g. works with)"
-                      className="mt-0.5 w-full bg-transparent text-xs text-slate-500 outline-none placeholder:text-slate-400 dark:text-neutral-400 dark:placeholder:text-neutral-600"
-                    />
-                  </span>
-                </button>
-                <button
-                  onClick={() => removeRelation(r.id)}
-                  aria-label="Remove relation"
-                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-                >
-                  ×
-                </button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-
-        {relPicker && (
-          <div className="mt-2 rounded-lg border border-slate-200 p-2 dark:border-neutral-700">
-            <div className="relative mb-2">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-neutral-500" />
-              <input
-                autoFocus
-                value={relQuery}
-                onChange={(e) => setRelQuery(e.target.value)}
-                placeholder="Search chats to link…"
-                className="w-full rounded-md bg-slate-100 py-1.5 pl-8 pr-2.5 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-700 dark:focus:ring-accent/40"
-              />
-            </div>
-            <div className="scroll-thin max-h-56 space-y-0.5 overflow-y-auto">
-              {relatableConvs.length === 0 && (
-                <div className="px-1 py-2 text-center text-xs text-slate-400 dark:text-neutral-500">
-                  No matching chats
-                </div>
-              )}
-              {relatableConvs.slice(0, 30).map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => addRelation(c)}
-                  className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition hover:bg-slate-100 dark:hover:bg-neutral-800"
-                >
-                  <Avatar
-                    name={c.contact.name}
-                    platform={c.platform}
-                    size="sm"
-                    src={c.contact.avatarUrl}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-slate-800 dark:text-neutral-100">
-                      {c.contact.name}
-                    </span>
-                    <span className="block truncate text-[11px] text-slate-400 dark:text-neutral-500">
-                      {c.contact.handle}
-                    </span>
-                  </span>
-                  <PlusIcon className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-neutral-500" />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </Section>
+      <LinkedChats key={conversation.id} contactId={contact.id} conversationId={conversation.id} onOpen={onSelectConversation} readOnly={readOnly} />
       </div>
     </motion.div>
   );

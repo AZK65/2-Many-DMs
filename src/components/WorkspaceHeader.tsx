@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 import { SettingsModal } from "./SettingsModal";
+import { SyncRestartControl } from "./SyncRestartControl";
 import { ChatAssistant } from "./ChatAssistant";
 import ThemeToggle from "./ThemeToggle";
 import { MenuDetails } from "./MenuDetails";
@@ -15,20 +16,14 @@ const secondary = [["/reply-lab", "Reply Lab"], ["/automations", "Automations"],
 const navIcons = [MailIcon, SheetIcon, CheckCircleIcon, UserIcon];
 
 /** One navigation vocabulary across the workspace, separate from inbox filters. */
-export function WorkspaceHeader({ brand, actions, assistant, onOpenEmails, onOpenSettings, showUtilities = true, rail = true }: { brand?: ReactNode; actions?: ReactNode; assistant?: ReactNode; onOpenEmails?: () => void; onOpenSettings?: () => void; showUtilities?: boolean; rail?: boolean }) {
+export function WorkspaceHeader({ brand, actions, assistant, onOpenEmails, onOpenSettings, showUtilities = true, workspaceControls = true, rail = true }: { brand?: ReactNode; actions?: ReactNode; assistant?: ReactNode; onOpenEmails?: () => void; onOpenSettings?: () => void; showUtilities?: boolean; workspaceControls?: boolean; rail?: boolean }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiSettings, setAiSettings] = useState(false);
   const pathname = usePathname();
   const secondaryPage = secondary.find(([href]) => pathname === href);
   const itemClass = (active: boolean) => `workspace-nav-item ${active ? "workspace-nav-active" : ""}`;
   return <><header className={`workspace-header ${rail ? "workspace-header-rail" : ""}`}>
-    <div className="workspace-brand-slot">{brand || <Link href="/" className="workspace-brand" aria-label="Omni CRM inbox">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/icon-light.png" alt="" className="h-6 w-6 dark:hidden" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/icon-dark.png" alt="" className="hidden h-6 w-6 dark:block" />
-      <span>omni<span className="ml-1 font-normal text-slate-400">crm</span></span>
-    </Link>}</div>
+    <div className="workspace-brand-slot">{brand || (workspaceControls ? <SyncRestartControl expandedBrand onOpenSettings={onOpenSettings || (() => setSettingsOpen(true))} /> : <span className="workspace-brand" aria-label="2Many DMs">2Many</span>)}</div>
     <nav aria-label="Workspace" className="workspace-navigation flex min-w-0 items-center gap-1 sm:ml-8">
       {primary.map(([href, label], index) => { const Icon = navIcons[index]; return <Link key={href} href={href} title={label} aria-label={label} aria-current={pathname === href ? "page" : undefined}
         className={`${itemClass(pathname === href)} ${pathname !== href ? "hidden sm:flex" : ""}`}>{rail && <Icon className="workspace-nav-icon h-5 w-5" />}<span className="workspace-nav-label">{label}</span></Link>; })}

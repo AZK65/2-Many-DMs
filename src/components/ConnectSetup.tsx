@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { OverlayPortal } from "./OverlayPortal";
-import { PlatformGlyph } from "./PlatformIcon";
+import { PlatformLogo } from "./PlatformLogo";
 import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { fetchJson } from "@/lib/fetch-json";
 import type { SetupConnections } from "@/lib/connection-setup";
@@ -23,7 +23,7 @@ export function ConnectShell({ platform, subtitle, steps, current, busy, onClose
         transition={{ duration: reduced ? 0 : 0.25, ease: [0.32, 0.72, 0, 1] }}
         onClick={e => e.stopPropagation()} className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 text-slate-900 shadow-xl dark:bg-neutral-900 dark:text-neutral-100">
         <header className="flex items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-800 dark:bg-neutral-800 dark:text-neutral-100"><PlatformGlyph platform={platform} className="h-5 w-5" /></span>
+          <PlatformLogo platform={platform} />
           <div className="min-w-0 flex-1"><h2 className="text-lg font-semibold">Connect {PLATFORMS[platform].label}</h2><p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">{subtitle}</p></div>
           <button type="button" onClick={onClose} disabled={busy} className={setupSecondary} aria-label="Close setup">✕</button>
         </header>

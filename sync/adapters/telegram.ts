@@ -10,6 +10,7 @@ import { TelegramHistorySync } from "../telegram-history-sync";
 import { MediaRecoveryQueue } from "../media-recovery";
 import { reuseTelegramPrimarySender } from "../telegram-media-sender";
 import { TelegramMediaDownloader } from "../telegram-media-download";
+import { telegramSpecialBody } from "../telegram-message-content";
 import type {
   Adapter,
   AdapterStatus,
@@ -519,8 +520,7 @@ export class TelegramAdapter implements Adapter {
       base.media = { type: resolved.type, url, name: resolved.name,
         isGif: Boolean(msg.gif || (msg.sticker && resolved.type === "video")) };
     } else if (!caption) {
-      // No text and no recognized media (poll, contact, location, etc.)
-      base.body = "[unsupported message]";
+      base.body = telegramSpecialBody(msg, base.sender?.name);
     }
 
     return base;

@@ -48,12 +48,19 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const { targetConversationId, label } = await req.json();
-  if (!targetConversationId) {
+  if (typeof targetConversationId !== "string" || !targetConversationId || (label !== undefined && typeof label !== "string") || (typeof label === "string" && label.length > 120)) {
     return NextResponse.json(
       { error: "targetConversationId required" },
       { status: 400 }
     );
   }
+
+  const [contact, target] = await Promise.all([
+    prisma.contact.findUnique({ where: { id: params.id }, select: { id: true, isGroup: true } }),
+    prisma.conversation.findUnique({ where: { id: targetConversationId }, select: { id: true, contactId: true } }),
+  ]);
+  if (!contact || !target) return NextResponse.json({ error: "That contact or chat no longer exists." }, { status: 404 });
+  if (contact.isGroup && target.contactId === contact.id) return NextResponse.json({ error: "Choose another chat to link." }, { status: 400 });
 
   const relation = await prisma.contactRelation.upsert({
     where: {
@@ -80,18 +87,19 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   const { id, label } = await req.json();
-  if (!id) {
+  if (typeof id !== "string" || !id || (label !== undefined && typeof label !== "string") || (typeof label === "string" && label.length > 120)) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
 
-  const relation = await prisma.contactRelation.update({
-    where: { id },
+  const updated = await prisma.contactRelation.updateMany({
+    where: { id, contactId: params.id },
     data: {
       label: typeof label === "string" && label.trim() ? label.trim() : null,
     },
-    include: withTarget,
   });
-
+  if (!updated.count) return NextResponse.json({ error: "This link no longer exists for this contact." }, { status: 404 });
+  const relation = await prisma.contactRelation.findFirst({ where: { id, contactId: params.id }, include: withTarget });
+  if (!relation) return NextResponse.json({ error: "This link no longer exists." }, { status: 404 });
   return NextResponse.json(toDTO(relation));
 }
 

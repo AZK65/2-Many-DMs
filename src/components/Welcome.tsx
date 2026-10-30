@@ -8,7 +8,7 @@ import {
   PLATFORM_ORDER,
   type Platform,
 } from "@/lib/platforms";
-import { PlatformGlyph } from "./PlatformIcon";
+import { PlatformLogo } from "./PlatformLogo";
 import ThemeToggle from "./ThemeToggle";
 import { TelegramConnect } from "./TelegramConnect";
 import { XConnect } from "./XConnect";
@@ -195,10 +195,9 @@ export function Welcome() {
                           ease: "easeInOut",
                         },
                       }}
-                      className="grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg"
-                      style={{ backgroundColor: PLATFORMS[p].bg }}
+                      className="grid h-14 w-14 place-items-center"
                     >
-                      <PlatformGlyph platform={p} className="h-7 w-7" />
+                      <PlatformLogo platform={p} className="h-14 w-14" />
                     </motion.span>
                   ))}
 
@@ -405,12 +404,7 @@ function ConnectCard({
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex items-center gap-3">
-        <span
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"
-          style={{ backgroundColor: PLATFORMS[platform].bg }}
-        >
-          <PlatformGlyph platform={platform} className="h-5 w-5" />
-        </span>
+        <PlatformLogo platform={platform} />
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900 dark:text-neutral-100">
             {title}

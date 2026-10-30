@@ -48,6 +48,11 @@ export async function POST(req: NextRequest) {
   if (await workerUp()) {
     return NextResponse.json({ ok: true, already: true });
   }
+  // The workspace supervisor owns startup/recovery; never start a competing
+  // worker or touch the primary desktop service from an isolated workspace.
+  if (process.env.OMNI_WORKSPACE_SUPERVISED === "1") {
+    return NextResponse.json({ ok: true, starting: true, managed: true });
+  }
   if (workerStartState.__omniWorkerRestarting) {
     return NextResponse.json({ ok: true, starting: true, restarting: true });
   }

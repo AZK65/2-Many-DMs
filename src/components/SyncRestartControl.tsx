@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { CheckIcon, CloseIcon, RefreshIcon } from "./icons";
 import { syncHealthView, type SyncHealth } from "@/lib/sync-health";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
 type RestartPhase =
   | "idle"
@@ -90,6 +91,17 @@ export function SyncRestartControl({
   expandedBrand?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("Main workspace");
+  const [customWorkspace, setCustomWorkspace] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/workspaces/identity", { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (!response.ok) return;
+      const value = await response.json();
+      if (!controller.signal.aborted) { setWorkspaceName(value.name); setCustomWorkspace(value.id !== "default"); }
+    }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [snapshot, setSnapshot] = useState<RestartSnapshot>(EMPTY_SNAPSHOT);
   const [requesting, setRequesting] = useState(false);
@@ -197,16 +209,16 @@ export function SyncRestartControl({
         type="button"
         whileTap={{ scale: 0.92 }}
         onClick={() => setOpen((current) => !current)}
-        title="Omni CRM controls"
+        title={`${workspaceName} · Workspaces and sync`}
         aria-label="Omni CRM controls"
         aria-expanded={open}
         className={`relative shrink-0 rounded-lg transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:opacity-75 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${expandedBrand ? "workspace-brand" : ""}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/icon-light.png" alt="Omni CRM" className="h-6 w-6 dark:hidden" />
+        {customWorkspace ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-accent/10 text-xs font-semibold text-accent" role="img" aria-label={workspaceName}>{workspaceName.slice(0, 2).toUpperCase()}</span> : <img src="/brand/icon-light.png" alt="Omni CRM" className="h-6 w-6 dark:hidden" />}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/icon-dark.png" alt="" className="hidden h-6 w-6 dark:block" />
-        {expandedBrand && <span>omni<span className="ml-1 font-normal text-slate-400">crm</span></span>}
+        {!customWorkspace && <img src="/brand/icon-dark.png" alt="" className="hidden h-6 w-6 dark:block" />}
+        {expandedBrand && <span className="max-w-40 truncate">{customWorkspace ? workspaceName : <>omni<span className="ml-1 font-normal text-slate-400">crm</span></>}</span>}
         <span
           className={`sync-status-dot ${expandedBrand ? "ml-1" : "absolute -right-0.5 -top-0.5"} h-2 w-2 rounded-full ring-2 ring-white dark:ring-neutral-900 ${
             statusPhase === "ready"
@@ -247,10 +259,10 @@ export function SyncRestartControl({
                   </div>
                   <div>
                     <h2 className="text-sm font-semibold text-slate-950 dark:text-white">
-                      Omni CRM
+                      {workspaceName}
                     </h2>
                     <p className="text-xs text-slate-500 dark:text-neutral-400">
-                      Settings and sync controls
+                      Workspaces, settings, and sync
                     </p>
                   </div>
                 </div>
@@ -264,7 +276,8 @@ export function SyncRestartControl({
                 </button>
               </header>
 
-              <div className="space-y-1 px-2 pb-2">
+              <WorkspaceMenu onName={setWorkspaceName} />
+              <div className="space-y-1 px-2 pb-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
