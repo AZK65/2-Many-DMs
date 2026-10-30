@@ -11,12 +11,12 @@ import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
 import { isLocked, tryUnlock, type UnlockResult } from "../x-passcode";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
-import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xSnowflakeDate, xHistoryMatchesPreview, type XLatestPreview } from "../x-history";
+import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview, type XLatestPreview } from "../x-history";
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
 import { downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
-import { reconcileXPreviewCopies } from "../x-preview-reconciliation";
+import { coalesceXPreviewRuns, reconcileXPreviewCopies } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
 import { normalizeXMessageText } from "../x-message-text";
@@ -867,7 +867,7 @@ export class XAdapter implements Adapter {
         platform: "x", chatExternalId: conv.id, messageExternalId: `x:preview:${digest}`,
         direction: conv.direction, body: conv.preview, inboxCategory: conv.inboxCategory,
         historical: initial || Date.now() - conv.timestamp > 5 * 60 * 1000,
-        timestamp: new Date(conv.timestamp), timestampVerified: true,
+        timestamp: new Date(conv.timestamp), timestampVerified: Boolean(conv.timeLabel) && !xInboxDateIsEstimate(conv.timeLabel || ""),
         isGroup: conv.id.startsWith("g"),
         contact: { externalKey: `x:${conv.id}`, name: conv.name || "X user",
           handle: conv.handle || conv.name || conv.id,
@@ -2024,7 +2024,12 @@ export class XAdapter implements Adapter {
         await reconcileXConversationTime(this.accountId, chatExternalId, conversation.timestamp);
       }
       if (this.accountId) {
-        const removed = await reconcileXPreviewCopies(prisma, this.accountId, chatExternalId, messages.filter(message => message.timestamp).map(message => `x:${message.id}`));
+        const dated = messages.filter(message => message.timestamp);
+        const coverage = covered && !undated && dated.length > 1 &&
+          (!("direction" in conversation) || xHistoryMatchesPreview(messages, conversation as XLatestPreview))
+          ? { since: Math.min(...dated.map(message => message.timestamp!)), until: Math.max(...dated.map(message => message.timestamp!)) } : undefined;
+        const removed = await coalesceXPreviewRuns(prisma, this.accountId, chatExternalId) +
+          await reconcileXPreviewCopies(prisma, this.accountId, chatExternalId, dated.map(message => `x:${message.id}`), coverage);
         if (removed) console.log(`[x] reconciled ${removed} duplicate inbox previews; recovery copies saved`);
       }
       console.log(`[x] history saved ${messages.length - undated}/${messages.length} dated messages`);

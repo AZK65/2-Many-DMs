@@ -367,7 +367,9 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       if (
         latest?.direction === m.direction &&
         (xPreviewMatchesText(m.body, latest.body) || Boolean(latest.mediaType && X_MEDIA_PREVIEWS[latest.mediaType]?.includes(m.body.trim()))) &&
-        Math.abs(latest.createdAt.getTime() - m.timestamp.getTime()) <= 130_000
+        // A rounded inbox clock cannot prove a second identical message. Keep
+        // one preview until a real native ID distinguishes a genuine repeat.
+        (m.timestampVerified === false || Math.abs(latest.createdAt.getTime() - m.timestamp.getTime()) <= 130_000)
       ) {
         // A matching native inbox echo is also a send receipt. Previously we
         // discarded it as a duplicate, leaving the provisional key in place

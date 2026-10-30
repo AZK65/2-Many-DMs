@@ -4,11 +4,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import WebSocket from "ws";
 import { PrismaClient } from "@prisma/client";
 import type { Adapter, AdapterStatus, InboundMessage, SentMessage } from "./types";
-import { discordReadPath, discordRetryDelay, privateDiscordMessage, type DiscordPerson, type DiscordPrivateChat, type DiscordSearchMessage } from "../discord-search-core";
+import { discordReadPath, discordRetryDelay, discordInboxCategory, mergeDiscordPrivateChat, privateDiscordMessage, type DiscordPerson, type DiscordPrivateChat, type DiscordSearchMessage } from "../discord-search-core";
 
-type Progress = { before?: string; complete?: boolean; latestId?: string; since: number; blockedUntil?: number; recent?: { before?: string; stopId?: string; latestId?: string } };
+type Progress = { before?: string; complete?: boolean; latestId?: string; requestPreviewId?: string; since: number; blockedUntil?: number; recent?: { before?: string; stopId?: string; latestId?: string } };
 type Checkpoint = { version: 1; userId: string; chats: Record<string, Progress> };
-type HistoryJob = { chatId: string; before?: string; since: number; stopId?: string; mode: "recent" | "history"; latestId?: string };
+type HistoryJob = { chatId: string; before?: string; since: number; stopId?: string; mode: "recent" | "history" | "request"; latestId?: string };
 export type DiscordSearchSession = { token: string; userId: string; username: string };
 
 /** Explicitly read-only personal inbox index. No send, react, acknowledge,
@@ -30,6 +30,7 @@ export class DiscordSearchAdapter implements Adapter {
   private nextRequestAt = 0;
   private requestQueue: Promise<unknown> = Promise.resolve();
   private eventQueue: Promise<unknown> = Promise.resolve();
+  private chatQueue: Promise<void> = Promise.resolve();
   private historyRunning = false;
   private refreshing?: Promise<void>;
   private jobs: HistoryJob[] = [];
@@ -85,7 +86,8 @@ export class DiscordSearchAdapter implements Adapter {
       const existing = await db.conversation.findMany({ where: { accountId: this.accountId, platform: "discord" }, select: { externalId: true, contact: { select: { externalKey: true, name: true, handle: true } } } });
       for (const row of existing) if (row.externalId) this.existingContacts.set(row.externalId, row.contact);
     } finally { await db.$disconnect(); }
-    await this.refreshChats();
+    // READY includes request/spam flags that the REST inbox omits. Classify
+    // that snapshot before history can import requested DMs into General.
     this.openGateway();
     this.refresh = setInterval(() => { void this.refreshChats().catch(() => { /* surfaced through status / next retry */ }); }, 5 * 60_000);
     this.refresh.unref();
@@ -138,10 +140,41 @@ export class DiscordSearchAdapter implements Adapter {
   private async readChats() {
     const chats = await this.request<DiscordPrivateChat[]>("/users/@me/channels");
     if (!Array.isArray(chats)) throw new Error("Discord did not return a private inbox.");
+    await this.registerChats(chats);
+  }
+  private async reconcileInboxCategories(chats: DiscordPrivateChat[]) {
+    const db = new PrismaClient();
+    try {
+      for (const category of ["general", "spam"] as const) {
+        const ids = chats.filter(chat => discordInboxCategory(chat) === category).map(chat => chat.id);
+        if (ids.length) await db.conversation.updateMany({
+          where: { platform: "discord", accountId: this.accountId, externalId: { in: ids }, inboxOverride: false, inboxCategory: { not: category } },
+          data: { inboxCategory: category },
+        });
+      }
+    } finally { await db.$disconnect(); }
+  }
+  private registerChats(chats: DiscordPrivateChat[]): Promise<void> {
+    // Gateway updates and REST refreshes can overlap. Merge against the latest
+    // flags and finish their database update in the same order.
+    const task = this.chatQueue.then(() => this.applyChats(chats));
+    this.chatQueue = task.catch(() => undefined);
+    return task;
+  }
+  private async applyChats(chats: DiscordPrivateChat[]) {
     const days = Math.max(1, Math.min(3650, Number(process.env.DISCORD_SEARCH_BACKFILL_DAYS) || 90));
-    for (const chat of chats.filter(chat => [1, 3].includes(chat.type) && /^\d+$/.test(chat.id))) {
-      this.channels.set(chat.id, chat);
+    const merged = chats.filter(chat => [1, 3].includes(chat.type) && /^\d+$/.test(chat.id))
+      .map(chat => mergeDiscordPrivateChat(this.channels.get(chat.id), chat));
+    for (const chat of merged) this.channels.set(chat.id, chat);
+    await this.reconcileInboxCategories(merged);
+    for (const chat of merged) {
       const p = this.checkpoint.chats[chat.id] ||= { since: Date.now() - days * 86400_000 };
+      // Pending requests can be years old. Read their latest native page once
+      // even when normal history is already complete or outside 90 days.
+      if ((p.blockedUntil || 0) <= Date.now() && discordInboxCategory(chat) === "spam" && /^\d+$/.test(chat.last_message_id || "") &&
+          p.requestPreviewId !== chat.last_message_id && !this.jobs.some(j => j.chatId === chat.id && j.mode === "request")) {
+        this.jobs.unshift({ chatId: chat.id, mode: "request", since: 0, latestId: chat.last_message_id! });
+      }
       if ((p.blockedUntil || 0) > Date.now() || this.jobs.some(j => j.chatId === chat.id)) continue;
       if (!p.latestId || (chat.last_message_id && chat.last_message_id !== p.latestId)) {
         this.jobs.push({ chatId: chat.id, mode: "recent", since: p.since, stopId: p.latestId, ...p.recent });
@@ -174,6 +207,19 @@ export class DiscordSearchAdapter implements Adapter {
         const job = this.jobs[0];
         const progress = this.checkpoint.chats[job.chatId] ||= { since: job.since };
         try {
+          if (job.mode === "request") {
+            // The single-message endpoint is bot-only. Personal inbox reads
+            // use the same bounded page endpoint as ordinary DM history.
+            const page = await this.request<DiscordSearchMessage[]>(`/channels/${job.chatId}/messages?limit=100`);
+            if (!Array.isArray(page) || !page.length || page.some(message => !/^\d+$/.test(message.id) || message.channel_id !== job.chatId)) throw new Error("Discord request identity mismatch.");
+            for (const message of [...page].reverse()) await this.ingest(message);
+            progress.requestPreviewId = job.latestId;
+            progress.blockedUntil = undefined;
+            this.jobs.splice(this.jobs.indexOf(job), 1);
+            await this.saveCheckpoint();
+            this.lastCheckedAt = Date.now();
+            continue;
+          }
           const page = await this.request<DiscordSearchMessage[]>(`/channels/${job.chatId}/messages?limit=100${job.before ? `&before=${job.before}` : ""}`);
           if (!Array.isArray(page)) throw new Error("Invalid Discord history response.");
           if (!job.latestId && page[0]) job.latestId = page[0].id;
@@ -185,7 +231,7 @@ export class DiscordSearchAdapter implements Adapter {
           }
           const oldest = page.at(-1)?.id;
           const complete = reachedStop || page.length < 100 || !oldest || oldest === job.before;
-          this.jobs.shift();
+          this.jobs.splice(this.jobs.indexOf(job), 1);
           if (job.mode === "recent") {
             progress.recent = complete ? undefined : { before: oldest, stopId: job.stopId, latestId: job.latestId };
             // Advance the high-water mark only after EVERY intervening page
@@ -203,7 +249,7 @@ export class DiscordSearchAdapter implements Adapter {
         } catch {
           if (this.stopped || this.fatal) break;
           progress.blockedUntil = Math.max(this.retryAt || 0, Date.now() + 5 * 60_000);
-          this.jobs.shift();
+          this.jobs.splice(this.jobs.indexOf(job), 1);
           await this.saveCheckpoint().catch(() => undefined);
         }
       }
@@ -255,7 +301,10 @@ export class DiscordSearchAdapter implements Adapter {
         this.sessionId = packet.d?.session_id || this.sessionId;
         this.attempts = 0;
         this.status = { platform: "discord", state: "ready" };
-        void this.refreshChats().catch(() => undefined);
+        this.eventQueue = this.eventQueue.then(async () => {
+          if (packet.t === "READY" && Array.isArray(packet.d?.private_channels)) await this.registerChats(packet.d.private_channels);
+          await this.refreshChats();
+        }).catch(() => { this.lastCheckedAt = undefined; });
       }
       if (packet.t === "MESSAGE_CREATE" && packet.d && !packet.d.guild_id) {
         const message = packet.d as DiscordSearchMessage;
@@ -272,7 +321,11 @@ export class DiscordSearchAdapter implements Adapter {
         }).catch(() => { this.lastCheckedAt = undefined; });
       }
       if (packet.t === "CHANNEL_CREATE" || packet.t === "CHANNEL_UPDATE") {
-        if ([1, 3].includes(packet.d?.type)) { this.channels.set(packet.d.id, packet.d); void this.refreshChats().catch(() => undefined); }
+        const previous = this.channels.get(packet.d?.id);
+        if ([1, 3].includes(packet.d?.type ?? previous?.type)) {
+          const chat = { ...packet.d, type: packet.d.type ?? previous?.type };
+          this.eventQueue = this.eventQueue.then(() => this.registerChats([chat])).catch(() => { this.lastCheckedAt = undefined; });
+        }
       }
     });
     socket.on("error", () => { /* close owns reconnect and does not expose credentials */ });

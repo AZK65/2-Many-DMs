@@ -1,7 +1,17 @@
 import type { InboundMessage } from "./adapters/types";
 
 export type DiscordPerson = { id: string; username?: string; global_name?: string | null; avatar?: string | null; bot?: boolean };
-export type DiscordPrivateChat = { id: string; type: number; name?: string; recipients?: DiscordPerson[]; last_message_id?: string | null; icon?: string | null };
+export type DiscordPrivateChat = { id: string; type: number; name?: string; recipients?: DiscordPerson[]; last_message_id?: string | null; icon?: string | null; is_message_request?: boolean; is_spam?: boolean };
+
+export function discordInboxCategory(chat: DiscordPrivateChat): "general" | "spam" | undefined {
+  if (chat.is_message_request === true || chat.is_spam === true) return "spam";
+  // REST omits these flags. Missing fields must not promote an unaccepted DM.
+  return chat.is_message_request === false && chat.is_spam === false ? "general" : undefined;
+}
+
+export function mergeDiscordPrivateChat(previous: DiscordPrivateChat | undefined, incoming: DiscordPrivateChat): DiscordPrivateChat {
+  return { ...previous, ...Object.fromEntries(Object.entries(incoming).filter(([, value]) => value !== undefined)) } as DiscordPrivateChat;
+}
 export type DiscordSearchMessage = {
   id: string; channel_id: string; content?: string; timestamp: string; author: DiscordPerson;
   attachments?: { filename: string; content_type?: string; url?: string }[];
@@ -38,7 +48,7 @@ export function privateDiscordMessage(chat: DiscordPrivateChat, message: Discord
   return {
     platform: "discord", chatExternalId: chat.id, messageExternalId: `discord:${chat.id}:${message.id}`,
     direction: message.author.id === selfId ? "out" : "in", body, timestamp, timestampVerified: true, historical: true,
-    isGroup: group,
+    isGroup: group, inboxCategory: discordInboxCategory(chat),
     contact: { externalKey: group ? `discord-group:${chat.id}` : `discord-user:${peer?.id || chat.id}`,
       name, handle: group ? "Discord group" : peer?.username ? `@${peer.username}` : "Discord member", avatarUrl: group ? undefined : discordPhoto(peer) },
     sender: group ? { externalKey: `discord-user:${message.author.id}`, name: discordPersonName(message.author), avatarUrl: discordPhoto(message.author) } : undefined,

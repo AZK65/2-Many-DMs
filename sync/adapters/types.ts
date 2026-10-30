@@ -36,7 +36,7 @@ export interface InboundMessage {
     avatarUrl?: string; // served path like "/avatars/telegram_123.jpg"
   };
   isGroup?: boolean; // the `contact` is a group chat
-  inboxCategory?: "general" | "spam"; // source inbox classification (currently X)
+  inboxCategory?: "general" | "spam"; // source inbox classification (X / Discord requests)
   // For inbound group messages: the member who actually sent it (so their tags
   // can show). Their externalKey matches their 1:1 contact when one exists.
   sender?: {

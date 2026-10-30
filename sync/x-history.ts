@@ -76,9 +76,13 @@ export function parseXMessageInfoDate(sent: string, now = Date.now()): number | 
     ? parseXDate(label, now, 'Today') : parseXDate(label, now);
 }
 
+export function xInboxDateIsEstimate(label: string): boolean {
+  return /^(?:now|\d+\s*(?:[smhdw]|seconds?|minutes?|hours?|days?|weeks?)(?: ago)?)$/i.test(label.trim());
+}
+
 export function stableXInboxDate(label: string, parsed: number | null, previous: number | undefined): number | null {
-  const relative = label.match(/^(\d+)\s*([smhdw])$/i);
-  const granularity = relative ? ({ s:1000, m:60000, h:3600000, d:86400000, w:604800000 }[relative[2].toLowerCase()] || 0) : /^now$/i.test(label) ? 60000 : 0;
+  const relative = label.trim().match(/^(\d+)\s*(s|m|h|d|w|seconds?|minutes?|hours?|days?|weeks?)(?: ago)?$/i);
+  const granularity = relative ? ({ s:1000, m:60000, h:3600000, d:86400000, w:604800000 }[relative[2][0].toLowerCase()] || 0) : /^now$/i.test(label.trim()) ? 60000 : 0;
   // Both observations are rounded estimates, not exact send times. X can keep
   // "now" for over a minute, and the 5s polling boundary adds jitter. A strict
   // 60s comparison created new IDs for the same preview at 60.027s / 64.254s.

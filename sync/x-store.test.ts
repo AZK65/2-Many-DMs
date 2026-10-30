@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { InboundMessage } from "./adapters/types";
 import { recordDeliveryReceipt } from "./delivery-receipt";
-import { reconcileXPreviewCopies } from "./x-preview-reconciliation";
+import { coalesceXPreviewRuns, reconcileXPreviewCopies } from "./x-preview-reconciliation";
 
 test("X history repairs dates without unread inflation, duplicates, or changing local sends", async () => {
   // A new empty database, never a copy of the user's chats or the live DB.
@@ -204,6 +204,12 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
     const roundedCount = await prisma.message.count();
     await persistInbound({ ...message, body: "rounded preview", timestamp: new Date(roundedAt.getTime() + 64027), messageExternalId: "x:preview:rounded-new" });
     assert.equal(await prisma.message.count(), roundedCount, "poll jitter must not duplicate a native message");
+    await persistInbound({ ...message, body: "rounded preview", timestampVerified: false, timestamp: new Date(roundedAt.getTime() + 30 * 60000), messageExternalId: "x:preview:drift-new" });
+    assert.equal(await prisma.message.count(), roundedCount, "relative clock drift cannot manufacture another copy of unchanged text");
+    await persistInbound({ ...message, body: "A genuinely changed preview", timestampVerified: false, timestamp: new Date(roundedAt.getTime() + 30 * 60000), messageExternalId: "x:preview:changed" });
+    assert.ok(await prisma.message.findUnique({ where: { externalKey: "x:preview:changed" } }));
+    await persistInbound({ ...message, body: "A genuinely changed preview", timestampVerified: true, timestamp: new Date(roundedAt.getTime() + 40 * 60000), messageExternalId: "x:preview:verified-repeat" });
+    assert.ok(await prisma.message.findUnique({ where: { externalKey: "x:preview:verified-repeat" } }), "a distinct verified clock still permits a repeat");
     await prisma.message.create({ data: { conversationId: conversation.id, externalKey: "x:preview:legacy-duplicate", body: "rounded preview", direction: "in", createdAt: new Date(roundedAt.getTime() + 64027) } });
     const pinned = await prisma.message.create({ data: { conversationId: conversation.id, externalKey: "x:preview:pinned-duplicate", body: "rounded preview", direction: "in", createdAt: roundedAt, pinnedAt: roundedAt } });
     const previousDataDir = process.env.DATA_DIR;
@@ -217,6 +223,39 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
       assert.equal(await prisma.message.count({ where: { externalKey: { in: [nativeKey, secondNativeKey] } } }), 2, "identical native messages remain separate");
       await prisma.message.create({ data: { conversationId: conversation.id, externalKey: "x:preview:ambiguous-repeat", body: "rounded preview", direction: "in", createdAt: roundedAt } });
       assert.equal(await reconcileXPreviewCopies(prisma, account.id, "test-chat", [nativeKey, secondNativeKey]), 0, "do not guess which genuine repeated message a preview belongs to");
+
+      const driftKey = "x:33333333-3333-4333-8333-333333333333";
+      const endKey = "x:44444444-4444-4444-8444-444444444444";
+      const since = roundedAt.getTime() + 60 * 60000;
+      const until = since + 60 * 60000;
+      await prisma.message.createMany({ data: [
+        { conversationId: conversation.id, externalKey: driftKey, direction: "in", body: "Request body", createdAt: new Date(since) },
+        { conversationId: conversation.id, externalKey: endKey, direction: "out", body: "Native reply", createdAt: new Date(until) },
+        { conversationId: conversation.id, externalKey: "x:preview:old-drift", direction: "in", body: "Request body", createdAt: new Date(since + 24 * 60000) },
+      ] });
+      assert.equal(await reconcileXPreviewCopies(prisma, account.id, "test-chat", [driftKey, endKey]), 0, "unread gaps never justify wide deduplication");
+      assert.equal(await reconcileXPreviewCopies(prisma, account.id, "test-chat", [driftKey, endKey], { since: since + 1000, until }), 0, "native must fall within the verified interval");
+      const intervening = "x:55555555-5555-4555-8555-555555555555";
+      await prisma.message.create({ data: { conversationId: conversation.id, externalKey: intervening, direction: "out", body: "", mediaType: "image", createdAt: new Date(since + 5000) } });
+      assert.equal(await reconcileXPreviewCopies(prisma, account.id, "test-chat", [driftKey, endKey, intervening], { since, until }), 0, "even an intervening attachment blocks ambiguous cleanup");
+      await prisma.message.delete({ where: { externalKey: intervening } });
+      assert.equal(await reconcileXPreviewCopies(prisma, account.id, "test-chat", [driftKey, endKey], { since, until }), 1, "complete native history proves the stale request preview drifted");
+      assert.equal(await prisma.message.count({ where: { externalKey: { in: [driftKey, endKey] } } }), 2);
+
+      // Accepted requests can lose their pre-acceptance history on X. Collapse
+      // only a contiguous generated run anchored by a nearby saved native ID.
+      const runKey = "x:66666666-6666-4666-8666-666666666666";
+      const runStart = until + 3600000;
+      await prisma.message.createMany({ data: [
+        { conversationId: conversation.id, externalKey: runKey, direction: "in", body: "Request run", createdAt: new Date(runStart) },
+        ...[60000, 300000, 1500000].map((offset, i) => ({ conversationId: conversation.id, externalKey: `x:preview:run-${i}`, direction: "in", body: "Request run", createdAt: new Date(runStart + offset) })),
+        { conversationId: conversation.id, externalKey: "x:preview:run-pinned", direction: "in", body: "Request run", createdAt: new Date(runStart + 1600000), pinnedAt: roundedAt },
+        { conversationId: conversation.id, externalKey: "x:77777777-7777-4777-8777-777777777777", direction: "in", body: "Request run", createdAt: new Date(runStart + 1700000) },
+        { conversationId: conversation.id, externalKey: "x:preview:run-unanchored", direction: "in", body: "Request run", createdAt: new Date(runStart + 2000000) },
+      ] });
+      await coalesceXPreviewRuns(prisma, account.id, "test-chat");
+      assert.equal(await prisma.message.count({ where: { externalKey: { in: [0, 1, 2].map(i => `x:preview:run-${i}`) } } }), 0);
+      for (const key of [runKey, "x:77777777-7777-4777-8777-777777777777", "x:preview:run-pinned", "x:preview:run-unanchored"]) assert.ok(await prisma.message.findUnique({ where: { externalKey: key } }), key);
     } finally {
       if (previousDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = previousDataDir;

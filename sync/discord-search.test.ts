@@ -3,12 +3,74 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { discordReadPath, discordRetryDelay, privateDiscordMessage, type DiscordSearchMessage } from "./discord-search-core";
+import { discordReadPath, discordRetryDelay, discordInboxCategory, mergeDiscordPrivateChat, privateDiscordMessage, type DiscordSearchMessage } from "./discord-search-core";
 import { DiscordSearchAdapter } from "./adapters/discord-search";
 import { encryptDiscordSearchSession, decryptDiscordSearchSession } from "./discord-search-secrets";
 
 const chat = { id: "123", type: 1, recipients: [{ id: "456", username: "customer", global_name: "Customer", avatar: "abc123" }] };
 const raw: DiscordSearchMessage = { id: "789", channel_id: "123", timestamp: "2026-10-29T13:00:00Z", content: "client@example.com", author: { id: "456", username: "customer" } };
+test("native request and spam flags survive partial REST snapshots and explicit acceptance clears them", () => {
+  for (const flags of [{ is_message_request: true }, { is_spam: true }, { is_message_request: false, is_spam: true }]) {
+    const requested = { ...chat, ...flags };
+    assert.equal(discordInboxCategory(requested), "spam");
+    assert.equal(privateDiscordMessage(requested, raw, "999")?.inboxCategory, "spam");
+    assert.equal(discordInboxCategory(mergeDiscordPrivateChat(requested, chat)), "spam");
+    assert.equal(discordInboxCategory(mergeDiscordPrivateChat(requested, { ...chat, is_message_request: false, is_spam: false })), "general");
+  }
+  assert.equal(discordInboxCategory(chat), undefined, "missing flags are not evidence of acceptance");
+  assert.equal(discordInboxCategory({ ...chat, is_message_request: false }), undefined);
+});
+test("overlapping channel snapshots keep request classification ordered", async () => {
+  const adapter = new DiscordSearchAdapter({ token: "test", userId: "999", username: "me" }, "test");
+  const internal = adapter as any;
+  const categories: unknown[] = [];
+  internal.reconcileInboxCategories = async (chats: typeof chat[]) => {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    categories.push(discordInboxCategory(chats[0]));
+  };
+  internal.drainHistory = async () => {};
+  await Promise.all([
+    internal.registerChats([{ ...chat, is_message_request: true, is_spam: false }]),
+    internal.registerChats([chat]),
+    internal.registerChats([{ ...chat, is_message_request: false, is_spam: false }]),
+    internal.registerChats([chat]),
+  ]);
+  assert.deepEqual(categories, ["spam", "spam", "general", "general"]);
+  await adapter.stop();
+});
+test("old requests fetch a native page without the history cutoff or queue loss", async () => {
+  const adapter = new DiscordSearchAdapter({ token: "test", userId: "999", username: "me" }, "test");
+  const internal = adapter as any;
+  internal.saveCheckpoint = async () => {};
+  internal.reconcileInboxCategories = async () => {};
+  internal.channels.set("123", chat);
+  internal.checkpoint.chats["123"] = { since: Date.now() - 86400000, complete: true, latestId: "500" };
+  internal.jobs = [{ chatId: "123", mode: "recent", since: 0, stopId: "500" }];
+  const paths: string[] = []; const saved: any[] = [];
+  internal.onMessage = async (message: unknown) => { saved.push(message); };
+  internal.request = async (route: string) => {
+    paths.push(route);
+    if (route.startsWith("/channels/123/")) {
+      // READY can discover a request while a normal page is in flight.
+      await internal.registerChats([{ ...chat, id: "124", last_message_id: "800", is_message_request: true, is_spam: false }]);
+      return [];
+    }
+    return [{ ...raw, id: "800", channel_id: "124", timestamp: "2022-01-01T00:00:00Z" }];
+  };
+  await internal.drainHistory();
+  assert.deepEqual(paths, ["/channels/123/messages?limit=100", "/channels/124/messages?limit=100"]);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].messageExternalId, "discord:124:800");
+  assert.equal(saved[0].inboxCategory, "spam");
+  assert.equal(saved[0].historical, true);
+  assert.equal(internal.checkpoint.chats["124"].requestPreviewId, "800");
+  assert.equal(internal.jobs.length, 0);
+  internal.checkpoint.chats["124"].complete = true;
+  internal.checkpoint.chats["124"].latestId = "800";
+  await internal.registerChats([{ ...chat, id: "124", last_message_id: "800" }]);
+  assert.equal(paths.length, 2, "unchanged requests must not be fetched repeatedly");
+  await adapter.stop();
+});
 test("private messages preserve native identity, timestamps, email search, and read-only semantics", () => {
   const result = privateDiscordMessage(chat, raw, "999")!;
   assert.equal(result.body, "client@example.com");

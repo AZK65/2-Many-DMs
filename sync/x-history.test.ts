@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { XAdapter } from "./adapters/x";
-import { mergeXHistory, orderXMinuteMessages, parseXDate, stableXInboxDate, xSnowflakeDate, xHistoryMatchesPreview } from "./x-history";
+import { mergeXHistory, orderXMinuteMessages, parseXDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview } from "./x-history";
 
 const now = new Date(2026, 9, 7, 16, 0).getTime();
 test("X dates come from the platform, never the import clock", () => {
@@ -29,6 +29,9 @@ test("UUIDv4 is not a timestamp; legacy snowflakes can be decoded", () => {
   assert.equal(xSnowflakeDate(id, now), date);
 });
 test("relative inbox labels do not manufacture new activity on each poll", () => {
+  for (const label of ["now", "4m", "2 hours ago", "1 minute", "3 days ago", " 5w "]) assert.equal(xInboxDateIsEstimate(label), true, label);
+  for (const label of ["", "9:44 PM", "Oct 29, 2026", "2026-10-29T21:44:00Z"]) assert.equal(xInboxDateIsEstimate(label), false, label);
+  assert.equal(stableXInboxDate("1 minute ago", now + 64027, now), now);
   const original = now - 7 * 3600000;
   assert.equal(stableXInboxDate("7h", original + 60000, original), original);
   assert.equal(stableXInboxDate("now", now, original), now);
