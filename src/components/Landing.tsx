@@ -9,6 +9,7 @@ import { FeatureBento } from "./marketing/FeatureBento";
 import { OnboardingPreview } from "./marketing/OnboardingPreview";
 import { GetStartedButton } from "./marketing/SetupPrompt";
 import { Questions } from "./marketing/Questions";
+import { GlassHero } from "./marketing/GlassHero";
 import type { Platform } from "@/lib/platforms";
 import releases from "../../public/changelog.json";
 
@@ -40,14 +41,14 @@ export function Landing() {
   }
   return <MarketingShell>
     <main id="main-content">
-      <section className="mx-auto max-w-7xl px-4 pb-12 pt-12 sm:px-8 sm:pt-24">
+      <GlassHero>
         <p className="mb-8 flex items-center gap-3 text-sm font-medium text-slate-500 dark:text-neutral-400"><span className="h-2 w-2 rounded-full bg-accent" />Your independent messaging workspace</p>
         <div className="grid items-end gap-8 lg:grid-cols-[1.5fr_1fr] lg:gap-16">
           <h1 className="marketing-heading max-w-3xl text-5xl font-semibold tracking-tighter sm:text-7xl xl:text-8xl">Your people.<br />Not your tabs.</h1>
           <div className="max-w-md lg:pb-2"><p className="text-lg leading-relaxed text-slate-500 dark:text-neutral-400">Telegram. WhatsApp. X. Discord.<br />One place to find the thread, remember the detail, and keep things moving.</p><div className="mt-8 flex flex-wrap items-center gap-6"><GetStartedButton /><button onClick={() => showDemo("inbox")} type="button" className="marketing-text-link">Try the demo <span aria-hidden>↘</span></button></div><p className="mt-4 text-xs text-slate-400 dark:text-neutral-500">Set up with Codex, Cursor, or Claude Code. Your machine, your workspace.</p></div>
         </div>
         <div className="mt-12 flex flex-wrap items-center gap-6 sm:gap-8">{connections.map(item => <span key={item.id} className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-neutral-400"><BrandMark platform={item.id as Platform} className="h-10 w-10" />{item.name}{item.id === "discord" && <span className="text-xs text-slate-400 dark:text-neutral-500">search</span>}</span>)}</div>
-      </section>
+      </GlassHero>
 
       <section id="demo" aria-label="Interactive workspace preview" className="mx-auto max-w-7xl px-4 sm:px-8"><ProductDemo view={view} onView={setView} /><p className="mt-4 text-center text-xs text-slate-400 dark:text-neutral-500">A working preview with fictional conversations. Your real workspace stays private.</p></section>
 
