@@ -24,6 +24,10 @@ try {
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewport({ width, height: 900 });
     await page.goto(base, { waitUntil: "networkidle2" });
+    assert.equal(await page.$eval(trigger, node => node.textContent.trim()), "", "Appearance trigger is icon-only");
+    assert.equal(await page.$eval(trigger, node => {
+      const rect = node.getBoundingClientRect(); return rect.width === rect.height;
+    }), true, "Appearance trigger stays circular");
     if (width >= 640) {
       assert.equal(await page.$eval(trigger, node => {
         const previous = node.parentElement.parentElement.previousElementSibling;
@@ -34,7 +38,12 @@ try {
       await page.focus(trigger);
       await page.keyboard.press(theme === "light" ? "ArrowDown" : "ArrowUp");
       await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "menuitemradio");
-      assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), theme === "dark" ? "Dark" : "Light");
+      assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), theme === "dark" ? "Dark" : "Light");
+      assert.equal(await page.$$eval('[role="menuitemradio"]', nodes => nodes.every(node => !node.textContent.trim() && node.getAttribute("title") && node.querySelector("svg"))), true, "Theme choices are labelled icons with tooltips");
+      await page.keyboard.press("ArrowRight");
+      assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), theme === "dark" ? "Light" : "Dark");
+      await page.keyboard.press("ArrowLeft");
+      assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), theme === "dark" ? "Dark" : "Light");
       await page.screenshot({ path: `${output}/${width}-${theme}-menu.png` });
       assert.equal(await page.$eval('[role="menu"]', node => {
         const rect = node.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;

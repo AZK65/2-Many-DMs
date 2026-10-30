@@ -137,7 +137,7 @@ try {
   await clickText("Restart preview");
   for (const theme of ["light", "dark"]) {
     await click('[aria-label="Website appearance"]');
-    await clickText(theme === "dark" ? "Dark" : "Light");
+    await page.click(`[role="menuitemradio"][aria-label="${theme === "dark" ? "Dark" : "Light"}"]`);
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), theme === "dark");
     assert.equal(await page.evaluate(() => localStorage.getItem("2many-site-theme")), theme);
     await settle();
