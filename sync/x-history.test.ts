@@ -51,6 +51,20 @@ test("history accumulates every virtualized window and deduplicates by native ID
   const rows = mergeXHistory([[m("c", 3), m("d", 4)], [m("b", 2), m("c", 3)], [m("a", 1), m("b", 2)]]);
   assert.deepEqual(rows.map((m) => m.id), ["a", "b", "c", "d"]);
 });
+
+test("full replies replace truncated native windows, never the reverse", () => {
+  const base = { id: "native", timestamp: now, direction: "in" as const };
+  const short = { ...base, text: "Here is the complete information…" };
+  const full = { ...base, text: "Here is the complete information you requested. Meet at 5:30 PM" };
+  for (const windows of [[[short], [full]], [[full], [short]]]) {
+    assert.equal(mergeXHistory(windows)[0].text, full.text);
+  }
+  const preview = { preview: short.text, timestamp: now, direction: "in" as const };
+  assert.equal(xHistoryMatchesPreview([full], preview), true);
+  assert.equal(xHistoryMatchesPreview([{ ...full, timestamp: now - 86400000 }], preview), false);
+  assert.equal(xHistoryMatchesPreview([{ ...full, direction: "out" }], preview), false);
+  assert.equal(xHistoryMatchesPreview([{ ...full, text: "yes please" }], { ...preview, preview: "yes" }), false);
+});
 test("minute-precision bubbles keep their native order, independently of preview insertion order", () => {
   const rows = orderXMinuteMessages(["yo bro", "credit card", "waitlist", "how can I get it?"].map((text, i) => ({ id: String(i), text, direction: "in" as const, timestamp: now, minutePrecision: true })));
   assert.deepEqual(rows.map(row => row.timestamp), [now, now + 1, now + 2, now + 3]);

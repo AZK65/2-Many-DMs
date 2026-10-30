@@ -69,6 +69,46 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
     const beforeRepeat = await prisma.message.count();
     await persistInbound(photo);
     assert.equal(await prisma.message.count(), beforeRepeat);
+
+    const shortText = "Here is the complete information…";
+    const fullText = "Here is the complete information you requested. Meet at 5:30 PM";
+    await persistInbound({ ...message, messageExternalId: "x:preview:truncated", body: shortText });
+    const shortRow = await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:preview:truncated" } });
+    await persistInbound({ ...message, messageExternalId: "x:full-reply", body: fullText, historical: true });
+    const fullRow = await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:full-reply" } });
+    assert.equal(fullRow.id, shortRow.id, "upgrade the visible preview in place");
+    assert.equal(fullRow.body, fullText);
+    await persistInbound({ ...message, messageExternalId: "x:full-reply", body: shortText, historical: true });
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:full-reply" } })).body, fullText);
+    const countAfterFull = await prisma.message.count();
+    await persistInbound({ ...message, messageExternalId: "x:preview:late-truncated", body: shortText });
+    assert.equal(await prisma.message.count(), countAfterFull, "late truncated preview must not duplicate a full reply");
+
+    await persistInbound({ ...message, messageExternalId: "x:hydrating-native", body: shortText, historical: true });
+    await persistInbound({ ...message, messageExternalId: "x:hydrating-native", body: fullText, historical: true });
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:hydrating-native" } })).body, fullText);
+
+    const { XAdapter } = await import("./adapters/x");
+    const warm = new XAdapter() as any;
+    const warmPage = { isClosed: () => false, url: () => "https://x.com/i/chat/test-chat" };
+    const warmWrites: InboundMessage[] = [];
+    Object.assign(warm, { accountId: account.id, sendPage: warmPage, onMessage: async (m: InboundMessage) => { warmWrites.push(m); } });
+    warm.readMessageWindow = async (page: unknown, options: unknown) => {
+      assert.equal(page, warmPage);
+      assert.deepEqual(options, { passive: true });
+      return [{ id: "warm-native", text: "Complete warm reply", direction: "in", timestamp: today.getTime() }];
+    };
+    await warm.syncWarmConversation(() => true);
+    assert.equal(warmWrites[0].body, "Complete warm reply");
+    assert.equal(warmWrites[0].messageExternalId, "x:warm-native");
+    await warm.syncWarmConversation(() => false);
+    assert.equal(warmWrites.length, 1, "retired/cooling/sending snapshots must not publish");
+    warm.readMessageWindow = async () => {
+      warm.sendPage = undefined;
+      return [{ id: "stale-native", text: "Wrong route", direction: "in", timestamp: today.getTime() }];
+    };
+    await warm.syncWarmConversation(() => true);
+    assert.equal(warmWrites.length, 1, "route changes during an async read must discard results");
     await persistInbound({ ...photo, messageExternalId: "x:document-native", media: { type: "file", url: "/media/document-fixture.pdf", name: "Report.pdf" } });
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:document-native" } })).mediaName, "Report.pdf");
 

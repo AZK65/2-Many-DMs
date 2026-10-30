@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { InboundMessage, InboundReaction } from "./adapters/types";
 import { isPlaceholderIdentity, type WhatsAppIdentity } from "./whatsapp-identity";
-import { normalizeXMessageText } from "./x-message-text";
+import { normalizeXMessageText, richerXMessageText, xPreviewMatchesText } from "./x-message-text";
 import { telegramPlaceholderRepair } from "./telegram-message-content";
 
 const X_MEDIA_PREVIEWS: Record<string, string[]> = {
@@ -278,6 +278,15 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
     }
     // Enrich a previously-synced row (media support, or group-sender backfill).
     const patch: Record<string, unknown> = {};
+    if (m.platform === "x" && !m.messageExternalId.startsWith("x:preview:")) {
+      const body = richerXMessageText(existing.body, m.body);
+      if (body !== existing.body) {
+        patch.body = body;
+        patch.translatedBody = null;
+        patch.translationSourceLanguage = null;
+        patch.translationTargetLanguage = null;
+      }
+    }
     if (m.platform === "discord" && m.sourceEdited) {
       patch.body = m.body;
       patch.translatedBody = null;
@@ -293,7 +302,7 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       patch.deliveryError = null;
     }
     if (m.media && !existing.mediaType) {
-      patch.body = m.body;
+      patch.body = m.platform === "x" ? richerXMessageText(existing.body, m.body) : m.body;
       patch.mediaType = m.media.type;
       patch.mediaUrl = m.media.url;
       patch.mediaName = m.media.name;
@@ -357,7 +366,7 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       });
       if (
         latest?.direction === m.direction &&
-        (normalizeXMessageText(latest.body) === normalizeXMessageText(m.body) || Boolean(latest.mediaType && X_MEDIA_PREVIEWS[latest.mediaType]?.includes(m.body.trim()))) &&
+        (xPreviewMatchesText(m.body, latest.body) || Boolean(latest.mediaType && X_MEDIA_PREVIEWS[latest.mediaType]?.includes(m.body.trim()))) &&
         Math.abs(latest.createdAt.getTime() - m.timestamp.getTime()) <= 130_000
       ) {
         // A matching native inbox echo is also a send receipt. Previously we
@@ -383,21 +392,25 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       // An explicit history fetch can later expose the native UUID for a row
       // first learned from the inbox preview. Upgrade that row in place so the
       // richer backfill never duplicates what the user already saw live.
-      const preview = await prisma.message.findFirst({
+      const candidates = await prisma.message.findMany({
         where: {
           conversationId: conversation.id,
           direction: m.direction,
-          body: m.media ? { in: [m.body, ...(X_MEDIA_PREVIEWS[m.media.type] || [])] } : m.body,
           externalKey: { startsWith: "x:preview:" },
           createdAt: { gte: new Date(m.timestamp.getTime() - 130000), lte: new Date(m.timestamp.getTime() + 130000) },
         },
         orderBy: { createdAt: "desc" },
       });
+      const matches = candidates.filter(candidate => xPreviewMatchesText(candidate.body, m.body) || Boolean(m.media && X_MEDIA_PREVIEWS[m.media.type]?.includes(candidate.body.trim())));
+      // Never silently combine repeated/ambiguous previews. Native IDs remain
+      // distinct; only one unambiguous nearby preview is promoted in place.
+      const preview = matches.length === 1 ? matches[0] : undefined;
       if (preview) {
         await prisma.message.update({
           where: { id: preview.id },
           data: {
             externalKey: m.messageExternalId,
+            body: m.body,
             createdAt: m.timestamp,
             senderContactId: senderContactId ?? preview.senderContactId,
             ...(m.media ? { body: m.body, mediaType: m.media.type, mediaUrl: m.media.url, mediaName: m.media.name, mediaIsGif: m.media.isGif || undefined } : {}),

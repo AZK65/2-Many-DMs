@@ -75,7 +75,9 @@ export function readXMessageDom() {
     const bounds = content.getBoundingClientRect();
     const side = bubble.querySelector('[data-side]')?.getAttribute('data-side');
     const direction: 'in' | 'out' = side === 'start' ? 'in' : side === 'end' ? 'out' : bounds.left + bounds.width / 2 > middle ? 'out' : 'in';
-    const text = (textElement?.innerText || '').replace(/(\s*\d{1,2}:\d{2}\s*(AM|PM))+\s*$/i, '').trim();
+    // message-text contains the body, not the separate native timestamp.
+    // Stripping a clock suffix here truncated real replies such as "at 5:30 PM".
+    const text = (textElement?.innerText || '').trim();
     return { id, direction, text, dateHints, timeText, day, attachments };
   }).filter((row) => row.text || row.attachments.length);
 }

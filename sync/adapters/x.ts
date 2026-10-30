@@ -782,11 +782,66 @@ export class XAdapter implements Adapter {
         if (await this.persistPreview(conversation, this.onMessage!, false, current)) updates++;
       }
       if (updates) console.log(`[x] live inbox saved ${updates} preview update(s) at=${new Date().toISOString()}`);
+      await this.syncWarmConversation(current);
     })().finally(() => {
       if (this.liveRead === read) this.liveRead = undefined;
     });
     this.liveRead = read;
     return read;
+  }
+
+  private async syncWarmConversation(current: () => boolean): Promise<void> {
+    const page = this.sendPage;
+    // Observe only the already-open send route. No navigation, clicks, Info
+    // menus, downloads or extra X requests; retain the existing idle parking.
+    const route = page && !page.isClosed() ? new URL(page.url()).pathname : "";
+    const chatExternalId = route.match(/^\/i\/chat\/([^/]+)$/)?.[1];
+    if (!chatExternalId || !page || !current() || !this.accountId) return;
+    const valid = () => current() && page === this.sendPage && !page.isClosed() && new URL(page.url()).pathname === route;
+    const stored = await prisma.conversation.findFirst({
+      where: { accountId: this.accountId, platform: "x", externalId: chatExternalId },
+      select: { contact: { select: { name: true, handle: true, isGroup: true } } },
+    });
+    if (!stored || !valid()) return;
+    const messages = await this.readMessageWindow(page, { passive: true });
+    if (!valid()) return;
+    await this.persistMessageWindow(chatExternalId, messages, {
+      name: stored.contact.name, handle: stored.contact.handle || stored.contact.name,
+      isGroup: stored.contact.isGroup, inboxCategory: "general",
+    }, valid);
+  }
+
+  private async persistMessageWindow(
+    chatExternalId: string,
+    messages: ScrapedMessage[],
+    source: { name: string; handle: string; isGroup: boolean; inboxCategory: "general" | "spam" },
+    current: () => boolean
+  ): Promise<{ undated: number; unavailableAttachments: number }> {
+    let undated = 0;
+    let unavailableAttachments = 0;
+    for (const message of orderXMinuteMessages(messages)) {
+      if (!current()) throw new Error("X history interrupted; retrying later");
+      if (!message.text && !message.attachments?.length) continue;
+      // Only a native ID with a verified date, or its already-saved date, can
+      // enter history. Never use the read/import clock to invent a sent time.
+      const existing = !message.timestamp ? await prisma.message.findUnique({ where: { externalKey: `x:${message.id}` }, select: { createdAt: true } }) : null;
+      const timestamp = message.timestamp || existing?.createdAt.getTime();
+      if (!timestamp) { undated++; continue; }
+      for (const [index, media] of (message.attachments?.length ? message.attachments : [undefined]).entries()) {
+        if (!current()) throw new Error("X history interrupted; retrying later");
+        if (media && !media.url) unavailableAttachments++;
+        await this.onMessage!({
+          platform: "x", chatExternalId,
+          messageExternalId: index ? `x:${message.id}:attachment:${index}` : `x:${message.id}`,
+          direction: message.direction, body: index ? "" : message.text, media,
+          inboxCategory: source.inboxCategory, historical: true,
+          timestamp: new Date(timestamp), timestampVerified: Boolean(message.timestamp),
+          isGroup: source.isGroup,
+          contact: { externalKey: `x:${chatExternalId}`, name: source.name, handle: source.handle },
+        });
+      }
+    }
+    return { undated, unavailableAttachments };
   }
 
   private persistPreview(
@@ -1415,7 +1470,8 @@ export class XAdapter implements Adapter {
     loadHistory: boolean | number = false,
     isRequest = false,
     timeoutMs?: number,
-    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview }
+    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview },
+    onWindow?: (messages: ScrapedMessage[]) => Promise<void>
   ): Promise<{ messages: ScrapedMessage[]; covered: boolean }> {
     const page = isRequest ? this.requestPage : this.chatPage;
     if (!page) throw new Error("X history page is unavailable");
@@ -1486,7 +1542,7 @@ export class XAdapter implements Adapter {
           : 0;
     // Virtualized XChat removes bubbles as they scroll out of view. Capture
     // every window, including the newest one BEFORE scrolling backwards.
-    const windows: ScrapedMessage[][] = [await this.readMessageWindow(page)];
+    const windows: ScrapedMessage[][] = [await this.readMessageWindow(page, { onWindow })];
     // A cold encrypted route can initially expose only a cached, older window.
     // Wait for the observed newest message without reloading or increasing the
     // network polling rate; a partial pass must never be called fully repaired.
@@ -1498,7 +1554,7 @@ export class XAdapter implements Adapter {
       if (await page.$(jump)) await page.click(jump).catch(() => null);
       await page.evaluate(scrollXSurface, { kind: "messages", direction: "newer" } as const);
       await delay(1000);
-      windows.push(await this.readMessageWindow(page));
+      windows.push(await this.readMessageWindow(page, { onWindow }));
     }
     let unchanged = 0;
     let reachedStart = false;
@@ -1513,7 +1569,7 @@ export class XAdapter implements Adapter {
       if (range && !range.targetId && !range.sinceTimestamp && collected.filter((message) => message.timestamp && (!range.beforeTimestamp || message.timestamp < range.beforeTimestamp)).length >= range.count) break;
       const position = await page.evaluate(scrollXSurface, { kind: "messages", direction: "older" } as const);
       await delay(1200);
-      const window = await this.readMessageWindow(page);
+      const window = await this.readMessageWindow(page, { onWindow });
       const before = new Set(windows.flat().map((message) => message.id));
       unchanged = window.some((message) => !before.has(message.id)) ? 0 : unchanged + 1;
       windows.push(window);
@@ -1536,16 +1592,14 @@ export class XAdapter implements Adapter {
     return { messages, covered };
   }
 
-  private async readMessageWindow(page: Page): Promise<ScrapedMessage[]> {
+  private async readMessageWindow(page: Page, options: { passive?: boolean; onWindow?: (messages: ScrapedMessage[]) => Promise<void> } = {}): Promise<ScrapedMessage[]> {
     const rows = await page.evaluate(readXMessageDom);
     const now = Date.now();
     const messages: ScrapedMessage[] = [];
     let infoReads = 0;
-    for (const { dateHints, timeText, day, attachments, ...message } of rows) {
-      const media: NonNullable<InboundMessage["media"]>[] = [];
-      for (const [index, attachment] of attachments.entries()) {
-        media.push(await this.downloadAttachment(page, message.id, index, attachment));
-      }
+    // Resolve newest timestamps first: an old bubble must not consume the
+    // bounded Info budget before the reply the user is actually waiting for.
+    for (const { dateHints, timeText, day, attachments, ...message } of [...rows].reverse()) {
       const explicitTimestamp = dateHints.map((hint) => parseXDate(hint, now)).find((value) => value !== null);
       let timestamp = explicitTimestamp ?? parseXDate(timeText, now, day) ?? (!timeText ? parseXDate(day, now) : null) ?? xSnowflakeDate(message.id, now);
       // A day label alone is not a photo's sent time. X suppresses timestamps
@@ -1557,7 +1611,10 @@ export class XAdapter implements Adapter {
           const saved = await prisma.message.findUnique({ where: { externalKey: `x:${message.id}` }, select: { createdAt: true } });
           timestamp = saved?.createdAt.getTime() || null;
         }
-        if (!timestamp && infoReads < 12 && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
+        if (!options.passive && !timestamp && infoReads < 12 && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
+          // Don't make already-dated newest replies wait behind an older
+          // row's missing Info control. Keep the native oldest-first order.
+          if (infoReads === 0 && messages.length) await options.onWindow?.([...messages].reverse());
           this.assertNotCoolingDown();
           if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
           infoReads++;
@@ -1577,12 +1634,26 @@ export class XAdapter implements Adapter {
       }
       messages.push({
         ...message,
-        attachments: media,
+        attachments: attachments.map(attachment => ({ type: attachment.type, url: null, name: attachment.name, isGif: attachment.isGif })),
         minutePrecision: !explicitTimestamp && !xSnowflakeDate(message.id, now) && Boolean(timestamp && timestamp % 60_000 === 0),
         timestamp,
       });
     }
-    if (messages.some((message) => !message.timestamp)) {
+    messages.reverse();
+    // Publish full text before any slow attachment download or older-history
+    // scroll. A later error must not discard the good newest window.
+    await options.onWindow?.(messages);
+    if (!options.passive) {
+      for (const message of messages) {
+        const row = rows.find(row => row.id === message.id)!;
+        for (const [index, attachment] of row.attachments.entries()) {
+          if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
+          message.attachments![index] = await this.downloadAttachment(page, message.id, index, attachment);
+        }
+      }
+      if (rows.some(row => row.attachments.length)) await options.onWindow?.(messages);
+    }
+    if (!options.passive && messages.some((message) => !message.timestamp)) {
       console.warn("[x] history date coverage", JSON.stringify({ total: messages.length, dated: messages.filter((message) => message.timestamp).length }));
     }
     return messages;
@@ -1910,6 +1981,14 @@ export class XAdapter implements Adapter {
             ? 24
             : 40
         : 40;
+      const saveWindow = async (messages: ScrapedMessage[]) => {
+        await this.persistMessageWindow(chatExternalId, messages, {
+          inboxCategory: conversation.inboxCategory,
+          isGroup: stored?.contact.isGroup || chatExternalId.startsWith("g"),
+          name: conversation.name !== "X user" ? conversation.name : stored?.contact.name || conversation.name,
+          handle: stored?.contact.handle || conversation.handle || conversation.name,
+        }, () => run === this.pageRun && !this.stopping && this.outboundPending === 0);
+      };
       const readHistory = (isRequest: boolean) => this.scrapeMessages(
         chatExternalId,
         // Longer explicit windows progressively load more history while still
@@ -1918,7 +1997,8 @@ export class XAdapter implements Adapter {
         isRequest,
         undefined,
         { sinceTimestamp: context?.sinceTimestamp, beforeTimestamp: _oldestTimestamp || undefined, count: Math.max(1, Math.min(500, _count)), targetId: context?.targetMessageId,
-          latest: (!context?.targetMessageId && (context?.sinceTimestamp || !_oldestTimestamp) && "direction" in conversation) ? conversation as XLatestPreview : undefined }
+          latest: (!context?.targetMessageId && (context?.sinceTimestamp || !_oldestTimestamp) && "direction" in conversation) ? conversation as XLatestPreview : undefined },
+        saveWindow
       );
       let history;
       try {
@@ -1929,44 +2009,16 @@ export class XAdapter implements Adapter {
         // once, never on rate limits/timeouts and never send or accept anything.
         if (conversation.inboxCategory !== "spam" || !String(error).includes("X request conversation was not found")) throw error;
         this.assertNotCoolingDown();
-        history = await readHistory(false);
         conversation.inboxCategory = "general";
+        history = await readHistory(false);
       }
       const { messages, covered } = history;
-      let undated = 0;
-      let unavailableAttachments = 0;
-      for (const message of orderXMinuteMessages(messages)) {
-        if (run !== this.pageRun || this.stopping) throw new Error("X history interrupted; retrying later");
-        if (!message.text && !message.attachments?.length) continue;
-        // Virtualization can remove the date separator immediately before the
-        // first visible bubble. Retain a date already saved for this native ID;
-        // never assign today or match an undated row by text alone.
-        const existing = !message.timestamp ? await prisma.message.findUnique({ where: { externalKey: `x:${message.id}` }, select: { createdAt: true } }) : null;
-        const timestamp = message.timestamp || existing?.createdAt.getTime();
-        if (!timestamp) { undated += 1; continue; }
-        const attachments = message.attachments?.length ? message.attachments : [undefined];
-        for (const [index, media] of attachments.entries()) {
-        if (media && !media.url) unavailableAttachments += 1;
-        await this.onMessage({
-          platform: "x",
-          chatExternalId,
-          messageExternalId: index ? `x:${message.id}:attachment:${index}` : `x:${message.id}`,
-          direction: message.direction,
-          body: index ? "" : message.text,
-          media,
-          inboxCategory: conversation.inboxCategory,
-          historical: true,
-          timestamp: new Date(timestamp),
-          timestampVerified: Boolean(message.timestamp),
-          isGroup: stored?.contact.isGroup || chatExternalId.startsWith("g"),
-          contact: {
-            externalKey: `x:${chatExternalId}`,
-            name: conversation.name !== "X user" ? conversation.name : stored?.contact.name || conversation.name,
-            handle: stored?.contact.handle || conversation.handle || conversation.name,
-          },
-        });
-        }
-      }
+      const { undated, unavailableAttachments } = await this.persistMessageWindow(chatExternalId, messages, {
+        inboxCategory: conversation.inboxCategory,
+        isGroup: stored?.contact.isGroup || chatExternalId.startsWith("g"),
+        name: conversation.name !== "X user" ? conversation.name : stored?.contact.name || conversation.name,
+        handle: stored?.contact.handle || conversation.handle || conversation.name,
+      }, () => run === this.pageRun && !this.stopping && this.outboundPending === 0);
       if (this.accountId && "timestamp" in conversation && conversation.timestamp) {
         await reconcileXConversationTime(this.accountId, chatExternalId, conversation.timestamp);
       }
@@ -2331,6 +2383,7 @@ export class XAdapter implements Adapter {
         }
       }
       if (sendClickError) throw sendClickError;
+      const sentAt = Date.now();
       stage = "waiting for X acceptance";
 
       // XChat clears its controlled composer only after the native Send action
@@ -2366,9 +2419,7 @@ export class XAdapter implements Adapter {
               if (!id || known.has(id)) continue;
               const rect = element.getBoundingClientRect();
               if (rect.left + rect.width / 2 <= mid) continue;
-              const text = (element.innerText || "")
-                .replace(/(\s*\d{1,2}:\d{2}\s*(AM|PM))+\s*$/i, "")
-                .trim();
+              const text = (element.innerText || "").trim();
               const normalizedText = text.replace(/\bhttps?:\/\/(?=[a-z0-9.-]+\.[a-z]{2,}\b)/gi, "").replace(/\s+/g, " ").trim();
               const normalizedExpected = expected.replace(/\bhttps?:\/\/(?=[a-z0-9.-]+\.[a-z]{2,}\b)/gi, "").replace(/\s+/g, " ").trim();
               if (!expected || normalizedText === normalizedExpected) {
@@ -2420,20 +2471,10 @@ export class XAdapter implements Adapter {
         }
       }
       if (!confirmedMessage && !acceptedWithoutId) {
-        // X group chats can take 20–30 seconds to paint the outgoing bubble and
-        // clear the composer even though the trusted Send click has already
-        // queued the message. Return a provisional key and let the inbox echo
-        // provide the real UUID asynchronously. One-to-one chats retain the
-        // stricter immediate composer/bubble confirmation.
-        if (!isGroupChat) {
-          throw new Error("XChat delivery confirmation timed out after pressing Send");
-        }
-        acceptedWithoutId = true;
+        throw new Error("XChat delivery confirmation timed out after pressing Send");
       }
       if (!confirmedMessage && acceptedWithoutId) {
-        // Give X a brief chance to surface an explicit native rejection. A
-        // group composer that still contains text is not itself a rejection;
-        // group state is intentionally reconciled by the later platform echo.
+        // Give X a brief chance to surface a rejection or restored draft.
         await delay(300);
         const rejection = await page.evaluate((composer) => {
           const root =
@@ -2468,15 +2509,16 @@ export class XAdapter implements Adapter {
           };
         }, composerSelector);
         if (rejection.errorText) throw new Error(rejection.errorText);
-        if (!rejection.composerEmpty && !isGroupChat) {
+        if (!rejection.composerEmpty) {
           throw new Error("XChat restored the draft instead of accepting it");
         }
       }
+      if (confirmedMessage) this.nativeMessageTimes.set(confirmedMessage.id, sentAt);
       return {
         messageExternalId: confirmedMessage
           ? `x:${confirmedMessage.id}`
-          : `x:${chatExternalId}:pending:${Date.now()}:${randomUUID()}`,
-        timestamp: new Date().toISOString(),
+          : `x:${chatExternalId}:pending:${sentAt}:${randomUUID()}`,
+        timestamp: new Date(sentAt).toISOString(),
       };
     } catch (error) {
       throw new Error(

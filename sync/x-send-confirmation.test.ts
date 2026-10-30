@@ -37,3 +37,17 @@ test("X never confirms an unobserved send", async () => {
   const f = fixture([false]);
   assert.equal(await waitForXSendConfirmation(f.read, 1000, f.clock, f.pause), false);
 });
+
+test("accepted sends release the queue in 600ms, not the 8/12-second native-ID timeout", async () => {
+  for (const timeout of [8000, 12000]) {
+    const f = fixture([{ kind: "accepted" }]);
+    assert.deepEqual(await waitForXSendConfirmation(f.read, timeout, f.clock, f.pause), { kind: "accepted" });
+    assert.equal(f.clock(), 600);
+  }
+});
+
+test("an unaccepted send retains the full confirmation window", async () => {
+  const f = fixture([false]);
+  assert.equal(await waitForXSendConfirmation(f.read, 12000, f.clock, f.pause), false);
+  assert.equal(f.clock(), 12000);
+});

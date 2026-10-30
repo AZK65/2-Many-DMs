@@ -1,3 +1,5 @@
+import { richerXMessageText, xPreviewMatchesText } from "./x-message-text";
+
 // Never substitute import time for a message's sent time. UUIDv4 XChat IDs
 // contain no date; only legacy snowflakes and dates displayed by X are usable.
 export function xSnowflakeDate(id: string, now = Date.now()): number | null {
@@ -102,7 +104,7 @@ export function xHistoryMatchesPreview(
   return messages.some(message => {
     if (message.direction !== preview.direction) return false;
     if (preview.timestamp && (!message.timestamp || Math.abs(message.timestamp - preview.timestamp) > tolerance)) return false;
-    if (normalize(message.text) === body) return true;
+    if (xPreviewMatchesText(body, normalize(message.text))) return true;
     const mediaPreview = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|file|document|attachment)s?$/i.exec(body);
     const kind = mediaPreview?.[2]?.toLowerCase();
     const expected = Number(mediaPreview?.[1]) || 1;
@@ -125,7 +127,7 @@ export function mergeXHistory<T extends XHistoryMessage>(windows: T[][]): T[] {
           const current = message.attachments?.[index];
           return current?.url ? current : previous || current!;
         }) : undefined;
-        found.set(message.id, { ...existing, timestamp: existing.timestamp || message.timestamp, attachments });
+        found.set(message.id, { ...existing, text: richerXMessageText(existing.text, message.text), timestamp: existing.timestamp || message.timestamp, attachments });
       }
     }
   }

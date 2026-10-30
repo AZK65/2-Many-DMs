@@ -19,6 +19,34 @@ function fixture() {
   return { adapter, page, saved };
 }
 
+test("newest readable replies survive a later older-history failure", async () => {
+  const { adapter, page, saved } = fixture();
+  adapter.busy = false;
+  adapter.chatPage = page;
+  adapter.scrapeConversations = async () => [];
+  adapter.parkActionPage = async () => {};
+  adapter.scrapeMessages = async (_id: string, _rounds: number, _request: boolean, _timeout: number, _range: unknown, onWindow: (rows: any[]) => Promise<void>) => {
+    await onWindow([{ id: "native", text: "Full newest reply", direction: "in", timestamp: Date.now() - 1000 }]);
+    assert.equal(saved[0].body, "Full newest reply");
+    throw new Error("Older window not available");
+  };
+  await assert.rejects(adapter.requestHistory("live", "", 0, 100), /Older window/);
+  assert.equal(saved.length, 1);
+});
+
+test("full text publishes before attachment downloads; passive reads never download", async () => {
+  const { adapter } = fixture();
+  const events: string[] = [];
+  const page = { evaluate: async () => [{ id: "native", text: "Full caption at 5:30 PM", direction: "in", dateHints: ["2026-01-01T00:00:00Z"], attachments: [{ type: "image", source: "https://pbs.twimg.com/media/fixture.jpg" }] }] };
+  adapter.downloadAttachment = async () => { events.push("download"); return { type: "image", url: "/media/fixture.jpg" }; };
+  const rows = await adapter.readMessageWindow(page, { onWindow: async (messages: any[]) => { events.push(messages[0].attachments[0].url ? "media saved" : "text saved"); } });
+  assert.deepEqual(events, ["text saved", "download", "media saved"]);
+  assert.equal(rows[0].text, "Full caption at 5:30 PM");
+  events.length = 0;
+  await adapter.readMessageWindow(page, { passive: true });
+  assert.deepEqual(events, []);
+});
+
 test("failed repairs remain queued durably and respect their retry deadline", async () => {
   const { adapter } = fixture();
   adapter.busy = false;

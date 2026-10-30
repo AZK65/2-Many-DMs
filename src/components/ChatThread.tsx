@@ -317,8 +317,13 @@ const AUTO_TRANSLATION_BATCH_SIZE = 8;
 const DELIVERY_REFRESH_DELAYS_MS = [
   250,
   500,
+  500,
+  750,
   1000,
+  1000,
+  1500,
   2000,
+  3000,
   4000,
   8000,
   16000,
@@ -3577,6 +3582,9 @@ export function ChatThread({
                       <time dateTime={m.createdAt}>{clockTime(m.createdAt)}</time>
                       {!conversation.isGroup && (deliveryStatus === "sending" || deliveryStatus === "pending") && (
                         <span> · Sending…</span>
+                      )}
+                      {conversation.platform === "x" && deliveryStatus === "sent" && m.externalKey?.includes(":pending:") && (
+                        <span title="X accepted this message. Waiting for its final message confirmation."> · Sent to X</span>
                       )}
                       {(deliveryStatus === "unconfirmed" || deliveryStatus === "failed") && (
                         <button
