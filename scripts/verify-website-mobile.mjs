@@ -46,7 +46,7 @@ try {
     await page.setViewport({ width: 320, height: 740, isMobile: true, hasTouch: true });
     await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" })); await settle();
     await page.screenshot({ path: `${output}/touch-hero-${theme}.png` });
-    await tap('[aria-label="Demo conversations"] button');
+    await tap('[data-demo-chat="0"]');
     await fits('[aria-label="Try a demo reply"]');
     await fits('[aria-label="Send demo reply"]');
     await tap('[aria-label="Back to demo conversations"]');

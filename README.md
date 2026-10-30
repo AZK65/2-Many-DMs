@@ -91,7 +91,7 @@ send a snippet, tag, or set status. Dry-run before you arm it.
 
 ## Guided setup
 
-The public website's **Get started** modal has setup prompts for **Codex, Cursor, and Claude Code**. Local models are included by default in the prompt, with machine checks and download confirmation; you can defer them. The repository is currently private, so access is required first. Prompts request a new private installation, protect existing data, and keep secrets out of Git. Copying only copies text; it does not open an assistant or install anything.
+The public website's **Get started** modal has setup prompts for **Codex, Cursor, and Claude Code**. Local models are included by default in the prompt, with machine checks and download confirmation; you can defer them. The repository is public and can be cloned without an invitation. Prompts request a new private installation, protect existing data, and keep secrets out of Git. Copying only copies text; it does not open an assistant or install anything.
 
 The repository includes a local model installer: **`npm run setup`** installs dependencies and offers the models for translation, image OCR search, and autocorrect. Install and open [Ollama](https://ollama.com/download) on the workspace host first. Already installed dependencies? Run **`npm run setup:models`**. Missing models download one at a time, existing models are skipped, and **`npm run models:check`** verifies the installed files. Downloads need several GB and compatible hardware. Model weights are not committed to Git and are never downloaded by `npm install` alone. Read [local model setup and recovery](docs/local-models.md).
 

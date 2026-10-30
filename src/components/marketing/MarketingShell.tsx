@@ -90,7 +90,7 @@ function MarketingLayout({ children }: { children: ReactNode }) {
         <nav aria-label="Footer navigation" className="flex flex-wrap items-start gap-6 text-sm text-slate-500 dark:text-neutral-400"><Link href="/landing#questions">Questions</Link><Link href="/privacy">Data & privacy</Link><Link href="/changelog">Updates</Link><a href="https://github.com/AZK65/2-Many-DMs" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
         {themePicker("Footer appearance", true)}
       </div>
-      <p className="max-w-3xl text-xs leading-relaxed text-slate-400 dark:text-neutral-500">An independent messaging workspace. Not affiliated with Telegram, WhatsApp, X, or Discord. Connection capabilities and provider limits vary. Repository access is currently required to install.</p>
+      <p className="max-w-3xl text-xs leading-relaxed text-slate-400 dark:text-neutral-500">An independent messaging workspace. Not affiliated with Telegram, WhatsApp, X, or Discord. Connection capabilities and provider limits vary. Public code. Your own installation.</p>
     </footer>
   </div>;
 }

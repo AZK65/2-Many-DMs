@@ -19,7 +19,7 @@ Install Cloudflare's Wrangler CLI and sign in with `wrangler login` before publi
 npm run website:deploy
 ```
 
-The Cloudflare Pages project is **2manydms**, with production branch **master**. It uses Direct Upload: a GitHub push alone does not publish the site. The deploy command rebuilds the public export and uploads only `website/out`. The source repository remains private.
+The Cloudflare Pages project is **2manydms**, with production branch **master**. It uses Direct Upload: a GitHub push alone does not publish the site. The deploy command rebuilds the public export and uploads only `website/out`. The source repository is public; personal workspaces, messages and account sessions are not part of this export.
 
 Direct Upload projects cannot later be converted to native Git integration; a CI job can still run the same Pages upload command. No CI token or automatic deployment workflow has been configured.
 
