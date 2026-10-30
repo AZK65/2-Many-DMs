@@ -20,6 +20,7 @@ function MarketingLayout({ children }: { children: ReactNode }) {
   const openSetup = useSetupPrompt();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileAppearanceOpen, setMobileAppearanceOpen] = useState(false);
   const [theme, setTheme] = useState("dark");
   const [compact, setCompact] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -48,10 +49,10 @@ function MarketingLayout({ children }: { children: ReactNode }) {
     try { localStorage.setItem("2many-site-theme", value); } catch {}
   }
 
-  function themePicker(label: string, showLabel = false) {
+  function themePicker(label: string, showLabel = false, placement: "top" | "bottom" = "bottom") {
     return <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-neutral-400">
       {showLabel && <span>Appearance</span>}
-      <ThemeSwitch theme={theme} onChange={changeTheme} label={`${label}: dark mode`} />
+      <ThemeSwitch theme={theme} onChange={changeTheme} label={label} placement={placement} />
     </div>;
   }
 
@@ -67,20 +68,20 @@ function MarketingLayout({ children }: { children: ReactNode }) {
           {navigation.map(([href, label]) => <Link href={href} key={href} aria-current={pathname === href ? "page" : undefined} className={`whitespace-nowrap text-sm font-medium transition-colors duration-200 hover:text-accent ${pathname === href ? "text-accent" : "text-slate-500 dark:text-neutral-400"}`}>{label}</Link>)}
         </motion.div>
         <motion.div layout="position" className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <GetStartedButton className="hidden h-10 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-slate-700 sm:block dark:bg-white dark:text-black dark:hover:bg-neutral-200" />
           {themePicker("Website appearance")}
-          <GetStartedButton className="hidden rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-slate-700 sm:block dark:bg-white dark:text-black dark:hover:bg-neutral-200" />
           <button type="button" aria-label="Open navigation" aria-expanded={menuOpen} aria-controls="website-mobile-menu" onClick={() => setMenuOpen(true)} className="relative h-12 w-12 shrink-0 rounded-full transition-colors duration-200 hover:bg-slate-100 lg:hidden dark:hover:bg-neutral-800"><span className="absolute left-4 top-5 h-px w-4 bg-current" /><span className="absolute left-4 top-7 h-px w-4 bg-current" /></button>
         </motion.div>
       </motion.nav>
     </header>
-    <AnimatePresence>{menuOpen && <OverlayPortal onClose={() => setMenuOpen(false)}>
+    <AnimatePresence>{menuOpen && <OverlayPortal onClose={() => mobileAppearanceOpen ? setMobileAppearanceOpen(false) : setMenuOpen(false)}>
       <motion.div id="website-mobile-menu" role="dialog" aria-modal="true" aria-label="Website navigation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.2 }} className="marketing-mobile-menu fixed inset-0 flex flex-col overflow-y-auto bg-white/95 p-8 text-slate-950 backdrop-blur-3xl dark:bg-black/95 dark:text-white">
         <div className="flex items-center justify-between"><span className="text-lg font-semibold">2 Many DMs</span><button type="button" aria-label="Close navigation" onClick={() => setMenuOpen(false)} className="relative h-10 w-10 rounded-lg"><span className="absolute left-3 top-5 h-px w-4 rotate-45 bg-current transition-transform duration-200" /><span className="absolute left-3 top-5 h-px w-4 -rotate-45 bg-current transition-transform duration-200" /></button></div>
         <nav className="my-auto space-y-8 py-8" aria-label="Mobile navigation">
           {[...navigation, ["/landing#onboarding", "Onboarding"]].map(([href, label], index) => <motion.div key={href} initial={{ opacity: 0, y: reduced ? 0 : 48 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.8, delay: reduced ? 0 : index * 0.08, ease: easing }}><Link onClick={() => setMenuOpen(false)} href={href} className="flex items-start justify-between gap-4 text-3xl font-medium tracking-tight"><span>{label}</span><span className="shrink-0 text-accent" aria-hidden>↗</span></Link></motion.div>)}
           <button type="button" onClick={() => { setMenuOpen(false); openSetup(); }} className="flex w-full items-start justify-between gap-4 text-left text-3xl font-medium tracking-tight">Get started <span className="text-accent" aria-hidden>↗</span></button>
         </nav>
-        {themePicker("Mobile menu appearance", true)}
+        <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-neutral-400"><span>Appearance</span><ThemeSwitch theme={theme} onChange={changeTheme} label="Mobile menu appearance" placement="top" open={mobileAppearanceOpen} onOpenChange={setMobileAppearanceOpen} /></div>
       </motion.div>
     </OverlayPortal>}</AnimatePresence>
     {children}
@@ -88,7 +89,7 @@ function MarketingLayout({ children }: { children: ReactNode }) {
       <div className="flex flex-col justify-between gap-8 border-t border-slate-200 py-8 md:flex-row dark:border-neutral-800">
         <div><Link href="/landing" className="text-xl font-semibold tracking-tight">2 Many DMs<span className="text-accent">.</span></Link><p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">Less switching. More conversation.</p></div>
         <nav aria-label="Footer navigation" className="flex flex-wrap items-start gap-6 text-sm text-slate-500 dark:text-neutral-400"><Link href="/landing#questions">Questions</Link><Link href="/privacy">Data & privacy</Link><Link href="/changelog">Updates</Link><a href="https://github.com/AZK65/2-Many-DMs" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
-        {themePicker("Footer appearance", true)}
+        {themePicker("Footer appearance", true, "top")}
       </div>
       <p className="max-w-3xl text-xs leading-relaxed text-slate-400 dark:text-neutral-500">An independent messaging workspace. Not affiliated with Telegram, WhatsApp, X, or Discord. Connection capabilities and provider limits vary. Public code. Your own installation.</p>
     </footer>

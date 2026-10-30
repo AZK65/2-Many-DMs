@@ -30,8 +30,12 @@ try {
     for (const theme of ["dark", "light"]) {
       await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "no-preference" }]);
       await page.goto(base + "/landing", { waitUntil: "networkidle2" });
-      const dark = await page.$eval('[aria-label="Website appearance: dark mode"]', node => node.getAttribute("aria-checked") === "true");
-      if (dark !== (theme === "dark")) await page.click('[aria-label="Website appearance: dark mode"]');
+      const dark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
+      if (dark !== (theme === "dark")) {
+        await page.click('[aria-label="Website appearance"]');
+        await page.waitForSelector('[role="menuitemradio"]');
+        await page.$$eval('[role="menuitemradio"]', (nodes, value) => nodes.find(node => node.textContent.trim() === value)?.click(), theme === "dark" ? "Dark" : "Light");
+      }
       await scroll(0);
       assert.ok(await opacity() < 0.01, "Hero starts clear");
       await page.screenshot({ path: `${output}/${width}-${theme}-clear.png` });

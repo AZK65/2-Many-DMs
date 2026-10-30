@@ -136,8 +136,8 @@ try {
   assert.match(await page.$eval('[data-onboarding-preview]', element => element.innerText), /Selected in preview/);
   await clickText("Restart preview");
   for (const theme of ["light", "dark"]) {
-    const selector = '[aria-label="Website appearance: dark mode"]';
-    if (await page.$eval(selector, element => element.getAttribute("aria-checked")) !== String(theme === "dark")) await click(selector);
+    await click('[aria-label="Website appearance"]');
+    await clickText(theme === "dark" ? "Dark" : "Light");
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), theme === "dark");
     assert.equal(await page.evaluate(() => localStorage.getItem("2many-site-theme")), theme);
     await settle();
@@ -207,11 +207,12 @@ try {
   await page.screenshot({ path: `${output}/faq-animated.png` });
   await click("#faq-question-1"); await new Promise(resolve => setTimeout(resolve, 750));
   assert.equal(await page.$eval("#faq-answer-1", element => element.getBoundingClientRect().height), 0);
-  const switchSelector = '[aria-label="Website appearance: dark mode"]';
-  await page.focus(switchSelector); await page.keyboard.press("Space");
+  const switchSelector = '[aria-label="Website appearance"]';
+  await page.focus(switchSelector); await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
   await new Promise(resolve => setTimeout(resolve, 600));
-  const themeChecked = await page.$eval(switchSelector, element => element.getAttribute("aria-checked") === "true");
-  assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), themeChecked);
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), false);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), "Website appearance");
   await page.$eval('[data-feature="translation"]', element => element.scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForSelector('[data-translation-phase="translating"]');
   await page.screenshot({ path: `${output}/translation-working.png` });
