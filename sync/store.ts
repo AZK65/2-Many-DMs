@@ -217,6 +217,9 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
     where: { externalKey: m.messageExternalId },
   });
   if (existing) {
+    // Keep a tombstone so retained/history copies cannot resurrect a deletion.
+    // Locally confirmed edits must not be reverted by older history either.
+    if (existing.deletedAt || existing.mutationState || (existing.editedAt && !m.sourceEdited)) return null;
     // Browser sends can return before the platform exposes the final native
     // id. When the real echo arrives, collapse that exact short-lived pair
     // while preserving the optimistic row already rendered by the UI.
@@ -289,6 +292,7 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
     }
     if (m.platform === "discord" && m.sourceEdited) {
       patch.body = m.body;
+      patch.editedAt = new Date();
       patch.translatedBody = null;
       patch.translationSourceLanguage = null;
       patch.translationTargetLanguage = null;

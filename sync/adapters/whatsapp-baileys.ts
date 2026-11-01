@@ -17,6 +17,7 @@ import { DurableRecords } from "../retention";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { avatarUnavailable } from "../avatar-errors";
 import { isGenericDirectIdentity } from "../../src/lib/direct-contact-identity";
+import { nativeMutationId } from "../../src/lib/message-mutations";
 import type {
   Adapter,
   AdapterStatus,
@@ -903,6 +904,30 @@ export class WhatsAppBaileysAdapter implements Adapter {
       messageExternalId: `whatsapp:${chatExternalId}:${id}`,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private mutationKey(chatExternalId: string, messageExternalId: string) {
+    const nativeId = nativeMutationId("whatsapp", chatExternalId, messageExternalId);
+    const jid = jidNormalizedUser(chatExternalId.replace(/@c\.us$/, "@s.whatsapp.net"));
+    const cached = this.readMessage(messageExternalId)?.key;
+    if (cached && (!cached.fromMe || jidNormalizedUser(cached.remoteJid || "") !== jid || cached.id !== nativeId)) {
+      throw new Error("WhatsApp could not verify your original message in this chat.");
+    }
+    return { jid, key: cached || { remoteJid: jid, id: nativeId, fromMe: true } };
+  }
+
+  async editMessage(chatExternalId: string, messageExternalId: string, body: string): Promise<void> {
+    await this.ensureReady();
+    const { jid, key } = this.mutationKey(chatExternalId, messageExternalId);
+    const result = await this.sock!.sendMessage(jid, { text: body, edit: key });
+    if (!result?.key?.id) throw new Error("WhatsApp did not confirm the edit request.");
+  }
+
+  async deleteMessage(chatExternalId: string, messageExternalId: string): Promise<void> {
+    await this.ensureReady();
+    const { jid, key } = this.mutationKey(chatExternalId, messageExternalId);
+    const result = await this.sock!.sendMessage(jid, { delete: key });
+    if (!result?.key?.id) throw new Error("WhatsApp did not confirm the deletion request.");
   }
 
   async react(

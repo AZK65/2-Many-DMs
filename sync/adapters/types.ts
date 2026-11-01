@@ -164,6 +164,8 @@ export interface InboundReaction {
 
 export interface Adapter {
   platform: Platform;
+  editMessage?(chatExternalId: string, messageExternalId: string, body: string): Promise<void>;
+  deleteMessage?(chatExternalId: string, messageExternalId: string): Promise<void>;
   start(
     onMessage: (m: InboundMessage) => Promise<void>,
     // Called when a chat is read on the platform (e.g. on the phone) so the

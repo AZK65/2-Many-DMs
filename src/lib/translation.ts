@@ -1,3 +1,5 @@
+import { protectTranslationLinks } from "./translation-links";
+
 export type TranslationResult = {
   translatedText: string;
   detectedLanguageCode: string;
@@ -179,6 +181,8 @@ async function chat(
 export async function detectConversationLanguage(
   samples: string[]
 ): Promise<DetectedLanguage> {
+  samples = samples.map(sample => protectTranslationLinks(sample).withoutLinks).filter(sample => /\p{L}/u.test(sample));
+  if (!samples.length) return { languageCode: "und", languageName: "Unknown" };
   const content = await chat(
     [
       "Identify the primary language used by the receiver in the messages below.",
@@ -207,6 +211,11 @@ export async function translateText(
 ): Promise<TranslationResult> {
   const targetCode = normalizeLanguageCode(target.code);
   const targetName = languageName(targetCode, target.name);
+  const protectedText = protectTranslationLinks(text);
+  if (protectedText.hasLinks && !/\p{L}/u.test(protectedText.withoutLinks)) {
+    return { translatedText: text, detectedLanguageCode: "und", detectedLanguageName: "Unknown",
+      targetLanguageCode: targetCode, targetLanguageName: targetName };
+  }
   // A chat-level source hint avoids a second local-model call for every
   // received message. One-off translations still detect their own language.
   const source = sourceHint
@@ -238,7 +247,7 @@ export async function translateText(
   }
 
   const styleSamples = targetStyleSamples
-    .map((sample) => sample.trim().slice(0, 240))
+    .map((sample) => protectTranslationLinks(sample).withoutLinks.trim().slice(0, 240))
     .filter(Boolean)
     .slice(0, 6);
 
@@ -246,6 +255,7 @@ export async function translateText(
     [
       `Translate this ${source.languageName} (${source.languageCode}) direct message into natural ${targetName} (${targetCode}).`,
       "Accurately preserve the meaning, tone, paragraph breaks, emojis, names, @mentions, links, email addresses, numbers, currencies, and product names.",
+      "Copy every OMNI_LINK placeholder exactly once, unchanged, in the same place in the sentence. Never expand it or invent an address.",
       "Use relaxed, everyday chat language. Do not make the message more formal, corporate, polite, or wordy than the original.",
       "Match clear formality in the source. When it is ambiguous, prefer friendly informal speech and natural contractions.",
       "Mirror the source's brevity, capitalization, punctuation, slang, abbreviations, emoji use, and sentence fragments.",
@@ -265,12 +275,12 @@ export async function translateText(
       `Please translate the following ${source.languageName} text into ${targetName}:`,
       "",
       "",
-      text,
+      protectedText.masked,
     ].join("\n")
   );
 
   return {
-    translatedText,
+    translatedText: protectedText.restore(translatedText),
     detectedLanguageCode: source.languageCode,
     detectedLanguageName: source.languageName,
     targetLanguageCode: targetCode,

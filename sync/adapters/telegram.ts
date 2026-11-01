@@ -11,6 +11,7 @@ import { MediaRecoveryQueue } from "../media-recovery";
 import { reuseTelegramPrimarySender } from "../telegram-media-sender";
 import { TelegramMediaDownloader } from "../telegram-media-download";
 import { telegramSpecialBody } from "../telegram-message-content";
+import { nativeMutationId } from "../../src/lib/message-mutations";
 import type {
   Adapter,
   AdapterStatus,
@@ -978,6 +979,34 @@ export class TelegramAdapter implements Adapter {
       );
       throw error;
     }
+  }
+
+  private async mutationTarget(chatExternalId: string, messageExternalId: string) {
+    this.prioritizeOutbound();
+    await this.ensureReady();
+    const nativeId = Number(nativeMutationId("telegram", chatExternalId, messageExternalId));
+    if (!Number.isSafeInteger(nativeId) || nativeId <= 0) throw new Error("Telegram message ID is invalid.");
+    const { id, topicId } = parseTarget(chatExternalId);
+    const peer = await this.resolvePeer(id);
+    const [message] = await this.client.getMessages(peer, { ids: [nativeId] });
+    // Telegram's getMessages(ids) can ignore a non-channel peer. Check it here
+    // before deleteMessages, whose ordinary-chat IDs are account-wide.
+    if (!message?.out || !message.peerId || utils.getPeerId(message.peerId) !== utils.getPeerId(peer) ||
+        (topicId && topicId !== 1 && topicIdOf(message) !== topicId)) {
+      throw new Error("Telegram could not verify your original message in this chat.");
+    }
+    return { peer, nativeId };
+  }
+
+  async editMessage(chatExternalId: string, messageExternalId: string, body: string): Promise<void> {
+    const { peer, nativeId } = await this.mutationTarget(chatExternalId, messageExternalId);
+    // No Markdown parsing: save exactly what the editor shows, including links.
+    await this.client.editMessage(peer, { message: nativeId, text: body, formattingEntities: [] });
+  }
+
+  async deleteMessage(chatExternalId: string, messageExternalId: string): Promise<void> {
+    const { peer, nativeId } = await this.mutationTarget(chatExternalId, messageExternalId);
+    await this.client.deleteMessages(peer, [nativeId], { revoke: true });
   }
 
   async react(

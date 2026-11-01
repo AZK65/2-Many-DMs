@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { extFromMime, saveMediaStream, MAX_BYTES } from "../media";
 import WebSocket, { type RawData } from "ws";
+import { nativeMutationId } from "../../src/lib/message-mutations";
 import type {
   Adapter,
   AdapterStatus,
@@ -759,6 +760,28 @@ export class DiscordBotAdapter implements Adapter {
       messageExternalId: messageKey(chatExternalId, sent.id),
       timestamp: sent.timestamp,
     };
+  }
+
+  private async mutationTarget(chatExternalId: string, messageExternalId: string) {
+    if (!this.canUseChannel(chatExternalId)) throw new Error("This Discord channel is outside DISCORD_CHANNEL_IDS.");
+    await this.ensureReady();
+    const nativeId = nativeMutationId("discord", chatExternalId, messageExternalId);
+    const path = `/channels/${chatExternalId}/messages/${nativeId}`;
+    const message = await this.request<DiscordMessage>(path);
+    if (!this.botUser?.id || message.author.id !== this.botUser.id || message.channel_id !== chatExternalId) {
+      throw new Error("Only messages sent by this Discord bot can be changed.");
+    }
+    return path;
+  }
+
+  async editMessage(chatExternalId: string, messageExternalId: string, body: string): Promise<void> {
+    const path = await this.mutationTarget(chatExternalId, messageExternalId);
+    await this.request(path, { method: "PATCH", body: JSON.stringify({ content: body, allowed_mentions: { parse: [] } }) });
+  }
+
+  async deleteMessage(chatExternalId: string, messageExternalId: string): Promise<void> {
+    const path = await this.mutationTarget(chatExternalId, messageExternalId);
+    await this.request(path, { method: "DELETE" });
   }
 
   async react(

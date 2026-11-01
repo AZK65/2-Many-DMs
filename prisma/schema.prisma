@@ -248,6 +248,12 @@ model Message {
   senderContactId           String?
   senderContact             Contact?          @relation("MessageSender", fields: [senderContactId], references: [id])
   body                      String
+  editedAt                  DateTime?
+  deletedAt                 DateTime?
+  // A native operation is never automatically replayed after an ambiguous
+  // disconnect or process restart. The request ID also deduplicates retries.
+  mutationState             String?
+  mutationRequestId         String?
   // For translated outbound messages, body is the exact text sent to the
   // platform and originalBody is the English draft. For inbound messages,
   // translatedBody caches the user's English translation.

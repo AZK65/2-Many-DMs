@@ -26,6 +26,7 @@ import type {
 
 import { startOcrIndexer } from "./ocr";
 import { ConnectorOperations } from "./connector-operations";
+import { MessageMutations } from "./message-mutations";
 import { acquireWorkerLocks } from "./worker-lock";
 import { recordDeliveryReceipt } from "./delivery-receipt";
 import { MessageRetention, canonicalWhatsAppMessage } from "./retention";
@@ -41,6 +42,7 @@ const adapters = new Map<string, Adapter>();
 const accountMeta = new Map<string, { platform: string; label: string | null }>();
 const accountVersions = new Map<string, string>();
 const connectorOperations = new ConnectorOperations<Adapter>();
+const messageMutations = new MessageMutations(prisma, id => adapters.get(id), (adapter, task) => connectorOperations.send(adapter, task));
 let adapterReload: Promise<void> | undefined;
 let controlServer: http.Server | undefined;
 let recoveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -515,6 +517,23 @@ function resolveAdapter(body: {
 function startControlServer(): Promise<void> {
   const port = Number(process.env.SYNC_CONTROL_PORT || 4001);
   controlServer = http.createServer(async (req, res) => {
+      if (req.method === "POST" && req.url === "/messages/mutate") {
+        res.setHeader("Content-Type", "application/json");
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {
+          res.writeHead(403); return res.end(JSON.stringify({ error: "Local workspace requests only." }));
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 300_000) { res.writeHead(413); return res.end(JSON.stringify({ error: "Message action is too large." })); }
+          }
+          const message = await messageMutations.execute(JSON.parse(body));
+          return res.end(JSON.stringify({ message }));
+        } catch (error) {
+          res.writeHead(409); return res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Message action failed." }));
+        }
+      }
       if (["/avatars/backfill", "/avatars/backfill?restart=1"].includes(req.url || "") && ["GET", "POST"].includes(req.method || "")) {
         // Operational endpoint is local-only; browser cross-origin requests
         // cannot trigger downloads, and a second POST resumes the same pass.
@@ -1192,6 +1211,9 @@ async function main() {
   // here without touching another worker's Telegram keys or browser profile.
   await startControlServer();
   await prismaReady;
+  // A previous process may have lost confirmation after sending a mutation.
+  // Surface uncertainty instead of silently replaying a destructive action.
+  await prisma.message.updateMany({ where: { mutationState: "pending" }, data: { mutationState: "uncertain" } });
   retention = new MessageRetention(path.join(process.env.DATA_DIR || process.cwd(), ".local", "sync-retention"));
   avatarBackfill = new AvatarBackfill(path.join(process.env.DATA_DIR || process.cwd(), ".local", "avatar-backfill.json"));
   startAutomationScheduler();

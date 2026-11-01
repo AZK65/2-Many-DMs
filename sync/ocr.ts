@@ -164,6 +164,7 @@ async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | nul
   return prisma.message.findFirst({
     where: {
       mediaType: "image",
+      deletedAt: null,
       // Platform adapters save recoverable Telegram, WhatsApp, X, and Gmail
       // images here. Remote-only previews are not downloaded by the indexer.
       mediaUrl: { startsWith: "/media/" },
@@ -183,8 +184,8 @@ async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | nul
 async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "skipped" | "failed"> {
   const filePath = candidate.mediaUrl ? localMediaPath(candidate.mediaUrl) : null;
   if (!filePath) {
-    await prisma.message.update({
-      where: { id: candidate.id },
+    await prisma.message.updateMany({
+      where: { id: candidate.id, deletedAt: null },
       data: {
         ocrStatus: "skipped",
         ocrModel: OCR_MODEL,
@@ -195,8 +196,8 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
     return "skipped";
   }
 
-  await prisma.message.update({
-    where: { id: candidate.id },
+  await prisma.message.updateMany({
+    where: { id: candidate.id, deletedAt: null },
     data: {
       ocrStatus: "processing",
       ocrModel: OCR_MODEL,
@@ -206,8 +207,8 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
   });
   try {
     const ocrText = await recognizeImage(filePath);
-    await prisma.message.update({
-      where: { id: candidate.id },
+    await prisma.message.updateMany({
+      where: { id: candidate.id, deletedAt: null },
       data: {
         ocrText,
         ocrStatus: "complete",
@@ -220,8 +221,8 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
   } catch (error) {
     const detail = String(error).replace(/^Error:\s*/, "").slice(0, 500);
     const skipped = /not a readable image|exceeds the .* OCR limit|ENOENT/i.test(detail);
-    await prisma.message.update({
-      where: { id: candidate.id },
+    await prisma.message.updateMany({
+      where: { id: candidate.id, deletedAt: null },
       data: {
         ocrStatus: skipped ? "skipped" : "failed",
         ocrModel: OCR_MODEL,

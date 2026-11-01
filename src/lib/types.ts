@@ -214,6 +214,9 @@ export interface EmailActivityDTO {
 
 export interface MessageDTO {
   id: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  mutationState?: string | null;
   // Stable platform message key. Reply previews use this to jump back to the
   // exact original message even when it is outside the loaded thread window.
   externalKey?: string | null;

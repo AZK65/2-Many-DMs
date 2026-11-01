@@ -54,6 +54,9 @@ function groupReactions(
 
 function outgoingMessageDTO(message: PrismaMessage): MessageDTO {
   return {
+    editedAt: message.editedAt?.toISOString() ?? null,
+    deletedAt: message.deletedAt?.toISOString() ?? null,
+    mutationState: message.mutationState,
     id: message.id,
     externalKey: message.externalKey,
     body: message.body,
@@ -217,6 +220,9 @@ export async function GET(
       !!m.lastSendAttemptAt &&
       m.lastSendAttemptAt < expiredPendingBefore;
     return {
+      editedAt: m.editedAt?.toISOString() ?? null,
+      deletedAt: m.deletedAt?.toISOString() ?? null,
+      mutationState: m.mutationState,
       id: m.id,
       externalKey: m.externalKey,
       body: m.body,

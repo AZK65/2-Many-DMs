@@ -15,6 +15,8 @@ import { MenuDetails } from "./MenuDetails";
 import { ClosePaneButton } from "./ClosePaneButton";
 import { OverlayPortal } from "./OverlayPortal";
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
+import { MessageMutationEditor, MessageMutationMenu } from "./MessageMutation";
+import type { MessageMutationAction } from "@/lib/message-mutations";
 import { InlineVideoPlayer } from "./InlineVideoPlayer";
 import { isGifMedia } from "@/lib/gif-media";
 import { canAutoLoadMedia, visibleMediaQueue } from "@/lib/automatic-media";
@@ -489,6 +491,13 @@ export function ChatThread({
     () => initialCachedThread?.messages ?? []
   );
   const [loading, setLoading] = useState(!initialCachedThread);
+  const [messageMutation, setMessageMutation] = useState<{ id: string; action: MessageMutationAction } | null>(null);
+  useEffect(() => { setMessageMutation(null); }, [conversation.id]);
+  function closeMessageMutation() {
+    const id = messageMutation?.id;
+    setMessageMutation(null);
+    requestAnimationFrame(() => { (id && document.getElementById(`message-menu-${id}`) || textareaRef.current)?.focus(); });
+  }
   const [hasMore, setHasMore] = useState(initialCachedThread?.hasMore ?? false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -3237,14 +3246,15 @@ export function ChatThread({
                     ) : (
                       <div className="w-10 shrink-0" aria-hidden="true" />
                     ))}
-                  {!inbound && (
+                  {!inbound && !m.deletedAt && (
                     <MenuDetails className="message-actions">
-                      <summary aria-label={`Message actions for ${clockTime(m.createdAt)}`} title="Message actions" className="message-actions-trigger list-none [&::-webkit-details-marker]:hidden"><MoreIcon className="h-4 w-4" /></summary>
+                      <summary id={`message-menu-${m.id}`} aria-label={`Message actions for ${clockTime(m.createdAt)}`} title="Message actions" className="message-actions-trigger list-none [&::-webkit-details-marker]:hidden"><MoreIcon className="h-4 w-4" /></summary>
                       <div className="workspace-menu absolute bottom-full left-0 z-30 mb-1 flex items-center p-1">
 
                     <ReactionAction message={m} align="right" />
                     {((["telegram", "whatsapp"] as string[]).includes(conversation.platform) || discordBotChat) && <button data-close-menu onClick={() => { setReplyingTo(m); textareaRef.current?.focus(); }} title="Reply" className="rounded-full p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-700"><ReplyIcon className="h-4 w-4" /></button>}
                     <PinAction message={m} />
+                    {!readOnly && <MessageMutationMenu conversation={conversation} message={m} onSelect={action => setMessageMutation({ id: m.id, action })} />}
                     <button data-close-menu onClick={() => setForwardMsg(m)} title="Forward" className="rounded-full p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-700">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                         <polyline points="15 17 20 12 15 7" />
@@ -3525,8 +3535,15 @@ export function ChatThread({
                       </div>
                     )}
                   </div>
+                    {!readOnly && messageMutation?.id === m.id && !m.deletedAt && <MessageMutationEditor key={`${conversation.id}:${m.id}:${messageMutation.action}`}
+                      conversation={conversation} message={m} action={messageMutation.action}
+                      onClose={closeMessageMutation} onSaved={updated => {
+                        setMessages(current => mergeMessageWindow(current, [updated]));
+                        if (replyingTo?.id === updated.id) setReplyingTo(updated.deletedAt ? null : updated);
+                      }} />}
+                    {m.mutationState && <p role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">{m.mutationState === "pending" ? "Change awaiting confirmation…" : "Change unconfirmed — check the native app. No automatic retry."}</p>}
                     <div
-                      className={`${showTimestamp ? `message-meta mt-1 text-xs tabular-nums ${!conversation.isGroup && inbound ? "text-left" : "text-right"}` : "sr-only"} ${
+                      className={`${showTimestamp || m.editedAt || m.deletedAt ? `message-meta mt-1 text-xs tabular-nums ${!conversation.isGroup && inbound ? "text-left" : "text-right"}` : "sr-only"} ${
                         m.direction === "out"
                           ? deliveryStatus === "failed"
                             ? "text-red-700 dark:text-red-300"
@@ -3544,6 +3561,7 @@ export function ChatThread({
                       }
                     >
                       <time dateTime={m.createdAt}>{clockTime(m.createdAt)}</time>
+                      {m.editedAt && !m.deletedAt && <span title={new Date(m.editedAt).toLocaleString()}> · Edited</span>}
                       {!conversation.isGroup && (deliveryStatus === "sending" || deliveryStatus === "pending") && (
                         <span> · Sending…</span>
                       )}

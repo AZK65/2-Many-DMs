@@ -1729,6 +1729,39 @@ export class WhatsAppAdapter implements Adapter {
     };
   }
 
+  private async mutationTarget(chatExternalId: string, messageExternalId: string) {
+    await this.ensureReady();
+    const nativeId = messageExternalId.replace(/^whatsapp:/, "");
+    const message = await this.client.getMessageById(nativeId);
+    if (!message?.fromMe || message.to !== chatExternalId || message.id._serialized !== nativeId) {
+      throw new Error("WhatsApp could not verify your original message in this chat.");
+    }
+    return message;
+  }
+
+  async editMessage(chatExternalId: string, messageExternalId: string, body: string): Promise<void> {
+    const message = await this.mutationTarget(chatExternalId, messageExternalId);
+    const edited = await message.edit(body);
+    if (!edited || edited.body !== body) throw new Error("WhatsApp did not accept this edit. Its edit window may have expired.");
+  }
+
+  async deleteMessage(chatExternalId: string, messageExternalId: string): Promise<void> {
+    const message = await this.mutationTarget(chatExternalId, messageExternalId);
+    // The library's delete(true) silently falls back to deleting only locally
+    // when revocation is unavailable. Never claim 'for everyone' in that case.
+    await this.client.pupPage!.evaluate(async (nativeId: string) => {
+      const w = window as any;
+      const msg = w.Store.Msg.get(nativeId) || (await w.Store.Msg.getMessagesById([nativeId]))?.messages?.[0];
+      if (!msg?.id?.fromMe || !w.Store.MsgActionChecks.canSenderRevokeMsg(msg)) {
+        throw new Error("WhatsApp no longer allows deleting this message for everyone.");
+      }
+      const chat = w.Store.Chat.get(msg.id.remote) || await w.Store.Chat.find(msg.id.remote);
+      await (w.compareWwebVersions(w.Debug.VERSION, ">=", "2.3000.0")
+        ? w.Store.Cmd.sendRevokeMsgs(chat, { list: [msg], type: "message" }, { clearMedia: true })
+        : w.Store.Cmd.sendRevokeMsgs(chat, [msg], { clearMedia: true, type: "Sender" }));
+    }, message.id._serialized);
+  }
+
   async react(
     _chatExternalId: string,
     messageExternalId: string,

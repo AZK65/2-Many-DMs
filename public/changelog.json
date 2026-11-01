@@ -1,6 +1,18 @@
 {
-  "current": "0.6.4",
+  "current": "0.6.5",
   "entries": [
+    {
+      "version": "0.6.5",
+      "date": "2026-11-01",
+      "title": "Message controls and protected links",
+      "notes": [
+        "Edit your sent text messages and delete your own messages for everyone on Telegram, WhatsApp, and official Discord bot connections, subject to platform permissions and time limits.",
+        "Message actions live in the existing menu. Edit inline without losing your reply draft; deletion asks for confirmation first.",
+        "Personal Discord search connections remain read-only. X and email do not offer native editing or deletion in this release.",
+        "URLs and email addresses are protected during translation. Link-only messages bypass translation, and unsafe translation results are blocked before sending.",
+        "Confirmed changes survive history refreshes. Uncertain platform actions are flagged and never automatically retried."
+      ]
+    },
     {
       "version": "0.6.4",
       "date": "2026-11-01",

@@ -19,6 +19,8 @@ export function mergeMessageWindow(current: MessageDTO[], incoming: MessageDTO[]
   for (const candidate of [...current, ...incoming]) {
     const previous = rows.get(candidate.id);
     let next = previous ? mergeDelivery(previous, candidate) : candidate;
+    if (previous && (previous.deletedAt ||
+        (Date.parse(previous.editedAt || "") || 0) > (Date.parse(candidate.editedAt || "") || 0))) next = previous;
     // A response started before preview promotion can finish after it. Never
     // downgrade the SAME row from a verified message back to a clipped snapshot.
     if (previous && isNativeXMessageKey(previous.externalKey) && candidate.externalKey?.startsWith("x:preview:")) {

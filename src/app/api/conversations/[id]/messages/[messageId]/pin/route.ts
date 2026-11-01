@@ -10,7 +10,7 @@ async function updatePin(
 ) {
   await prismaReady;
   const message = await prisma.message.findFirst({
-    where: { id: messageId, conversationId },
+    where: { id: messageId, conversationId, deletedAt: null },
     select: { id: true },
   });
   if (!message) {
