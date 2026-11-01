@@ -1,4 +1,8 @@
 export type MessageMutationAction = "edit" | "delete";
+/** Only throw before any native commit was attempted. Safe to release the claim. */
+export class MessageMutationRejected extends Error {}
+export const isNativeXMutationKey = (key: string | null | undefined) =>
+  /^x:(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|\d{10,25})$/i.test(key || "");
 type Target = {
   direction: string; externalKey?: string | null; body: string;
   createdAt: string | Date; mediaType?: string | null; deliveryStatus?: string | null;
@@ -9,11 +13,12 @@ type Target = {
  * the platform logo: personal Discord and X browser sessions are different
  * from official bot/API connections. */
 export function messageMutationPolicy(platform: string, driver: string | null | undefined, message: Target, now = Date.now()) {
-  const supported = platform === "telegram" || platform === "whatsapp" || (platform === "discord" && driver === "bot");
-  const maxLength = platform === "discord" ? 2000 : platform === "telegram" ? 4096 : 65536;
+  const supported = platform === "telegram" || platform === "whatsapp" || (platform === "discord" && driver === "bot") || (platform === "x" && driver === "browser");
+  const maxLength = platform === "discord" ? 2000 : platform === "telegram" ? 4096 : platform === "x" ? 10000 : 65536;
   const age = now - new Date(message.createdAt).getTime();
   const ready = supported && message.direction === "out" && !!message.externalKey &&
     !message.externalKey.includes(":pending:") && !message.externalKey.includes(":preview:") &&
+    (platform !== "x" || isNativeXMutationKey(message.externalKey)) &&
     (!message.deliveryStatus || message.deliveryStatus === "sent") && !message.deletedAt && !message.mutationState &&
     Number.isFinite(age) && age >= -60_000;
   return {

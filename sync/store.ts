@@ -368,6 +368,13 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
         orderBy: { createdAt: "desc" },
         select: { id: true, externalKey: true, deliveryStatus: true, direction: true, body: true, createdAt: true, mediaType: true },
       });
+      // After a native edit/delete, X can keep emitting the old inbox snippet.
+      // It has no native ID, so it cannot resurrect text we intentionally changed.
+      // New native-ID messages still sync normally; pending sends retain their
+      // receipt path. The connector continues scheduling full-history repairs.
+      if (m.direction === "out" && !latest?.externalKey?.includes(":pending:") &&
+          await prisma.message.findFirst({ where: { conversationId: conversation.id,
+            OR: [{ editedAt: { not: null } }, { deletedAt: { not: null } }, { mutationState: { not: null } }] }, select: { id: true } })) return null;
       if (
         latest?.direction === m.direction &&
         (xPreviewMatchesText(m.body, latest.body) || Boolean(latest.mediaType && X_MEDIA_PREVIEWS[latest.mediaType]?.includes(m.body.trim()))) &&

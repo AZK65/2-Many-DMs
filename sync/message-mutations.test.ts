@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { MessageMutations, type MutationInput } from "./message-mutations";
 import type { Adapter, InboundMessage } from "./adapters/types";
+import { MessageMutationRejected } from "../src/lib/message-mutations";
 
 test("native mutations are account-scoped, idempotent, conflict-safe and survive history replay", async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "message-actions-test-"));
@@ -73,6 +74,39 @@ test("native mutations are account-scoped, idempotent, conflict-safe and survive
     const restarted = new MessageMutations(prisma, () => adapter, (_adapter, task) => task());
     await assert.rejects(restarted.execute(pending), /unconfirmed/);
     assert.equal(calls, failedCalls, "worker restart never replays uncertain actions");
+
+    const xAccount = await prisma.account.create({ data: { platform: "x", driver: "browser", userId: user.id } });
+    const xInbound: InboundMessage = { ...inbound, platform: "x", accountId: xAccount.id, chatExternalId: "111-222",
+      messageExternalId: "x:00000000-0000-4000-8000-000000000001", contact: { externalKey: "x:fixture-person", name: "Fixture Person", handle: "fixture-person" } };
+    await persistInbound(xInbound);
+    const xMessage = await prisma.message.findUniqueOrThrow({ where: { externalKey: xInbound.messageExternalId } });
+    let rejectsSafely = true, xCalls = 0;
+    const xAdapter = { platform: "x", getStatus: () => ({ state: "ready", platform: "x" }),
+      editMessage: async (chat: string, key: string, _body: string, context?: { expectedBody: string }) => {
+        assert.equal(chat, "111-222"); assert.equal(key, xInbound.messageExternalId);
+        assert.equal(context?.expectedBody, xMessage.body);
+        if (rejectsSafely) throw new MessageMutationRejected("X does not offer Edit message");
+        xCalls++;
+      }, deleteMessage: async () => { xCalls++; },
+    } as unknown as Adapter;
+    const xService = new MessageMutations(prisma, id => id === xAccount.id ? xAdapter : undefined, (_adapter, task) => task());
+    const xInput = { ...input, conversationId: xMessage.conversationId, messageId: xMessage.id, requestId: "x-action-1" };
+    await assert.rejects(xService.execute(xInput), /does not offer/);
+    const rejected = await prisma.message.findUniqueOrThrow({ where: { id: xMessage.id } });
+    assert.equal(rejected.mutationState, null); assert.equal(rejected.mutationRequestId, null);
+    rejectsSafely = false;
+    await xService.execute(xInput);
+    assert.equal(xCalls, 1);
+    await persistInbound({ ...xInbound, messageExternalId: "x:preview:old-outgoing", timestamp: new Date(Date.now() + 1000) });
+    assert.equal(await prisma.message.count({ where: { conversationId: xMessage.conversationId } }), 1, "stale preview cannot recreate edited content");
+    await persistInbound({ ...xInbound, messageExternalId: "x:00000000-0000-4000-8000-000000000002", timestamp: new Date(Date.now() + 2000) });
+    assert.equal(await prisma.message.count({ where: { conversationId: xMessage.conversationId } }), 2, "real repeated messages with new IDs remain intact");
+    const xEdited = await prisma.message.findUniqueOrThrow({ where: { id: xMessage.id } });
+    await xService.execute({ ...xInput, requestId: "x-action-2", action: "delete", expectedBody: xEdited.body, expectedEditedAt: xEdited.editedAt!.toISOString() });
+    await persistInbound(xInbound);
+    await persistInbound({ ...xInbound, messageExternalId: "x:preview:deleted-outgoing" });
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: xMessage.id } })).body, "Message deleted");
+    assert.equal(await prisma.message.count({ where: { conversationId: xMessage.conversationId } }), 2, "deleted messages do not reappear as native or preview copies");
   } finally {
     await store?.prisma.$disconnect();
     process.env.DATABASE_URL = previousUrl;

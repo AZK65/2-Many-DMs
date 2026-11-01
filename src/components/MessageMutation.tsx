@@ -46,7 +46,7 @@ export function MessageMutationEditor({ conversation, message, action, onClose, 
         method: editing ? "PATCH" : "DELETE", headers: { "content-type": "application/json", "x-omni-message-action": "1" },
         body: JSON.stringify({ requestId: requestId.current, expectedBody: original.current.body,
           expectedEditedAt: original.current.editedAt || null, body, confirmDelete: !editing }),
-        signal: AbortSignal.timeout(35_000),
+        signal: AbortSignal.timeout(95_000),
       });
       const result = await response.json();
       if (!response.ok || !result.message) throw new Error(result.error || "Could not confirm the action. Check the native app.");
@@ -67,6 +67,9 @@ export function MessageMutationEditor({ conversation, message, action, onClose, 
     <p className="mb-3 text-xs leading-5 text-slate-500 dark:text-neutral-400">{editing
       ? "Recipients will see exactly this text. Edits are not automatically translated."
       : "This removes your message from the platform chat for everyone. People may already have read or saved it. This cannot be undone."}</p>
+    {conversation.platform === "x" && <p className="mb-3 text-xs leading-5 text-slate-500 dark:text-neutral-400">{editing
+      ? "X must offer Edit message for this message. Its edit limits still apply."
+      : "Requires X Chat’s Delete for all option. We never substitute Delete for me."}</p>}
     {editing && <AutoGrowTextarea ref={textarea} value={body} onChange={event => setBody(event.target.value)} disabled={busy}
       aria-label="Edited message" maxLength={policy.maxLength} minRows={2}
       className="resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-accent focus:ring-1 focus:ring-accent disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-900 dark:text-white" />}

@@ -64,6 +64,27 @@ function connectorHarness() {
   return { adapter, pages };
 }
 
+test("X message changes and sends share one ordered queue, including failed actions", async () => {
+  const { adapter } = connectorHarness();
+  adapter.scheduleSendPagePark = () => {};
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const order: string[] = [];
+  adapter.performSend = async () => { order.push("send start"); await wait; order.push("send end"); return { id: "fixture" }; };
+  adapter.openGeneralConversation = async () => { order.push("mutation start"); throw new Error("Synthetic preflight rejection"); };
+  const send = adapter.send("111-222", "Fixture");
+  const mutation = adapter.editMessage("111-222", "x:00000000-0000-4000-8000-000000000001", "Changed", { expectedBody: "Fixture" });
+  const rejected = assert.rejects(mutation, /Synthetic preflight rejection/);
+  await Promise.resolve();
+  assert.deepEqual(order, ["send start"]);
+  assert.equal(adapter.outboundPending, 2);
+  release(); await send; await rejected;
+  assert.deepEqual(order, ["send start", "send end", "mutation start"]);
+  assert.equal(adapter.outboundPending, 0);
+  await adapter.send("111-222", "Next fixture");
+  assert.equal(order.at(-1), "send end", "a rejected edit must not jam subsequent sends");
+});
+
 test("unchanged X previews get a daily history audit without duplicate jobs or bypassing cooldowns", () => {
   const { adapter } = connectorHarness();
   adapter.scheduleAutomaticRepair = () => {};

@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type { Adapter } from "./adapters/types";
-import { messageMutationPolicy, type MessageMutationAction } from "../src/lib/message-mutations";
+import { messageMutationPolicy, MessageMutationRejected, type MessageMutationAction } from "../src/lib/message-mutations";
 
 export type MutationInput = { conversationId: string; messageId: string; userId: string; requestId: string;
   action: MessageMutationAction; expectedBody: string; expectedEditedAt: string | null; body?: string };
@@ -50,8 +50,8 @@ export class MessageMutations {
     if (claimed.count !== 1) throw new Error("Another action is already changing this message. Wait for it to finish.");
     try {
       await this.withConnector(adapter, () => input.action === "edit"
-        ? adapter.editMessage!(conversation.externalId!, message.externalKey!, input.body!)
-        : adapter.deleteMessage!(conversation.externalId!, message.externalKey!));
+        ? adapter.editMessage!(conversation.externalId!, message.externalKey!, input.body!, { expectedBody: message.body })
+        : adapter.deleteMessage!(conversation.externalId!, message.externalKey!, { expectedBody: message.body }));
       const deleted = input.action === "delete";
       await this.db.$transaction(async tx => {
         await tx.message.update({ where: { id: message.id }, data: {
@@ -73,6 +73,11 @@ export class MessageMutations {
       });
       return this.snapshot(message.id);
     } catch (error) {
+      if (error instanceof MessageMutationRejected) {
+        await this.db.message.updateMany({ where: { id: message.id, mutationRequestId: input.requestId, mutationState: "pending" },
+          data: { mutationState: null, mutationRequestId: null } });
+        throw error;
+      }
       // A transport failure is not proof that the platform rejected the change.
       // Do not replay it automatically, or claim a local-only delete was remote.
       await this.db.message.updateMany({ where: { id: message.id, mutationRequestId: input.requestId, mutationState: "pending" },

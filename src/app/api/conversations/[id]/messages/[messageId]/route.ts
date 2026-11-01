@@ -20,7 +20,7 @@ async function mutate(request: Request, params: { id: string; messageId: string 
   if (!message) return NextResponse.json({ error: "Message not found in this workspace." }, { status: 404 });
   try {
     const response = await fetch(`${process.env.SYNC_CONTROL_URL || "http://localhost:4001"}/messages/mutate`, {
-      method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(30_000),
+      method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({ action, conversationId: params.id, messageId: params.messageId, userId: user.id,
         requestId: input.requestId, expectedBody: input.expectedBody, expectedEditedAt: input.expectedEditedAt, body: input.body }),
     });

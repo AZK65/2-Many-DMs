@@ -20,6 +20,8 @@ import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapsh
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
 import { normalizeXMessageText } from "../x-message-text";
+import { mutateXMessage } from "../x-message-mutations";
+import { isNativeXMutationKey, MessageMutationRejected, type MessageMutationAction } from "../../src/lib/message-mutations";
 import type {
   Adapter,
   AdapterStatus,
@@ -2079,6 +2081,38 @@ export class XAdapter implements Adapter {
     await this.requestHistory(chatExternalId, "", 0, 1, { inboxCategory: conversation?.inboxCategory === "spam" ? "spam" : "general", targetMessageId: id });
   }
 
+  async editMessage(chat: string, key: string, body: string, context?: { expectedBody: string }): Promise<void> {
+    return this.mutateMessage(chat, key, "edit", context, body);
+  }
+
+  async deleteMessage(chat: string, key: string, context?: { expectedBody: string }): Promise<void> {
+    return this.mutateMessage(chat, key, "delete", context);
+  }
+
+  private mutateMessage(chat: string, key: string, action: MessageMutationAction, context?: { expectedBody: string }, body?: string): Promise<void> {
+    if (!context || typeof context.expectedBody !== "string") return Promise.reject(new MessageMutationRejected("The original X message is required."));
+    if (!/^[\w-]{1,150}$/.test(chat) || !isNativeXMutationKey(key)) return Promise.reject(new MessageMutationRejected("This message has no verified native X identity."));
+    const queuedAt = Date.now();
+    return this.enqueueOutbound(async () => {
+      // Never execute a destructive action long after its requesting UI timed out.
+      if (Date.now() - queuedAt > 15000) throw new MessageMutationRejected("X was busy sending another message. Please try again.");
+      try { await this.ensureReady(); } catch (error) { throw new MessageMutationRejected(String(error).replace(/^Error: /, "")); }
+      const page = this.sendPage!;
+      const run = ++this.pageRun;
+      this.busy = true;
+      try {
+        // Mutation never accepts a request or chooses a different account.
+        try { await this.openGeneralConversation(page, chat, false); }
+        catch (error) { throw new MessageMutationRejected(`X could not open this exact chat. ${String(error).replace(/^Error: /, "")}`); }
+        await mutateXMessage(page, { chat, key, action, body, expectedBody: context.expectedBody }, () => {
+          this.assertNotCoolingDown();
+          if (Date.now() - queuedAt > 60000) throw new Error("X took too long to prepare or confirm this action. Check the native chat.");
+          if (this.stopping || run !== this.pageRun) throw new Error("X connection changed during the action.");
+        });
+      } finally { if (run === this.pageRun) this.busy = false; }
+    });
+  }
+
   async send(
     chatExternalId: string,
     body: string,
@@ -2087,25 +2121,21 @@ export class XAdapter implements Adapter {
     _replyToExternalId?: string,
     context?: OutboundSendContext
   ): Promise<SentMessage> {
+    const startedAt = Date.now();
+    return this.enqueueOutbound(() => this.performSend(chatExternalId, body, media, context)).then(sent => {
+      console.log(`[x] sent ${chatExternalId} in ${Date.now() - startedAt}ms`);
+      return sent;
+    });
+  }
+
+  private enqueueOutbound<T>(task: () => Promise<T>): Promise<T> {
     if (this.sendPageIdleTimer) {
       clearTimeout(this.sendPageIdleTimer);
       this.sendPageIdleTimer = undefined;
     }
-    const queuedAt = Date.now();
     this.outboundPending += 1;
     const operation = this.outboundQueue
-      .then(() => this.performSend(chatExternalId, body, media, context))
-      .then((sent) => {
-        console.log(`[x] sent ${chatExternalId} in ${Date.now() - queuedAt}ms`);
-        return sent;
-      })
-      .catch((error) => {
-        console.error(
-          `[x] send ${chatExternalId} failed after ${Date.now() - queuedAt}ms:`,
-          error
-        );
-        throw error;
-      })
+      .then(task)
       .finally(async () => {
         this.outboundPending = Math.max(0, this.outboundPending - 1);
         if (this.outboundPending === 0) {

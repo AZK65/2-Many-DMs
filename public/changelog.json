@@ -1,6 +1,18 @@
 {
-  "current": "0.6.5",
+  "current": "0.6.6",
   "entries": [
+    {
+      "version": "0.6.6",
+      "date": "2026-11-01",
+      "title": "Native X message controls",
+      "notes": [
+        "Edit your verified sent text messages through the X browser connection, directly from the existing message menu.",
+        "Delete your own messages for everyone when X Chat offers Delete for all. It never falls back to deleting only your copy.",
+        "Actions verify the exact conversation, native message ID and sender, then reload X to check the result before showing success.",
+        "X permission and edit limits still apply. Unverified previews must load their full messages first, and uncertain actions are never automatically retried.",
+        "Sending and message changes share one queue so they cannot interfere with each other. Existing drafts and translation links remain protected."
+      ]
+    },
     {
       "version": "0.6.5",
       "date": "2026-11-01",
