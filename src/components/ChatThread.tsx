@@ -12,6 +12,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { MenuDetails } from "./MenuDetails";
+import { ClosePaneButton } from "./ClosePaneButton";
 import { OverlayPortal } from "./OverlayPortal";
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { InlineVideoPlayer } from "./InlineVideoPlayer";
@@ -664,13 +665,22 @@ export function ChatThread({
     if (saved !== null) setAutoCorrectEnabled(saved !== "false");
   }, []);
 
+  const pendingDraftRef = useRef({ id: conversation.id, text: draft });
   useEffect(() => {
+    pendingDraftRef.current = { id: conversation.id, text: draft };
     const timer = window.setTimeout(
       () => saveConversationDraft(conversation.id, draft),
       300
     );
     return () => window.clearTimeout(timer);
   }, [conversation.id, draft]);
+
+  // Closing a pane can unmount it before the debounce fires. Flush the latest
+  // unsent text so reopening the conversation never loses that last edit.
+  useEffect(() => () => {
+    const pending = pendingDraftRef.current;
+    saveConversationDraft(pending.id, pending.text);
+  }, []);
   const deliveryRefreshTimersRef = useRef(new Set<number>());
   const deliveryMessagesRef = useRef(messages);
   deliveryMessagesRef.current = messages;
@@ -2806,7 +2816,7 @@ export function ChatThread({
                       <summary aria-label="Conversation options" className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:hover:bg-neutral-800 [&::-webkit-details-marker]:hidden"><MoreIcon className="h-4 w-4" /></summary>
           <div className="thread-options-menu workspace-menu absolute right-0 top-full z-40 mt-2 flex w-64 flex-col gap-1 p-2">
             <button type="button" data-close-menu onClick={e => { onOpenContact(); }} className="workspace-menu-item text-left">Contact details</button>
-        {multiViewAction && (
+        {multiViewAction && multiViewAction.kind !== "close" && (
           <button
             type="button"
             onClick={multiViewAction.onClick}
@@ -2818,11 +2828,7 @@ export function ChatThread({
                 : "border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
             }`}
           >
-            {multiViewAction.kind === "close" ? (
-              <CloseIcon className="h-4 w-4" />
-            ) : (
-              <PinIcon className="h-4 w-4" />
-            )}
+            <PinIcon className="h-4 w-4" />
             <span className={multiViewCompact ? "hidden 2xl:inline" : "hidden xl:inline"}>
               {multiViewAction.label}
             </span>
@@ -3018,6 +3024,9 @@ export function ChatThread({
         )}
           </div>
         </MenuDetails>
+        {multiViewAction?.kind === "close" && (
+          <ClosePaneButton onClick={multiViewAction.onClick} className="hidden lg:inline-flex" />
+        )}
       </div>
 
       {/* Forum topic tabs */}

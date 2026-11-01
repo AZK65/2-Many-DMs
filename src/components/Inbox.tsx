@@ -28,6 +28,7 @@ import {
   type TaggedPersonTarget,
 } from "./ChatThread";
 import { ContactPanel } from "./ContactPanel";
+import { ClosePaneButton } from "./ClosePaneButton";
 import { PlatformGlyph } from "./PlatformIcon";
 import { ChatTypeIcon } from "./ChatTypeIcon";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -346,6 +347,15 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
   const replyQueueReleaseTimersRef = useRef<Map<string, number>>(new Map());
   const heldQueueSortAtRef = useRef<Map<string, number>>(new Map());
   const selectionRequestRef = useRef(0);
+  const conversationWorkspaceRef = useRef<HTMLElement>(null);
+  const restoreWorkspaceFocusRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (restoreWorkspaceFocusRef.current && !multiViewPinnedId) {
+      restoreWorkspaceFocusRef.current = false;
+      conversationWorkspaceRef.current?.focus({ preventScroll: true });
+    }
+  }, [multiViewPinnedId]);
 
   const conversationListSortAt = useCallback(
     (conversation: ConversationDTO) =>
@@ -1045,6 +1055,23 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
     setMultiViewPinnedId(null);
     setMobileMultiPane("browse");
     if (fallbackId) setSelectedId(fallbackId);
+  }
+
+  function closeSecondPane() {
+    if (!multiViewPinnedId) return;
+    // A chat prefetch may still be in flight. It must not replace the pinned
+    // conversation after the user has explicitly closed the second pane.
+    selectionRequestRef.current += 1;
+    if (selectedId !== multiViewPinnedId) releaseConversationFromQueue(selectedId);
+    setSwitchingToId(null);
+    setFocusMessageId(null);
+    setShowContact(false);
+    setContactConversationId(null);
+    setSelectedId(multiViewPinnedId);
+    setMultiViewPinnedId(null);
+    setMobileMultiPane("browse");
+    setMobileThreadOpen(true);
+    restoreWorkspaceFocusRef.current = true;
   }
 
   function addConversationToMultiView(id: string) {
@@ -2780,7 +2807,10 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
       {/* Thread workspace */}
       </div>
       <main id="conversation-workspace"
-        className={`${mobileThreadOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col overflow-hidden`}
+        ref={conversationWorkspaceRef}
+        tabIndex={-1}
+        aria-label="Conversation"
+        className={`${mobileThreadOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col overflow-hidden focus:outline-none`}
       >
         {multiViewPinned ? (
           <>
@@ -2810,6 +2840,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
               >
                 {selected ? selected.contact.name : "Second chat"}
               </button>
+              <ClosePaneButton onClick={closeSecondPane} />
             </div>
 
             <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
@@ -2885,29 +2916,31 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
                       setShowContact(false);
                     }}
                     multiViewAction={{
-                      label: "Close pane",
+                      label: "Close second pane",
                       kind: "close",
-                      onClick: () => {
-                        releaseConversationFromQueue(selected.id);
-                        setSelectedId(null);
-                        setMobileMultiPane("pinned");
-                      },
+                      onClick: closeSecondPane,
                     }}
                     multiViewCompact
                   />
                 ) : (
-                  <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                    <span className="grid h-10 w-10 place-items-center rounded-lg bg-slate-100 text-slate-400 dark:bg-neutral-800 dark:text-neutral-500">
-                      <PlusIcon className="h-4 w-4" />
-                    </span>
-                    <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-neutral-200">
-                      Choose a second chat
-                    </p>
-                    <p className="mt-1 max-w-xs text-xs leading-5 text-slate-400 dark:text-neutral-500">
-                      Select any conversation from the inbox. Your pinned chat
-                      stays open and keeps its place.
-                    </p>
-                  </div>
+                  <>
+                    <div className="thread-header hidden lg:flex">
+                      <span className="flex-1 text-sm font-medium text-slate-500 dark:text-neutral-400">Second chat</span>
+                      <ClosePaneButton onClick={closeSecondPane} />
+                    </div>
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-slate-100 text-slate-400 dark:bg-neutral-800 dark:text-neutral-500">
+                        <PlusIcon className="h-4 w-4" />
+                      </span>
+                      <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-neutral-200">
+                        Choose a second chat
+                      </p>
+                      <p className="mt-1 max-w-xs text-xs leading-5 text-slate-400 dark:text-neutral-500">
+                        Select any conversation from the inbox. Your pinned chat
+                        stays open and keeps its place.
+                      </p>
+                    </div>
+                  </>
                 )}
               </section>
             </div>
