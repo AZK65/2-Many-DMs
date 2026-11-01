@@ -1,6 +1,19 @@
 {
-  "current": "0.6.2",
+  "current": "0.6.3",
   "entries": [
+    {
+      "version": "0.6.3",
+      "date": "2026-11-01",
+      "title": "Reliable X chats and more workspace control",
+      "notes": [
+        "X inbox previews resolve to full messages without duplicate bubbles. Delayed history appears in chronological order.",
+        "Genuine repeated messages stay intact, and search results still open the full original message.",
+        "Close the second chat pane directly without losing your other chat or its draft.",
+        "Create separate workspaces with their own account sign-ins, then rename or remove them from the workspace menu.",
+        "Discover related chats through shared members, with manual linking when you need it.",
+        "A larger update window puts release notes up front, with installation progress and clear close controls."
+      ]
+    },
     {
       "version": "0.6.2",
       "date": "2026-10-29",

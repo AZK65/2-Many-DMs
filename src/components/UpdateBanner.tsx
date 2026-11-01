@@ -1,281 +1,153 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type Entry = {
-  version: string;
-  sha?: string;
-  date?: string;
-  title?: string;
-  notes?: string[];
-};
-type Check = {
-  current: string;
-  latest: string;
-  currentSha?: string | null;
-  latestSha?: string | null;
-  hasUpdate: boolean;
-  behindCount?: number;
-  branch?: string;
-  canApply?: boolean;
-  blockedReason?: string | null;
-  entries: Entry[];
-  repoUrl?: string;
-  selfUpdate?: boolean;
-  manualCommands?: string[];
-};
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
+import { UpdateDialog, type UpdateCheck } from "./UpdateDialog";
+import changelog from "../../public/changelog.json";
 
 export function UpdateBanner() {
-  const [data, setData] = useState<Check | null>(null);
-  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<UpdateCheck | null>(null);
   const [hidden, setHidden] = useState(true);
+  const [preview, setPreview] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [installed, setInstalled] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const applyingRef = useRef(false);
+  const mounted = useRef(true);
+  const timer = useRef<number | null>(null);
+  const dismissedRevision = useRef<string | null>(null);
 
   useEffect(() => {
+    mounted.current = true;
     let active = true;
-    const check = () =>
-      fetch("/api/updates/check", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((d: Check) => {
-          if (!active) return;
-          if (!d?.hasUpdate) {
-            setData(null);
-            setHidden(true);
-            return;
-          }
-          setData(d);
-          setHidden(localStorage.getItem("dismissedUpdate") === d.latest);
-        })
-        .catch(() => {});
+    let checking = false;
+    const isPreview = new URLSearchParams(window.location.search).get("previewUpdate") === "1";
+    if (isPreview) {
+      setPreview(true);
+      setData({ current: changelog.current, latest: changelog.current, hasUpdate: false,
+        canApply: false, selfUpdate: false, entries: changelog.entries.slice(0, 1) });
+      setHidden(false);
+    }
+    const check = async () => {
+      if (isPreview || applyingRef.current || checking) return;
+      checking = true;
+      try {
+        const response = await fetch("/api/updates/check", { cache: "no-store" });
+        if (!response.ok) return;
+        const result: UpdateCheck = await response.json();
+        if (!active || applyingRef.current) return;
+        if (!result?.hasUpdate) { setHidden(true); return; }
+        setData(result);
+        setInstalled(false);
+        setApplyMsg(null);
+        let dismissed = dismissedRevision.current;
+        try { dismissed ||= localStorage.getItem("dismissedUpdate"); } catch { /* storage may be disabled */ }
+        setHidden(dismissed === result.latest || dismissed === result.latestSha);
+      } catch { /* Offline checks must not interrupt the inbox. */ }
+      finally { checking = false; }
+    };
     void check();
     const interval = window.setInterval(check, 10 * 60 * 1000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void check();
-    };
+    const onVisibility = () => { if (document.visibilityState === "visible") void check(); };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       active = false;
+      mounted.current = false;
       window.clearInterval(interval);
+      if (timer.current !== null) window.clearTimeout(timer.current);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
-  if (!data || hidden) return null;
-
   function dismiss() {
-    localStorage.setItem("dismissedUpdate", data!.latest);
+    if (applyingRef.current) return;
+    if (!preview && data) {
+      dismissedRevision.current = data.latestSha || data.latest;
+      try { localStorage.setItem("dismissedUpdate", data.latestSha || data.latest); } catch { /* still dismiss this session */ }
+    }
+    if (preview) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("previewUpdate");
+      window.history.replaceState(window.history.state, "", url);
+    }
     setHidden(true);
   }
 
-  // Wait for the server to come back after its restart, then reload into the
-  // new build.
-  function waitForRestart() {
-    setApplyMsg("Restarting…");
-    const iv = setInterval(async () => {
-      try {
-        const r = await fetch("/api/updates/check", { cache: "no-store" });
-        if (r.ok) {
-          clearInterval(iv);
-          location.reload();
-        }
-      } catch {
-        /* still down */
-      }
-    }, 3000);
+  function schedule(callback: () => void, delay: number) {
+    if (!mounted.current) return;
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(callback, delay);
   }
 
-  function poll() {
-    const iv = setInterval(async () => {
-      let s: {
-        phase?: string;
-        error?: string | null;
-        done?: boolean;
-        restarting?: boolean;
-        restartRequired?: boolean;
-      } | null = null;
+  function finish(message: string) {
+    if (!mounted.current) return;
+    applyingRef.current = false;
+    setApplying(false);
+    setApplyMsg(message);
+  }
+
+  // A 200 response alone is not proof of restart: the old server can still
+  // answer while the build is finishing. Wait for the new process's idle state
+  // AND the exact revision the user approved.
+  function waitForRestart(expectedRevision: string, deadline = Date.now() + 4 * 60_000) {
+    if (!mounted.current) return;
+    setApplyMsg("Restarting the app…");
+    schedule(() => { void (async () => {
       try {
-        s = await fetch("/api/updates/apply", { cache: "no-store" }).then((r) =>
-          r.json()
-        );
-      } catch {
-        // request failed → the process is likely restarting after the build
-        clearInterval(iv);
-        waitForRestart();
-        return;
-      }
-      if (s?.error) {
-        clearInterval(iv);
-        setApplying(false);
-        setApplyMsg(`Update failed: ${s.error}`);
-        return;
-      }
-      if (s?.restartRequired) {
-        clearInterval(iv);
-        setApplying(false);
-        setApplyMsg("Installed. Restart OmniCRM and its sync worker to finish.");
-        return;
-      }
-      if (s?.done || s?.restarting) {
-        clearInterval(iv);
-        waitForRestart();
-        return;
-      }
-      setApplyMsg(`${s?.phase || "Working"}…`);
-    }, 2000);
+        const stateResponse = await fetch("/api/updates/apply", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        const state = stateResponse.ok ? await stateResponse.json() : null;
+        if (state?.phase === "idle") {
+          const checkResponse = await fetch("/api/updates/check", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+          const check = checkResponse.ok ? await checkResponse.json() : null;
+          if (mounted.current && check?.currentSha === expectedRevision) { window.location.reload(); return; }
+        }
+      } catch { /* A short outage is expected during restart. */ }
+      if (Date.now() >= deadline) { finish("The server has not returned yet. Reopen the app after it finishes restarting."); return; }
+      waitForRestart(expectedRevision, deadline);
+    })(); }, 3000);
+  }
+
+  function poll(expectedRevision: string, deadline = Date.now() + 20 * 60_000) {
+    schedule(() => { void (async () => {
+      try {
+        const response = await fetch("/api/updates/apply", { cache: "no-store", signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error("Update status is unavailable");
+        const state = await response.json();
+        if (!mounted.current) return;
+        if (state.error) { finish("Update failed: " + state.error); return; }
+        if (state.restartRequired) { setInstalled(true); finish("Installed. Restart the app and sync worker to finish."); return; }
+        if (state.done || state.restarting) { waitForRestart(expectedRevision); return; }
+        setApplyMsg((state.phase || "Working") + "…");
+      } catch { waitForRestart(expectedRevision); return; }
+      if (Date.now() >= deadline) { finish("The update is taking longer than expected. Check the server before trying again."); return; }
+      poll(expectedRevision, deadline);
+    })(); }, 2000);
   }
 
   async function pull() {
+    if (preview || installed || applyingRef.current || !data?.hasUpdate || !data.canApply || !data.selfUpdate || !data.latestSha) return;
+    const expectedRevision = data.latestSha;
+    applyingRef.current = true;
     setApplying(true);
-    setApplyMsg("Starting…");
-    let start: { started?: boolean; reason?: string; error?: string } | null =
-      null;
+    setApplyMsg("Starting the update…");
     try {
-      start = await fetch("/api/updates/apply", {
+      const response = await fetch("/api/updates/apply", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-omnicrm-update": "1",
-        },
-        body: JSON.stringify({ expectedRevision: data?.latestSha }),
-      }).then((r) => r.json());
-    } catch {
-      setApplying(false);
-      setApplyMsg("Couldn't reach the server.");
-      return;
-    }
-    if (!start?.started) {
-      setApplying(false);
-      setApplyMsg(
-        start?.reason === "self-update-disabled"
-          ? "One-click update is off — set ALLOW_SELF_UPDATE=1, or run the commands above."
-          : start?.error || "Couldn't start the update."
-      );
-      return;
-    }
-    poll();
+        headers: { "Content-Type": "application/json", "x-omnicrm-update": "1" },
+        body: JSON.stringify({ expectedRevision }),
+      });
+      const start = await response.json();
+      if (!mounted.current) return;
+      if (!response.ok || !start?.started) {
+        finish(start?.reason === "self-update-disabled"
+          ? "One-click installation is disabled. Use the manual installation steps."
+          : start?.error || "The update could not start.");
+        return;
+      }
+      poll(expectedRevision);
+    } catch { finish("Couldn’t reach the server. No update was confirmed."); }
   }
 
-  return (
-    <div className="fixed bottom-4 right-4 z-50 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
-      <div className="flex items-start gap-3 px-4 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent/20 text-base">
-          ✨
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold dark:text-neutral-100">
-            {data.behindCount || 1} {(data.behindCount || 1) === 1 ? "update" : "updates"} available
-          </div>
-          <div className="text-xs text-slate-500 dark:text-neutral-400">
-            {data.current} →{" "}
-            <b className="text-accent dark:text-accent">{data.latest}</b>
-            {data.branch ? ` · ${data.branch}` : ""}
-          </div>
-        </div>
-        <button
-          onClick={dismiss}
-          className="rounded p-1 text-slate-300 transition hover:text-slate-500 dark:text-neutral-600 dark:hover:text-neutral-400"
-          aria-label="Dismiss"
-        >
-          ✕
-        </button>
-      </div>
-
-      {open && (
-        <div className="max-h-64 overflow-y-auto border-t border-slate-100 px-4 py-3 dark:border-neutral-700/70">
-          {data.entries.map((e) => (
-            <div key={e.sha || e.version} className="mb-3 last:mb-0">
-              <div className="flex items-baseline gap-2">
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500 dark:bg-neutral-700 dark:text-neutral-300">
-                  {e.version}
-                </span>
-                {e.title && (
-                  <span className="text-xs text-slate-500 dark:text-neutral-400">
-                    {e.title}
-                  </span>
-                )}
-              </div>
-              <ul className="mt-1 space-y-0.5 pl-1">
-                {(e.notes || []).map((n, i) => (
-                  <li
-                    key={i}
-                    className="flex gap-1.5 text-xs text-slate-600 dark:text-neutral-300"
-                  >
-                    <span className="text-accent dark:text-accent">•</span>
-                    <span>{n}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          {data.blockedReason && (
-            <div className="mb-3 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-              {data.blockedReason}
-            </div>
-          )}
-
-          <div className="mt-2 rounded-lg bg-slate-50 p-2 dark:bg-neutral-900">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
-              To update
-            </div>
-            <code className="block whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-600 dark:text-neutral-300">
-              {(data.manualCommands || ["git pull --ff-only", "npm install", "npm run build"]).join("\n")}
-            </code>
-            <div className="mt-1 text-[10px] text-slate-400 dark:text-neutral-500">
-              then restart the app + sync worker.
-              {!data.selfUpdate && (
-                <span> One-click updates are available on localhost or with <code>ALLOW_SELF_UPDATE=1</code>.</span>
-              )}{" "}
-              {data.repoUrl && (
-                <a
-                  href={data.repoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-accent hover:underline dark:text-accent"
-                >
-                  View on GitHub →
-                </a>
-              )}
-            </div>
-          </div>
-          {applyMsg && (
-            <p className="mt-2 text-[11px] text-slate-500 dark:text-neutral-400">
-              {applyMsg}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-2.5 dark:border-neutral-700/70">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-        >
-          {open ? "Hide" : "What's new"}
-        </button>
-        <div className="flex-1" />
-        <button
-          onClick={dismiss}
-          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 dark:text-neutral-400 dark:hover:bg-neutral-700"
-        >
-          Not now
-        </button>
-        <button
-          onClick={() => {
-            setOpen(true);
-            if (data.selfUpdate && data.canApply) pull();
-          }}
-          disabled={applying}
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg transition hover:bg-accent disabled:opacity-60"
-        >
-          {applying
-            ? "Updating…"
-            : data.selfUpdate && data.canApply
-              ? "Update now"
-              : "View steps"}
-        </button>
-      </div>
-    </div>
-  );
+  return <AnimatePresence>{data && !hidden && <UpdateDialog key={preview ? "preview" : data.latestSha || data.latest}
+    data={data} preview={preview} applying={applying} installed={installed} message={applyMsg} onClose={dismiss} onUpdate={() => void pull()} />}</AnimatePresence>;
 }
