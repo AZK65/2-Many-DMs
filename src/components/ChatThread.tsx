@@ -22,6 +22,7 @@ import { groupPeopleLabel } from "@/lib/group-avatars";
 import { groupMessageSender, messageSenderKey } from "@/lib/message-sender";
 import { showDirectMessageTimestamp } from "@/lib/direct-message-layout";
 import { deliveryIds, mergeDelivery, mergeDeliveryReceipt, observedMessageIds, removeMissingMessages } from "@/lib/message-delivery";
+import { mergeMessageWindow, orderMessageWindow, projectMessageTimeline } from "@/lib/message-timeline";
 import {
   MEDIA_LABEL,
   type ConversationDTO,
@@ -400,64 +401,10 @@ type ThreadPage = { messages: MessageDTO[]; hasMore: boolean };
 const threadCache = new Map<string, ThreadPage>();
 const threadPrefetches = new Map<string, Promise<boolean>>();
 
-function sameMessage(left: MessageDTO, right: MessageDTO): boolean {
-  return (
-    left.id === right.id &&
-    left.externalKey === right.externalKey &&
-    left.body === right.body &&
-    left.originalBody === right.originalBody &&
-    left.translatedBody === right.translatedBody &&
-    left.translationSourceLanguage === right.translationSourceLanguage &&
-    left.translationTargetLanguage === right.translationTargetLanguage &&
-    left.createdAt === right.createdAt &&
-    left.deliveryStatus === right.deliveryStatus &&
-    left.deliveryError === right.deliveryError &&
-    left.direction === right.direction &&
-    left.mediaType === right.mediaType &&
-    left.mediaUrl === right.mediaUrl &&
-    left.mediaName === right.mediaName &&
-    left.mediaIsGif === right.mediaIsGif &&
-    left.pinnedAt === right.pinnedAt &&
-    left.replyToExternalKey === right.replyToExternalKey &&
-    left.replyPreview === right.replyPreview &&
-    left.replySender === right.replySender &&
-    left.senderContactId === right.senderContactId &&
-    left.senderHandle === right.senderHandle &&
-    left.senderExternalKey === right.senderExternalKey &&
-    left.senderName === right.senderName &&
-    left.senderAvatarUrl === right.senderAvatarUrl &&
-    JSON.stringify(left.senderTags || []) === JSON.stringify(right.senderTags || []) &&
-    JSON.stringify(left.reactions || []) === JSON.stringify(right.reactions || []) &&
-    JSON.stringify(left.mentionNames || {}) === JSON.stringify(right.mentionNames || {}) &&
-    JSON.stringify(left.mentionTargets || {}) === JSON.stringify(right.mentionTargets || {})
-  );
-}
-
-function mergeMessageWindow(
-  current: MessageDTO[],
-  incomingMessages: MessageDTO[]
-): MessageDTO[] {
-  const incoming = new Map(
-    incomingMessages.map((message) => [message.id, message] as const)
-  );
-  let changed = false;
-  const merged = current.map((message) => {
-    const candidate = incoming.get(message.id);
-    const next = candidate ? mergeDelivery(message, candidate) : undefined;
-    if (!next || sameMessage(message, next)) return message;
-    changed = true;
-    return next;
-  });
-  const ids = new Set(merged.map((message) => message.id));
-  const additions = incomingMessages.filter((message) => !ids.has(message.id));
-  if (additions.length) changed = true;
-  return changed ? [...merged, ...additions] : current;
-}
-
 function cacheThread(conversationId: string, page: ThreadPage): void {
   threadCache.delete(conversationId);
   threadCache.set(conversationId, {
-    messages: page.messages.slice(-150),
+    messages: mergeMessageWindow([], page.messages).slice(-150),
     hasMore: page.hasMore,
   });
   while (threadCache.size > THREAD_CACHE_LIMIT) {
@@ -1127,14 +1074,21 @@ export function ChatThread({
   }
 
   const caps = PLATFORM_ATTACHMENTS[conversation.platform];
+  const timeline = useMemo(
+    () => projectMessageTimeline(messages, conversation.platform),
+    [messages, conversation.platform],
+  );
+  const renderedFocusMessageId = activeFocusMessageId
+    ? timeline.aliases.get(activeFocusMessageId) ?? activeFocusMessageId
+    : null;
   const visibleMessages = useMemo(
     () =>
       compactMessageLimit && !showFullContext
-        ? messages.slice(-compactMessageLimit)
-        : messages,
-    [compactMessageLimit, messages, showFullContext]
+        ? timeline.messages.slice(-compactMessageLimit)
+        : timeline.messages,
+    [compactMessageLimit, timeline.messages, showFullContext]
   );
-  const compactHiddenCount = Math.max(0, messages.length - visibleMessages.length);
+  const compactHiddenCount = Math.max(0, timeline.messages.length - visibleMessages.length);
   const messagesByExternalKey = useMemo(
     () => new Map(messages.filter(message => message.externalKey).map(message => [message.externalKey, message])),
     [messages],
@@ -1630,10 +1584,10 @@ export function ChatThread({
           }
           setMessages((current) => {
             const receipts = new Map((data.deliveries || []).map(message => [message.id, message]));
-            return mergeMessageWindow(removeMissingMessages(current, data.missingObservedIds), data.messages).map(message => {
+            return orderMessageWindow(mergeMessageWindow(removeMissingMessages(current, data.missingObservedIds), data.messages).map(message => {
               const receipt = receipts.get(message.id);
               return receipt ? mergeDeliveryReceipt(message, receipt) : message;
-            });
+            }));
           });
           // A notification deep-link owns the scroll position. Do not let the
           // background poll pull the user back to the newest message while the
@@ -1657,9 +1611,9 @@ export function ChatThread({
   }, [conversation.id, focusMessageId]);
 
   useEffect(() => {
-    if (!activeFocusMessageId || loading) return;
+    if (!renderedFocusMessageId || loading) return;
     const message = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-message-id="${CSS.escape(activeFocusMessageId)}"]`,
+      `[data-message-id="${CSS.escape(renderedFocusMessageId)}"]`,
     );
     if (!message) return;
 
@@ -1675,7 +1629,7 @@ export function ChatThread({
       cancelAnimationFrame(frame);
       window.clearTimeout(settle);
     };
-  }, [activeFocusMessageId, loading, messages.length, replyFocus?.token]);
+  }, [renderedFocusMessageId, loading, visibleMessages.length, replyFocus?.token]);
 
   async function jumpToSearchMessage(id: string, signal: AbortSignal) {
     if (!messages.some((message) => message.id === id)) {
@@ -1730,7 +1684,7 @@ export function ChatThread({
   }
 
   async function loadOlder() {
-    const first = messages.find((m) => m.deliveryStatus !== "sending");
+    const first = orderMessageWindow(messages).find((m) => m.deliveryStatus !== "sending");
     if (!first || loadingOlder || !hasMore) return;
     setLoadingOlder(true);
     const el = scrollRef.current;
@@ -1738,7 +1692,7 @@ export function ChatThread({
     const data = await fetch(
       `/api/conversations/${conversation.id}/messages?before=${encodeURIComponent(first.createdAt)}&limit=${THREAD_PAGE_SIZE}`
     ).then((r) => r.json()) as { messages: MessageDTO[]; hasMore: boolean };
-    setMessages((current) => [...data.messages, ...current]);
+    setMessages((current) => mergeMessageWindow(current, data.messages));
     setHasMore(data.hasMore);
     setLoadingOlder(false);
     requestAnimationFrame(() => {
@@ -3201,7 +3155,7 @@ export function ChatThread({
               : m;
             const translationPending =
               translatingMessageId === m.id || autoTranslatingIds.has(m.id);
-            const focused = m.id === activeFocusMessageId;
+            const focused = m.id === renderedFocusMessageId;
             const showTimestamp = conversation.isGroup || showDirectMessageTimestamp({
               lastOfRun, focused, deliveryStatus, externalKey: m.externalKey,
             });

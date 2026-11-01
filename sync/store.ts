@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { InboundMessage, InboundReaction } from "./adapters/types";
 import { isPlaceholderIdentity, type WhatsAppIdentity } from "./whatsapp-identity";
-import { normalizeXMessageText, richerXMessageText, xPreviewMatchesText } from "./x-message-text";
+import { isNativeXMessageKey, normalizeXMessageText, richerXMessageText, xPreviewMatchesText } from "./x-message-text";
 import { telegramPlaceholderRepair } from "./telegram-message-content";
 
 const X_MEDIA_PREVIEWS: Record<string, string[]> = {
@@ -393,6 +393,24 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
           });
         }
         return null;
+      }
+      // A delayed inbox snapshot can arrive AFTER we replied. The newest row
+      // is then outbound, so the guard above cannot see the native inbound
+      // message it describes. Check the latest event in this direction too;
+      // never search past a different same-direction message or infer a send
+      // receipt here. Real repeats still arrive with distinct native IDs.
+      if (latest && latest.direction !== m.direction && m.body.trim()) {
+        const anchor = await prisma.message.findFirst({
+          where: { conversationId: conversation.id, direction: m.direction },
+          orderBy: { createdAt: "desc" },
+          select: { externalKey: true, body: true, createdAt: true, mediaType: true },
+        });
+        if (anchor && isNativeXMessageKey(anchor.externalKey) && !anchor.mediaType &&
+          !Object.values(X_MEDIA_PREVIEWS).some(labels => labels.includes(m.body.trim())) &&
+          anchor.createdAt.getTime() <= m.timestamp.getTime() + 130_000 &&
+          xPreviewMatchesText(m.body, anchor.body)) {
+          return null;
+        }
       }
     } else {
       // An explicit history fetch can later expose the native UUID for a row

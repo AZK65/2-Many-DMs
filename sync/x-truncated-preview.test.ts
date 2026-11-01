@@ -109,6 +109,31 @@ test("clipped previews reconcile across chats without losing native messages or 
     await persistInbound({ ...inbound, messageExternalId: `x:${randomUUID()}`, body: full, timestamp: new Date(at + 86400000), historical: true });
     assert.equal(await prisma.message.count({ where: { conversationId: first.conversationId } }), 2, "genuine native repeats stay separate");
 
+    for (const category of ["general", "spam"]) {
+      const chatExternalId = `delayed-snapshot-${category}`;
+      const event = { ...inbound, chatExternalId, body: full, timestamp: new Date(at) };
+      const nativeKey = `x:${randomUUID()}`;
+      await persistInbound({ ...event, messageExternalId: nativeKey });
+      const stored = await prisma.message.findUniqueOrThrow({ where: { externalKey: nativeKey } });
+      await prisma.conversation.update({ where: { id: stored.conversationId }, data: { inboxCategory: category } });
+      await persistInbound({ ...event, direction: "out", body: "Thanks, I will check.", timestamp: new Date(at + 60000), messageExternalId: `x:${randomUUID()}` });
+      for (let repeat = 0; repeat < 4; repeat++) {
+        await persistInbound({ ...event, body: prefix, timestamp: new Date(at + (repeat + 1) * 3600000), messageExternalId: `x:preview:${category}-late-${repeat}` });
+      }
+      assert.equal(await prisma.message.count({ where: { conversationId: stored.conversationId } }), 2,
+        "replying must not let a delayed inbox snapshot recreate the incoming message");
+      await persistInbound({ ...event, timestamp: new Date(at + 5 * 3600000), messageExternalId: `x:${randomUUID()}` });
+      assert.equal(await prisma.message.count({ where: { conversationId: stored.conversationId } }), 3, "real identical incoming repeat survives");
+      await persistInbound({ ...event, body: "A different incoming event", timestamp: new Date(at + 6 * 3600000), messageExternalId: `x:${randomUUID()}` });
+      await persistInbound({ ...event, direction: "out", body: "Another reply", timestamp: new Date(at + 7 * 3600000), messageExternalId: `x:${randomUUID()}` });
+      await persistInbound({ ...event, body: prefix, timestamp: new Date(at + 8 * 3600000), messageExternalId: `x:preview:${category}-unmatched` });
+      assert.equal(await prisma.message.count({ where: { conversationId: stored.conversationId } }), 6,
+        "never search past a different same-direction event to discard a potentially new message");
+      await persistInbound({ ...event, chatExternalId: `${chatExternalId}-other`, body: prefix,
+        messageExternalId: `x:preview:${category}-other-chat` });
+      assert.ok(await prisma.message.findUnique({ where: { externalKey: `x:preview:${category}-other-chat` } }), "no cross-chat matching");
+    }
+
     const { copy: failureCopy } = await createChat("backup-failure");
     await prisma.message.create({ data: { ...failureCopy, externalKey: "x:preview:backup-failure" } });
     assert.equal(await reconcileXVerifiedSnapshot(prisma, "different-account", "backup-failure", proof), 0);
