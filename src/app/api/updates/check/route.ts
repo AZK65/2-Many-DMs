@@ -1,18 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inspectGitUpdates } from "@/lib/git-updates";
+import { selfUpdateEnabled } from "@/lib/update-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function isLocalRequest(req: NextRequest): boolean {
-  const host = (req.headers.get("host") || "").split(":")[0].replace(/[[\]]/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function selfUpdateEnabled(req: NextRequest): boolean {
-  if (process.env.ALLOW_SELF_UPDATE === "0") return false;
-  return process.env.ALLOW_SELF_UPDATE === "1" || isLocalRequest(req);
-}
 
 // Git is the source of truth. Each installation fetches through its own
 // configured remote, so private-repository credentials never pass through the

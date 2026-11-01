@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { OverlayPortal } from "./OverlayPortal";
+import { UpdatePreferences } from "./UpdatePreferences";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { TelegramConnect } from "./TelegramConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
@@ -33,6 +34,7 @@ export function WorkspaceOnboarding() {
   const [accountsError, setAccountsError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [savingUpdates, setSavingUpdates] = useState(false);
   const { connections, error: connectionError } = useSetupConnections();
   useEffect(() => {
     const controller = new AbortController();
@@ -72,9 +74,10 @@ export function WorkspaceOnboarding() {
             {accounts.filter(account => account.platform === platform).map(account => <button key={account.id} type="button" onClick={() => setSaved(account)} className={`${setupSecondary} mt-3 flex w-full items-center justify-between gap-2 text-left text-xs`}><span className="truncate">{account.label || PLATFORMS[platform].label}</span><span className="shrink-0 text-accent">{account.status === "disconnected" ? "Not connected" : setupAccountLabel(account, connections)}</span></button>)}
           </section>)}</div>
           <p className="text-xs leading-5 text-slate-400">{connected ? `${connected} connected. History imports in the background; a connected account does not mean all older messages are loaded yet.` : "You can connect one account now or finish later from Settings. AI is optional and starts without an API key."}</p>
+          <div className="mt-6"><UpdatePreferences onBusyChange={setSavingUpdates} /></div>
           {identityError && <SetupError>{identityError}<button type="button" onClick={() => setAttempt(value => value + 1)} className={`${setupSecondary} mt-2`}>Retry loading workspace</button></SetupError>}
           {(error || accountsError || connectionError) && <SetupError>{error || accountsError || connectionError}</SetupError>}
-          <button type="button" disabled={!identity || busy} onClick={() => void finish()} className={`${setupButton} mt-6 w-full`}>{busy ? "Saving…" : connected ? "Open my workspace" : "Finish setup later"}</button>
+          <button type="button" disabled={!identity || busy || savingUpdates} onClick={() => void finish()} className={`${setupButton} mt-6 w-full`}>{busy ? "Saving…" : connected ? "Open my workspace" : "Finish setup later"}</button>
         </motion.section>
       </motion.div>
     </OverlayPortal>

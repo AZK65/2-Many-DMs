@@ -1,6 +1,7 @@
 "use client";
 
 import { OverlayPortal } from "./OverlayPortal";
+import { UpdatePreferences } from "./UpdatePreferences";
 import { AISetup } from "./AISetup";
 
 import { useEffect, useState } from "react";
@@ -399,6 +400,10 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
                     >
                       Restore default colors
                     </button>
+                  </SettingsPanel>
+
+                  <SettingsPanel title="Updates" description="Choose when this installation receives new versions.">
+                    <UpdatePreferences review onReview={onClose} />
                   </SettingsPanel>
 
                   <SettingsPanel title="Inbox behavior" description="Set the view and alerts you start with each day.">

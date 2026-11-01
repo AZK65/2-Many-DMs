@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { OverlayPortal } from "./OverlayPortal";
 import { CheckIcon, CloseIcon, DownloadIcon, ExternalLinkIcon } from "./icons";
@@ -23,7 +23,7 @@ export type UpdateCheck = {
 
 const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-neutral-900";
 
-export function UpdateDialog({ data, preview = false, applying = false, installed = false, message, onClose, onUpdate }: {
+export function UpdateDialog({ data, preview = false, applying = false, installed = false, message, onClose, onUpdate, onSkip, savingPreference = false, autoControl, autoMessage }: {
   data: UpdateCheck;
   preview?: boolean;
   applying?: boolean;
@@ -31,6 +31,10 @@ export function UpdateDialog({ data, preview = false, applying = false, installe
   message?: string | null;
   onClose: () => void;
   onUpdate: () => void;
+  onSkip?: () => void;
+  savingPreference?: boolean;
+  autoControl?: ReactNode;
+  autoMessage?: string | null;
 }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -43,10 +47,10 @@ export function UpdateDialog({ data, preview = false, applying = false, installe
     if (manual) manualRef.current?.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
   }, [manual, reduceMotion]);
 
-  return <OverlayPortal onClose={applying ? undefined : onClose}>
+  return <OverlayPortal onClose={applying || savingPreference ? undefined : onClose}>
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition}
       className="fixed inset-0 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={() => { if (!applying) onClose(); }}>
+      onClick={() => { if (!applying && !savingPreference) onClose(); }}>
       <motion.section role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}
         initial={{ opacity: 0, y: reduceMotion ? 0 : 16, scale: reduceMotion ? 1 : 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: reduceMotion ? 0 : 8 }} transition={transition}
@@ -61,7 +65,7 @@ export function UpdateDialog({ data, preview = false, applying = false, installe
                 <span className="mt-1 block text-xs">{preview ? "Latest release notes" : "A new version of your workspace"}</span>
               </div>
             </div>
-            <button type="button" aria-label={preview ? "Close update preview" : "Close update notification"} disabled={applying} onClick={onClose}
+            <button type="button" aria-label={preview ? "Close update preview" : "Close update notification"} disabled={applying || savingPreference} onClick={onClose}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800">
               <CloseIcon className="h-5 w-5" />
             </button>
@@ -94,6 +98,7 @@ export function UpdateDialog({ data, preview = false, applying = false, installe
             </article>) : <p className="text-sm text-slate-500 dark:text-neutral-400">This update has no detailed release notes. Review the changes on GitHub before installing.</p>}
           </div>
           {!preview && data.blockedReason && <p role="status" className="mt-6 rounded-xl bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{data.blockedReason}</p>}
+          {autoControl && <div className="mt-6">{autoControl}</div>}
           {!preview && !installed && <details ref={manualRef} open={manual} onToggle={event => setManual(event.currentTarget.open)} className="mt-6 text-sm">
             <summary className="cursor-pointer rounded-lg py-2 text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-400">Manual installation steps</summary>
             <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600 dark:bg-neutral-900 dark:text-neutral-300"><code>{(data.manualCommands || ["git pull --ff-only", "npm install", "npm run build"]).join("\n")}</code></pre>
@@ -103,11 +108,12 @@ export function UpdateDialog({ data, preview = false, applying = false, installe
         </div>
 
         <footer className="shrink-0 border-t border-slate-100 bg-slate-50/70 px-6 py-4 sm:px-8 dark:border-neutral-800 dark:bg-neutral-900/50">
+          {autoMessage && <p className="mb-3 text-xs leading-relaxed text-slate-500 dark:text-neutral-400">{autoMessage}</p>}
           {message && <p role="status" aria-live="polite" className="mb-4 text-sm text-slate-600 dark:text-neutral-300">{message}</p>}
           <div className="flex flex-wrap items-center justify-end gap-2">
             <a href="/changelog" target="_blank" rel="noreferrer" className={`${button} mr-auto text-slate-500 hover:text-slate-900 dark:text-neutral-400 dark:hover:text-white`}>Full changelog <ExternalLinkIcon className="h-4 w-4" /></a>
-            {!preview && !installed && <button type="button" disabled={applying} onClick={onClose} className={`${button} text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800`}>Not now</button>}
-            <button type="button" disabled={applying} onClick={preview || installed ? onClose : canInstall ? onUpdate : () => setManual(true)}
+            {!preview && !installed && <button type="button" disabled={applying || savingPreference} onClick={onSkip || onClose} className={`${button} text-slate-600 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800`}>{savingPreference ? "Saving…" : "Skip this version"}</button>}
+            <button type="button" disabled={applying || savingPreference} onClick={preview || installed ? onClose : canInstall ? onUpdate : () => setManual(true)}
               className={`${button} bg-accent text-accent-fg hover:brightness-95`}>
               {!preview && !installed && <DownloadIcon className="h-4 w-4" />}{preview ? "Close preview" : installed ? "Done" : applying ? "Updating…" : canInstall ? "Update now" : "View steps"}
             </button>

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { inspectGitUpdates } from "@/lib/git-updates";
+import path from "node:path";
+import { acquireWorkerLock, type WorkerLock } from "../../../../../sync/worker-lock";
+import { updatePreferenceStore, validUpdateRevision } from "@/lib/update-preferences";
+import { updateMutationAllowed } from "@/lib/update-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +61,7 @@ async function runStep(phase: string, command: string, args: string[]) {
   s.log += `\n$ ${[command, ...args].join(" ")}\n${(stdout + stderr).trim()}\n`;
 }
 
-async function runUpdate(expectedRevision: string | null) {
+async function runUpdate(expectedRevision: string, automatic: boolean, lock: WorkerLock) {
   const s = state();
   try {
     s.phase = "Checking Git";
@@ -67,6 +71,10 @@ async function runUpdate(expectedRevision: string | null) {
       throw new Error("A newer update appeared. Review it before installing.");
     if (!update.canApply)
       throw new Error(update.blockedReason || "This update cannot be applied safely.");
+
+    // Re-read consent after the network check, immediately before any mutation.
+    // Persist the attempt so a failure/restart cannot cause an automatic loop.
+    if (automatic) updatePreferenceStore().claimAutomatic(expectedRevision);
 
     await runStep("Pulling latest code", "git", ["merge", "--ff-only", update.latestSha]);
     await runStep("Installing dependencies", "npm", ["install", "--no-audit", "--no-fund"]);
@@ -95,42 +103,24 @@ async function runUpdate(expectedRevision: string | null) {
     s.error = (err.stderr || err.message || String(e)).trim();
     s.phase = "Failed";
     s.running = false;
-  }
-}
-
-function isLocalRequest(req: NextRequest): boolean {
-  const host = (req.headers.get("host") || "").split(":")[0].replace(/[[\]]/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function selfUpdateEnabled(req: NextRequest): boolean {
-  if (process.env.ALLOW_SELF_UPDATE === "0") return false;
-  return process.env.ALLOW_SELF_UPDATE === "1" || isLocalRequest(req);
-}
-
-function sameOrigin(req: NextRequest): boolean {
-  const origin = req.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).host === req.headers.get("host");
-  } catch {
-    return false;
+  } finally {
+    lock.release();
   }
 }
 
 // Kick off one guarded fast-forward update at a time.
 export async function POST(req: NextRequest) {
-  if (
-    !selfUpdateEnabled(req) ||
-    !sameOrigin(req) ||
-    req.headers.get("x-omnicrm-update") !== "1"
-  ) {
+  if (!updateMutationAllowed(req)) {
     return NextResponse.json({
       ok: false,
       started: false,
       reason: "self-update-disabled",
       commands: MANUAL,
     });
+  }
+  const body = await req.json().catch(() => null) as { expectedRevision?: unknown; automatic?: unknown } | null;
+  if (!body || !validUpdateRevision(body.expectedRevision) || (body.automatic !== undefined && typeof body.automatic !== "boolean")) {
+    return NextResponse.json({ ok: false, started: false, error: "Review a valid update before installing." }, { status: 400 });
   }
   const s = state();
   if (s.running) {
@@ -139,6 +129,9 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
+  let lock: WorkerLock;
+  try { lock = acquireWorkerLock(path.join(process.cwd(), ".local", "updates", "installation")); }
+  catch { return NextResponse.json({ ok: false, started: false, error: "Another update is running. Wait for it to finish." }, { status: 409 }); }
   g.__upd = {
     running: true,
     phase: "Starting",
@@ -149,8 +142,7 @@ export async function POST(req: NextRequest) {
     restartRequired: false,
     installedRevision: null,
   };
-  const body = await req.json().catch(() => ({})) as { expectedRevision?: string };
-  void runUpdate(body.expectedRevision || null); // progress via GET
+  void runUpdate(body.expectedRevision, body.automatic === true, lock); // progress via GET
   return NextResponse.json({ ok: true, started: true });
 }
 

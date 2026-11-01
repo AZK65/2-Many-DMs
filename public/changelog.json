@@ -1,6 +1,18 @@
 {
-  "current": "0.6.3",
+  "current": "0.6.4",
   "entries": [
+    {
+      "version": "0.6.4",
+      "date": "2026-11-01",
+      "title": "Updates on your terms",
+      "notes": [
+        "Choose automatic updates during onboarding or in Settings → General. They start off unless you opt in.",
+        "Every update notice offers Update now, Skip this version, and an automatic updates switch.",
+        "Automatic installation waits for a visible 60-second countdown with no activity or saved drafts while the inbox is open.",
+        "Skipped versions and failed automatic attempts are not automatically retried. Review a skipped update from Settings whenever you want.",
+        "Update preferences persist on this installation, with guarded writes and one installation at a time."
+      ]
+    },
     {
       "version": "0.6.3",
       "date": "2026-11-01",

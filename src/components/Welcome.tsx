@@ -10,6 +10,7 @@ import {
 } from "@/lib/platforms";
 import { PlatformLogo } from "./PlatformLogo";
 import ThemeToggle from "./ThemeToggle";
+import { UpdatePreferences } from "./UpdatePreferences";
 import { TelegramConnect } from "./TelegramConnect";
 import { XConnect } from "./XConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
@@ -40,6 +41,7 @@ type AccountRow = {
 export function Welcome() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [savingUpdates, setSavingUpdates] = useState(false);
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [showTelegram, setShowTelegram] = useState(false);
@@ -350,9 +352,11 @@ export function Welcome() {
                     </motion.div>
                   ))}
                 </div>
+                <div className="mt-6"><UpdatePreferences onBusyChange={setSavingUpdates} /></div>
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={finish}
+                  disabled={savingUpdates}
                   className="mt-7 w-full rounded-xl bg-accent px-3 py-3 text-base font-semibold text-accent-fg transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   Open my inbox
