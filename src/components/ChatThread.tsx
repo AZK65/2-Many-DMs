@@ -16,6 +16,7 @@ import { ClosePaneButton } from "./ClosePaneButton";
 import { OverlayPortal } from "./OverlayPortal";
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { MessageMutationEditor, MessageMutationMenu } from "./MessageMutation";
+import { PhotoTranslation, PhotoTranslationAction } from "./PhotoTranslation";
 import type { MessageMutationAction } from "@/lib/message-mutations";
 import { InlineVideoPlayer } from "./InlineVideoPlayer";
 import { isGifMedia } from "@/lib/gif-media";
@@ -492,6 +493,13 @@ export function ChatThread({
   );
   const [loading, setLoading] = useState(!initialCachedThread);
   const [messageMutation, setMessageMutation] = useState<{ id: string; action: MessageMutationAction } | null>(null);
+  const [photoTranslationId, setPhotoTranslationId] = useState<string | null>(null);
+  useEffect(() => { setPhotoTranslationId(null); }, [conversation.id]);
+  function closePhotoTranslation() {
+    const id = photoTranslationId;
+    setPhotoTranslationId(null);
+    requestAnimationFrame(() => { (id && document.getElementById(`message-menu-${id}`) || textareaRef.current)?.focus(); });
+  }
   useEffect(() => { setMessageMutation(null); }, [conversation.id]);
   function closeMessageMutation() {
     const id = messageMutation?.id;
@@ -3252,6 +3260,7 @@ export function ChatThread({
                       <div className="workspace-menu absolute bottom-full left-0 z-30 mb-1 flex items-center p-1">
 
                     <ReactionAction message={m} align="right" />
+                    {!readOnly && m.mediaType === "image" && <PhotoTranslationAction onClick={() => setPhotoTranslationId(m.id)} />}
                     {((["telegram", "whatsapp"] as string[]).includes(conversation.platform) || discordBotChat) && <button data-close-menu onClick={() => { setReplyingTo(m); textareaRef.current?.focus(); }} title="Reply" className="rounded-full p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-700"><ReplyIcon className="h-4 w-4" /></button>}
                     <PinAction message={m} />
                     {!readOnly && <MessageMutationMenu conversation={conversation} message={m} onSelect={action => setMessageMutation({ id: m.id, action })} />}
@@ -3535,6 +3544,8 @@ export function ChatThread({
                       </div>
                     )}
                   </div>
+                    {!readOnly && photoTranslationId === m.id && !m.deletedAt && <PhotoTranslation key={`${conversation.id}:${m.id}:${m.mediaUrl}`}
+                      conversationId={conversation.id} messageId={m.id} onClose={closePhotoTranslation} />}
                     {!readOnly && messageMutation?.id === m.id && !m.deletedAt && <MessageMutationEditor key={`${conversation.id}:${m.id}:${messageMutation.action}`}
                       conversation={conversation} message={m} action={messageMutation.action}
                       onClose={closeMessageMutation} onSaved={updated => {
@@ -3592,10 +3603,10 @@ export function ChatThread({
                   </div>
                   {inbound && (
                     <MenuDetails className="message-actions">
-                      <summary aria-label={`Message actions for ${clockTime(m.createdAt)}`} title="Message actions" className="message-actions-trigger list-none [&::-webkit-details-marker]:hidden"><MoreIcon className="h-4 w-4" /></summary>
+                      <summary id={`message-menu-${m.id}`} aria-label={`Message actions for ${clockTime(m.createdAt)}`} title="Message actions" className="message-actions-trigger list-none [&::-webkit-details-marker]:hidden"><MoreIcon className="h-4 w-4" /></summary>
                       <div className="workspace-menu absolute bottom-full right-0 z-30 mb-1 flex items-center p-1">
 
-                    {!readOnly && m.body && (
+                    {!readOnly && m.body && m.mediaType !== "image" && (
                       <button
                         type="button"
                         onClick={() => translateIncomingMessage(m)}
@@ -3624,6 +3635,7 @@ export function ChatThread({
                       </button>
                     )}
                     <ReactionAction message={m} align="left" />
+                    {!readOnly && m.mediaType === "image" && !m.deletedAt && <PhotoTranslationAction onClick={() => setPhotoTranslationId(m.id)} />}
                     {(["telegram", "whatsapp"] as string[]).includes(conversation.platform) && <button data-close-menu onClick={() => { setReplyingTo(m); textareaRef.current?.focus(); }} title="Reply" className="rounded-full p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-700"><ReplyIcon className="h-4 w-4" /></button>}
                     <PinAction message={m} />
                     <button data-close-menu onClick={() => setForwardMsg(m)} title="Forward" className="rounded-full p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600 dark:text-neutral-500 dark:hover:bg-neutral-700">

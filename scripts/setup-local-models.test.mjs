@@ -11,7 +11,9 @@ const stream = lines => new Response(lines.join("\n"));
 test("default plan matches the repo; overrides are respected and deduplicated", () => {
   assert.deepEqual(modelPlan().map(item => item.model), ["translategemma:4b", "glm-ocr:latest", "qwen3.5:4b"]);
   const plan = modelPlan({ OLLAMA_TRANSLATION_MODEL: "small:4b", OLLAMA_REPLY_MODEL: "small:4b", OLLAMA_OCR_MODEL: "reader", OLLAMA_AUTOCORRECT_MODEL: "reader:latest" });
-  assert.deepEqual(plan.map(item => item.model), ["small:4b", "reader"]);
+  assert.deepEqual(plan.map(item => item.model), ["small:4b", "reader", "qwen3.5:4b"]);
+  assert.ok(modelPlan({ OLLAMA_PHOTO_OCR_MODEL: "vision:small" }).some(item => item.model === "vision:small"));
+  assert.throws(() => modelPlan({ OLLAMA_PHOTO_OCR_MODEL: "vision:cloud" }));
   for (const model of ["model:cloud", "model:4b-cloud", "https://remote.example/model", "bad; command", "../name"]) assert.throws(() => modelPlan({ OLLAMA_REPLY_MODEL: model }));
 });
 

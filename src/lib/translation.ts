@@ -1,4 +1,5 @@
 import { protectTranslationLinks } from "./translation-links";
+import { localOllamaFetch, requireLocalModel } from "./local-ollama";
 
 export type TranslationResult = {
   translatedText: string;
@@ -32,15 +33,6 @@ const DETECTION_SCHEMA = {
 
 const OLLAMA_MODEL = process.env.OLLAMA_TRANSLATION_MODEL || "translategemma:4b";
 const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TRANSLATION_TIMEOUT_MS || 90_000);
-
-function ollamaUrl(): string {
-  const configured = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
-  const url = new URL(configured);
-  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
-    throw new Error("Local translation only accepts an Ollama address on this machine.");
-  }
-  return url.toString().replace(/\/$/, "");
-}
 
 function parseJson<T>(value: string, label: string): T {
   try {
@@ -96,7 +88,7 @@ async function localFetch(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${ollamaUrl()}${path}`, { ...init, signal: controller.signal });
+    return await localOllamaFetch(path, { ...init, signal: controller.signal }, timeoutMs);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Local translation took too long.");
@@ -109,6 +101,7 @@ async function localFetch(
 
 export async function translationEngineStatus(): Promise<TranslationEngineStatus> {
   try {
+    await requireLocalModel(OLLAMA_MODEL);
     const response = await localFetch("/api/tags", { cache: "no-store" }, 2500);
     if (!response.ok) throw new Error("Ollama is unavailable");
     const payload = (await response.json()) as { models?: Array<{ name?: string }> };
@@ -135,7 +128,7 @@ export async function translationEngineStatus(): Promise<TranslationEngineStatus
       engine: "ollama",
       model: OLLAMA_MODEL,
       detail:
-        error instanceof Error && /address on this machine/i.test(error.message)
+        error instanceof Error && /address on this machine|model missing|Cloud|verify downloaded/i.test(error.message)
           ? error.message
           : "Open Ollama to enable private local translation",
     };
@@ -148,8 +141,10 @@ export async function translationAvailable(): Promise<boolean> {
 
 async function chat(
   prompt: string,
-  format?: typeof DETECTION_SCHEMA
+  format?: typeof DETECTION_SCHEMA,
+  maxTokens = 1200
 ): Promise<string> {
+  await requireLocalModel(OLLAMA_MODEL);
   const response = await localFetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -159,12 +154,14 @@ async function chat(
       keep_alive: "15m",
       messages: [{ role: "user", content: prompt }],
       ...(format ? { format } : {}),
-      options: { temperature: 0, num_predict: format ? 100 : 1200 },
+      options: { temperature: 0, num_predict: format ? 100 : maxTokens },
     }),
   });
   const payload = (await response.json().catch(() => ({}))) as {
     error?: string;
     message?: { content?: string };
+    done_reason?: string;
+    eval_count?: number;
   };
   if (!response.ok || payload.error) {
     const reason = payload.error || `Ollama returned ${response.status}`;
@@ -174,6 +171,7 @@ async function chat(
     throw new Error(`Local translation failed: ${reason}`);
   }
   const content = payload.message?.content?.trim();
+  if (!format && (payload.done_reason === "length" || (payload.eval_count || 0) >= maxTokens)) throw new Error("Local translation reached its text limit. Try a smaller section so nothing is cut off.");
   if (!content) throw new Error("Local translation returned an empty result.");
   return content;
 }
@@ -207,7 +205,8 @@ export async function translateText(
   text: string,
   target: { code: string; name: string },
   sourceHint?: { code: string; name: string },
-  targetStyleSamples: string[] = []
+  targetStyleSamples: string[] = [],
+  mode: "chat" | "photo" = "chat"
 ): Promise<TranslationResult> {
   const targetCode = normalizeLanguageCode(target.code);
   const targetName = languageName(targetCode, target.name);
@@ -253,15 +252,15 @@ export async function translateText(
 
   const translatedText = await chat(
     [
-      `Translate this ${source.languageName} (${source.languageCode}) direct message into natural ${targetName} (${targetCode}).`,
+      `Translate this ${source.languageName} (${source.languageCode}) ${mode === "photo" ? "text extracted from a photo" : "direct message"} into natural ${targetName} (${targetCode}).`,
       "Accurately preserve the meaning, tone, paragraph breaks, emojis, names, @mentions, links, email addresses, numbers, currencies, and product names.",
       "Copy every OMNI_LINK placeholder exactly once, unchanged, in the same place in the sentence. Never expand it or invent an address.",
-      "Use relaxed, everyday chat language. Do not make the message more formal, corporate, polite, or wordy than the original.",
-      "Match clear formality in the source. When it is ambiguous, prefer friendly informal speech and natural contractions.",
+      mode === "photo" ? "Keep the document's register, headings, labels and line order. Do not paraphrase or summarize." : "Use relaxed, everyday chat language. Do not make the message more formal, corporate, polite, or wordy than the original.",
+      mode === "photo" ? "Preserve formal wording and all visible details from the source." : "Match clear formality in the source. When it is ambiguous, prefer friendly informal speech and natural contractions.",
       "Mirror the source's brevity, capitalization, punctuation, slang, abbreviations, emoji use, and sentence fragments.",
       "Never add a greeting, introduction, name, acknowledgement, filler word, polite softener, explanation, conclusion, or extra idea that is not in the source.",
       "If the source starts abruptly or is only a fragment, the translation must do the same.",
-      ...(targetCode.split("-")[0] === "fr"
+      ...(mode === "chat" && targetCode.split("-")[0] === "fr"
         ? ["For French, use tu, te, and ton rather than vous, unless the source is explicitly formal or addresses multiple people."]
         : []),
       ...(styleSamples.length
@@ -276,7 +275,7 @@ export async function translateText(
       "",
       "",
       protectedText.masked,
-    ].join("\n")
+    ].join("\n"), undefined, mode === "photo" ? 4096 : 1200
   );
 
   return {

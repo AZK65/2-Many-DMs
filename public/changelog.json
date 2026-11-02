@@ -1,6 +1,17 @@
 {
-  "current": "0.6.7",
+  "current": "0.6.8",
   "entries": [
+    {
+      "version": "0.6.8",
+      "date": "2026-11-02",
+      "title": "Private photo translation",
+      "notes": [
+        "Choose Translate photo from a photo's message menu to read its text and translate it to English on your own device.",
+        "View the original recognized text, copy the translation, or close the inline result without changing the photo or sending a message.",
+        "Uses downloaded Qwen vision and TranslateGemma models through local Ollama. Remote endpoints, cloud models and redirects are rejected; no cloud fallback.",
+        "Supports downloaded PNG, JPEG and WebP photos with clear progress, missing-model guidance and retry states. Links are preserved and incomplete model output is not presented as a full translation."
+      ]
+    },
     {
       "version": "0.6.7",
       "date": "2026-11-02",

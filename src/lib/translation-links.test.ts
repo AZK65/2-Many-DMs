@@ -30,6 +30,7 @@ test("link-only messages bypass Ollama; mixed text masks links and verifies the 
   const savedFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async (_url, init) => {
+    if (String(_url).endsWith("/api/show")) return Response.json({ model_info: { architecture: "gemma" } });
     calls++;
     const prompt = JSON.parse(String(init?.body)).messages[0].content;
     assert.ok(!prompt.includes("https://example.com"));
@@ -42,7 +43,7 @@ test("link-only messages bypass Ollama; mixed text masks links and verifies the 
     assert.equal(calls, 0);
     assert.equal((await translateText(`See ${link}`, target)).translatedText, `Regarde ${link}`);
     assert.equal(calls, 1);
-    globalThis.fetch = async () => Response.json({ message: { content: "Regarde https://example.com/debut" } });
+    globalThis.fetch = async url => String(url).endsWith("/api/show") ? Response.json({ model_info: { architecture: "gemma" } }) : Response.json({ message: { content: "Regarde https://example.com/debut" } });
     await assert.rejects(translateText(`See ${link}`, target), /Nothing was sent/);
   } finally { globalThis.fetch = savedFetch; }
 });

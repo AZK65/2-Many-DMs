@@ -1,19 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "./store";
+import { OCR_MODEL, PHOTO_OCR_MODEL, localPhotoPath, recognizeLocalPhoto } from "../src/lib/local-ocr";
+import { requireLocalModel } from "../src/lib/local-ollama";
 
-const OCR_MODEL = process.env.OLLAMA_OCR_MODEL || "glm-ocr:latest";
-const OLLAMA_URL = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-const OCR_TIMEOUT_MS = Math.max(30_000, Number(process.env.OLLAMA_OCR_TIMEOUT_MS || 180_000));
 // Live OCR is intentionally slow and unloads its model after each image. A
 // large historical photo library must be an explicit backfill, never something
 // that silently keeps a laptop hot after the feature is installed.
 const OCR_INTERVAL_MS = Math.max(15_000, Number(process.env.OCR_INTERVAL_MS || 60_000));
 const OCR_RETRY_MS = Math.max(60_000, Number(process.env.OCR_RETRY_MS || 6 * 60 * 60 * 1_000));
-const OCR_MAX_BYTES = Math.max(1, Number(process.env.OCR_MAX_MB || 20)) * 1024 * 1024;
-const OCR_TEXT_LIMIT = Math.max(1_000, Number(process.env.OCR_TEXT_LIMIT || 30_000));
-const OCR_MAX_TOKENS = Math.max(128, Number(process.env.OCR_MAX_TOKENS || 512));
-const OCR_KEEP_ALIVE = process.env.OCR_KEEP_ALIVE || "0s";
 const OCR_INCLUDE_HISTORY = process.env.OCR_INCLUDE_HISTORY === "1";
 const OCR_STATE_PATH = path.join(process.env.DATA_DIR || process.cwd(), ".ocr_state.json");
 
@@ -60,103 +55,8 @@ async function liveIndexStart(): Promise<Date | null> {
   return liveSince;
 }
 
-function localMediaPath(mediaUrl: string): string | null {
-  const clean = mediaUrl.split(/[?#]/)[0];
-  if (!clean.startsWith("/media/")) return null;
-  let decoded = clean;
-  try {
-    decoded = decodeURIComponent(clean);
-  } catch {
-    return null;
-  }
-  const filename = path.basename(decoded);
-  if (!filename || filename === "." || filename === "..") return null;
-  return path.join(process.cwd(), "public", "media", filename);
-}
-
 async function modelAvailable(): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3_000);
-  timeout.unref?.();
-  try {
-    const response = await fetch(`${OLLAMA_URL}/api/tags`, {
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok) return false;
-    const data = (await response.json()) as {
-      models?: Array<{ name?: string; model?: string }>;
-    };
-    return (data.models || []).some((item) => {
-      const name = item.name || item.model || "";
-      return name === OCR_MODEL || name.replace(/:latest$/, "") === OCR_MODEL.replace(/:latest$/, "");
-    });
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function cleanOcrText(value: string): string {
-  const cleaned = value
-    .replace(/^```(?:markdown|md|text)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .replace(/\u0000/g, "")
-    .trim();
-  // The Ollama renderer can occasionally repeat the final recognized line
-  // until generation stops. Collapse only adjacent duplicates so legitimate
-  // repeated labels elsewhere in a screenshot are preserved.
-  const lines: string[] = [];
-  for (const line of cleaned.split(/\r?\n/)) {
-    const normalized = line.trim();
-    if (normalized && normalized === lines[lines.length - 1]) continue;
-    lines.push(normalized);
-  }
-  return lines.join("\n").trim().slice(0, OCR_TEXT_LIMIT);
-}
-
-async function recognizeImage(filePath: string): Promise<string> {
-  const info = await fs.stat(filePath);
-  if (!info.isFile()) throw new Error("The attachment is not a readable image file.");
-  if (info.size > OCR_MAX_BYTES) {
-    throw new Error(`Image exceeds the ${Math.round(OCR_MAX_BYTES / 1024 / 1024)} MB OCR limit.`);
-  }
-  const image = await fs.readFile(filePath);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
-  timeout.unref?.();
-  try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: OCR_MODEL,
-        prompt: "Text Recognition:",
-        images: [image.toString("base64")],
-        stream: false,
-        keep_alive: OCR_KEEP_ALIVE,
-        // Search needs readable text rather than a full document re-creation.
-        // A bounded output avoids pathological repeated generations and keeps
-        // the background indexer light enough to coexist with live sync.
-        options: { temperature: 0, num_predict: OCR_MAX_TOKENS },
-      }),
-    });
-    const data = (await response.json().catch(() => ({}))) as {
-      response?: string;
-      error?: string;
-    };
-    if (!response.ok) throw new Error(data.error || `GLM-OCR returned ${response.status}.`);
-    return cleanOcrText(data.response || "");
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`GLM-OCR did not finish within ${Math.ceil(OCR_TIMEOUT_MS / 1000)} seconds.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  try { await requireLocalModel(OCR_MODEL); return true; } catch { return false; }
 }
 
 async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | null> {
@@ -171,7 +71,7 @@ async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | nul
       ...(liveSince ? { createdAt: { gte: liveSince } } : {}),
       OR: [
         { ocrStatus: null },
-        { ocrModel: { not: OCR_MODEL } },
+        { ocrModel: { notIn: [OCR_MODEL, PHOTO_OCR_MODEL] } },
         { ocrStatus: "processing", ocrUpdatedAt: { lt: retryBefore } },
         { ocrStatus: "failed", ocrUpdatedAt: { lt: retryBefore } },
       ],
@@ -182,7 +82,8 @@ async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | nul
 }
 
 async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "skipped" | "failed"> {
-  const filePath = candidate.mediaUrl ? localMediaPath(candidate.mediaUrl) : null;
+  let filePath: string | null = null;
+  try { filePath = candidate.mediaUrl ? localPhotoPath(candidate.mediaUrl) : null; } catch { /* not local */ }
   if (!filePath) {
     await prisma.message.updateMany({
       where: { id: candidate.id, deletedAt: null },
@@ -196,8 +97,8 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
     return "skipped";
   }
 
-  await prisma.message.updateMany({
-    where: { id: candidate.id, deletedAt: null },
+  const claimed = await prisma.message.updateMany({
+    where: { id: candidate.id, deletedAt: null, OR: [{ ocrModel: null }, { ocrModel: { not: PHOTO_OCR_MODEL } }, { ocrStatus: { not: "complete" } }] },
     data: {
       ocrStatus: "processing",
       ocrModel: OCR_MODEL,
@@ -205,10 +106,11 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
       ocrUpdatedAt: new Date(),
     },
   });
+  if (!claimed.count) return "skipped";
   try {
-    const ocrText = await recognizeImage(filePath);
+    const ocrText = await recognizeLocalPhoto(candidate.mediaUrl!, { background: true });
     await prisma.message.updateMany({
-      where: { id: candidate.id, deletedAt: null },
+      where: { id: candidate.id, deletedAt: null, ocrStatus: "processing", ocrModel: OCR_MODEL },
       data: {
         ocrText,
         ocrStatus: "complete",
@@ -222,7 +124,7 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
     const detail = String(error).replace(/^Error:\s*/, "").slice(0, 500);
     const skipped = /not a readable image|exceeds the .* OCR limit|ENOENT/i.test(detail);
     await prisma.message.updateMany({
-      where: { id: candidate.id, deletedAt: null },
+      where: { id: candidate.id, deletedAt: null, ocrStatus: "processing", ocrModel: OCR_MODEL },
       data: {
         ocrStatus: skipped ? "skipped" : "failed",
         ocrModel: OCR_MODEL,

@@ -38,6 +38,10 @@ with **your** keys, no SaaS in the middle.
 
 ## Features
 
+### New in 0.6.8
+
+**Local photo translation:** choose Translate photo from a photo's message menu to read its text and translate it to English. Compare the recognized original, copy the result, and keep the photo unchanged. Uses downloaded Qwen vision and TranslateGemma models, with no cloud fallback. See [local setup and photo translation](docs/local-models.md#translate-a-photo-privately).
+
 ### New in 0.6.2
 
 Live Discord private-message search with a guided local sign-in, clearer onboarding for all four

@@ -6,7 +6,8 @@ import { config } from "dotenv";
 const defaults = [
   ["Translation and reply drafting", "OLLAMA_TRANSLATION_MODEL", "translategemma:4b"],
   ["Image text search (OCR)", "OLLAMA_OCR_MODEL", "glm-ocr:latest"],
-  ["Autocorrect", "OLLAMA_AUTOCORRECT_MODEL", "qwen3.5:4b"],
+  ["Autocorrect and photo OCR", "OLLAMA_AUTOCORRECT_MODEL", "qwen3.5:4b"],
+  ["Photo translation OCR", "OLLAMA_PHOTO_OCR_MODEL", "qwen3.5:4b"],
 ];
 const normalize = name => name.includes(":") ? name : `${name}:latest`;
 
