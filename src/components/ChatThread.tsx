@@ -3373,7 +3373,8 @@ export function ChatThread({
                         </div>
                       </button>
                     )}
-                    <MediaContent
+                    {!readOnly && photoTranslationId === m.id && !m.deletedAt ? <PhotoTranslation key={`${conversation.id}:${m.id}:${m.mediaUrl}`}
+                      conversationId={conversation.id} messageId={m.id} source={mediaSource(m)} onClose={closePhotoTranslation} /> : <MediaContent
                       message={m}
                       onAutoRecover={canSyncConversation && canAutoLoadMedia(conversation.platform, m)
                         ? () => recoverMessageMedia(m, true) : undefined}
@@ -3386,7 +3387,7 @@ export function ChatThread({
                           : undefined
                       }
                       recovering={recoveringMediaId === m.id}
-                    />
+                    />}
                     {m.body && !(m.mediaType === "sticker" && m.mediaUrl) && (
                       <div
                         className={
@@ -3544,8 +3545,6 @@ export function ChatThread({
                       </div>
                     )}
                   </div>
-                    {!readOnly && photoTranslationId === m.id && !m.deletedAt && <PhotoTranslation key={`${conversation.id}:${m.id}:${m.mediaUrl}`}
-                      conversationId={conversation.id} messageId={m.id} onClose={closePhotoTranslation} />}
                     {!readOnly && messageMutation?.id === m.id && !m.deletedAt && <MessageMutationEditor key={`${conversation.id}:${m.id}:${messageMutation.action}`}
                       conversation={conversation} message={m} action={messageMutation.action}
                       onClose={closeMessageMutation} onSaved={updated => {

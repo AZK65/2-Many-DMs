@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "./store";
-import { OCR_MODEL, PHOTO_OCR_MODEL, localPhotoPath, recognizeLocalPhoto } from "../src/lib/local-ocr";
+import { OCR_MODEL, PHOTO_LAYOUT_MODELS, localPhotoPath, recognizeLocalPhoto } from "../src/lib/local-ocr";
 import { requireLocalModel } from "../src/lib/local-ollama";
 
 // Live OCR is intentionally slow and unloads its model after each image. A
@@ -71,7 +71,7 @@ async function nextCandidate(liveSince: Date | null): Promise<OcrCandidate | nul
       ...(liveSince ? { createdAt: { gte: liveSince } } : {}),
       OR: [
         { ocrStatus: null },
-        { ocrModel: { notIn: [OCR_MODEL, PHOTO_OCR_MODEL] } },
+        { ocrModel: { notIn: [OCR_MODEL, ...PHOTO_LAYOUT_MODELS] } },
         { ocrStatus: "processing", ocrUpdatedAt: { lt: retryBefore } },
         { ocrStatus: "failed", ocrUpdatedAt: { lt: retryBefore } },
       ],
@@ -98,7 +98,7 @@ async function indexCandidate(candidate: OcrCandidate): Promise<"indexed" | "ski
   }
 
   const claimed = await prisma.message.updateMany({
-    where: { id: candidate.id, deletedAt: null, OR: [{ ocrModel: null }, { ocrModel: { not: PHOTO_OCR_MODEL } }, { ocrStatus: { not: "complete" } }] },
+    where: { id: candidate.id, deletedAt: null, OR: [{ ocrModel: null }, { ocrModel: { notIn: PHOTO_LAYOUT_MODELS } }, { ocrStatus: { not: "complete" } }] },
     data: {
       ocrStatus: "processing",
       ocrModel: OCR_MODEL,

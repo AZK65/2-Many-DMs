@@ -38,9 +38,9 @@ with **your** keys, no SaaS in the middle.
 
 ## Features
 
-### New in 0.6.8
+### New in 0.6.9
 
-**Local photo translation:** choose Translate photo from a photo's message menu to read its text and translate it to English. Compare the recognized original, copy the result, and keep the photo unchanged. Uses downloaded Qwen vision and TranslateGemma models, with no cloud fallback. See [local setup and photo translation](docs/local-models.md#translate-a-photo-privately).
+**Translation on the photo:** English text now overlays its original area on the image. Switch Original / Translated, enlarge it, or copy and compare the text. OCR and translation stay local, with no cloud fallback or changes to your image. See [local setup and photo translation](docs/local-models.md#translate-a-photo-privately).
 
 ### New in 0.6.2
 

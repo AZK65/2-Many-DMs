@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { CloseIcon, CopyIcon, GlobeIcon } from "./icons";
+import { OverlayPortal } from "./OverlayPortal";
+import { TranslatedPhotoImage } from "./TranslatedPhotoImage";
 import type { PhotoTranslationResult } from "@/lib/photo-translation";
 
 export function PhotoTranslationAction({ onClick }: { onClick: () => void }) {
@@ -13,13 +15,16 @@ export function PhotoTranslationAction({ onClick }: { onClick: () => void }) {
   </button>;
 }
 
-export function PhotoTranslation({ conversationId, messageId, onClose }: { conversationId: string; messageId: string; onClose: () => void }) {
+export function PhotoTranslation({ conversationId, messageId, source, onClose }: { conversationId: string; messageId: string; source: string | null; onClose: () => void }) {
   const [result, setResult] = useState<PhotoTranslationResult | null>(null);
   const [stage, setStage] = useState<"reading" | "translating" | "done" | "error">("reading");
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
+  const [view, setView] = useState<"translated" | "original">("translated");
+  const [expanded, setExpanded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const reduced = useReducedMotion();
   useEffect(() => { panel.current?.focus(); }, []);
@@ -29,23 +34,18 @@ export function PhotoTranslation({ conversationId, messageId, onClose }: { conve
     const request = async (action: "recognize" | "translate") => {
       const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/photo-translation`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-omni-photo-translation": "1" }, body: JSON.stringify({ action }),
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(200_000)]),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(240_000)]),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Local photo translation failed. Try again.");
       return data as PhotoTranslationResult;
     };
     void (async () => {
-      setError(""); setCopied(false);
-      // A translation retry reuses recognized text, not another expensive OCR.
-      let original = result;
-      if (!original?.originalText) {
-        setStage("reading");
-        original = await request("recognize");
-        if (!active) return;
-        setResult(original);
-      }
+      setError(""); setCopied(false); setCopyError(""); setStage("reading");
+      // Re-read on retry: layout may have expired or the file may have changed.
+      const original = await request("recognize");
       if (!active) return;
+      setResult(original);
       if (original.empty || !original.originalText) { setStage("done"); return; }
       setStage("translating");
       const translated = await request("translate");
@@ -56,39 +56,56 @@ export function PhotoTranslation({ conversationId, messageId, onClose }: { conve
       setStage("error");
     });
     return () => { active = false; controller.abort(); };
-    // Result is intentionally retained only for an explicit retry, not a new request.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, messageId, attempt]);
 
-  return <motion.section ref={panel} tabIndex={-1} aria-label="Local photo translation" aria-busy={stage === "reading" || stage === "translating"}
-    initial={{ opacity: 0, y: reduced ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.2 }}
-    onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}
-    className="mt-2 w-full min-w-0 rounded-xl bg-slate-100 p-3 text-left text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-[#272727] dark:text-neutral-100">
-    <div className="flex items-start justify-between gap-3">
-      <div><h3 className="text-sm font-semibold">Photo translation</h3><p className="mt-1 text-xs text-slate-500 dark:text-neutral-400">English · OCR and translation on this device</p></div>
-      <button type="button" onClick={onClose} aria-label="Close photo translation" title="Close photo translation"
-        className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-black/5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-400 dark:hover:bg-white/10"><CloseIcon className="h-4 w-4" /></button>
+  const ready = stage === "done" && !!result?.translatedText && !!result.regions?.length;
+  const button = "rounded-lg px-3 py-2 text-xs font-medium transition-colors duration-200 hover:bg-black/5 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 dark:hover:bg-white/10";
+  const image = (large = false) => source && !imageFailed
+    ? <TranslatedPhotoImage source={source} regions={result?.regions || []} translated={ready && view === "translated"} expanded={large} onError={() => setImageFailed(true)} />
+    : <p className="p-4 text-xs text-slate-500 dark:text-neutral-400">Photo unavailable. Close translation and recover the attachment first.</p>;
+  const controls = (large = false) => <div className="flex flex-wrap items-center justify-between gap-2 py-2">
+    <div className="inline-flex rounded-lg bg-black/5 p-0.5 dark:bg-white/5" role="group" aria-label="Photo view">
+      <button type="button" aria-pressed={view === "original"} onClick={() => setView("original")} className={`${button} ${view === "original" ? "bg-white shadow-sm dark:bg-neutral-700" : ""}`}>Original</button>
+      <button type="button" aria-pressed={view === "translated"} disabled={!ready} onClick={() => setView("translated")} className={`${button} ${view === "translated" && ready ? "bg-white shadow-sm dark:bg-neutral-700" : ""}`}>Translated</button>
     </div>
-    {(stage === "reading" || stage === "translating") && <div className="mt-3" role="status">
-      <p className="text-xs text-slate-600 dark:text-neutral-300">{stage === "reading" ? "Reading text from the photo locally…" : "Translating the recognized text locally…"}</p>
-      <div aria-hidden="true" className={`mt-2 space-y-2 ${reduced ? "" : "animate-pulse"}`}><div className="h-2 w-3/4 rounded bg-black/10 dark:bg-white/10" /><div className="h-2 w-1/2 rounded bg-black/10 dark:bg-white/10" /></div>
-    </div>}
-    {error && <div className="mt-3"><p role="alert" className="break-words text-xs leading-5 text-red-600 dark:text-red-300">{error}</p>
-      <button type="button" onClick={() => setAttempt(value => value + 1)} className="workspace-button mt-2 px-3 py-2 text-xs">Try again</button></div>}
-    {stage === "done" && result?.empty && <p role="status" className="mt-3 text-sm">No readable text found. Try a clearer photo or a crop of the text.</p>}
-    {result?.translatedText && <>
-      <p role="status" className="mt-3 text-xs text-slate-500 dark:text-neutral-400">{result.detectedLanguageName === "English" ? "The text is already in English." : `${result.detectedLanguageName || "Detected language"} → English`}</p>
-      <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere]" dir="auto">{result.translatedText}</div>
-      <button type="button" className="workspace-button mt-3 inline-flex items-center gap-2 px-3 py-2 text-xs" onClick={async () => {
-        try { await navigator.clipboard.writeText(result.translatedText!); setCopied(true); setCopyError(""); }
-        catch { setCopyError("Clipboard unavailable. Select and copy the translation above."); }
-      }}><CopyIcon className="h-4 w-4" />{copied ? "Copied" : "Copy translation"}</button>
-      {copyError && <p role="alert" className="mt-2 text-xs">{copyError}</p>}
-    </>}
-    {result?.originalText && <details className="mt-3 text-xs text-slate-600 dark:text-neutral-300">
-      <summary className="cursor-pointer rounded py-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Original text from photo</summary>
-      <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words leading-5 [overflow-wrap:anywhere]" dir="auto">{result.originalText}</div>
-    </details>}
-    <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-neutral-400">Your original photo is unchanged. OCR can misread text; check important details against the image.</p>
+    <div className="flex items-center gap-1">
+      {!large && <button type="button" disabled={!source || imageFailed} onClick={() => setExpanded(true)} className={button}>Enlarge</button>}
+      {ready && <button type="button" className={button} aria-label={copied ? "Translation copied" : "Copy translation"} title={copied ? "Copied" : "Copy translation"} onClick={async () => {
+        try { await navigator.clipboard.writeText(result!.translatedText!); setCopied(true); setCopyError(""); }
+        catch { setCopyError("Clipboard unavailable. Select and copy the text below."); }
+      }}><CopyIcon className="h-4 w-4" /></button>}
+      <button type="button" onClick={large ? () => setExpanded(false) : onClose} className={button} aria-label={large ? "Close enlarged photo" : "Close photo translation"}><CloseIcon className="h-4 w-4" /></button>
+    </div>
+  </div>;
+  const status = <div className="space-y-2 pb-2 text-xs text-slate-500 dark:text-neutral-400">
+    <p role="status">{stage === "reading" ? "Finding text areas locally…" : stage === "translating" ? "Translating text areas locally…" : result?.empty ? "No readable text found. Try a clearer photo." : ready ? `${result?.detectedLanguageName || "Detected language"} → English · On this device` : "Photo translation · On this device"}</p>
+    {(stage === "reading" || stage === "translating") && <div aria-hidden className={`h-1 w-1/2 rounded-full bg-accent/40 ${reduced ? "" : "animate-pulse"}`} />}
+    {error && <><p role="alert" className="break-words text-red-600 dark:text-red-300">{error}</p><button type="button" onClick={() => { setResult(null); setAttempt(v => v + 1); panel.current?.focus(); }} className="workspace-button px-3 py-2 text-xs">Try again</button></>}
+    {copyError && <p role="alert">{copyError}</p>}
+    {copied && <span role="status" className="sr-only">Translation copied</span>}
+    {ready && result?.layoutApproximate && <p>Text positions are estimated. Compare with Original.</p>}
+  </div>;
+  const transcript = result?.originalText && <details className="pb-2 text-xs text-slate-500 dark:text-neutral-400">
+    <summary className="cursor-pointer rounded py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Text &amp; original</summary>
+    <div className="max-h-48 space-y-3 overflow-y-auto whitespace-pre-wrap break-words leading-5 [overflow-wrap:anywhere]">
+      {result.translatedText && <div dir="auto"><strong className="font-medium">English</strong><p>{result.translatedText}</p></div>}
+      <div dir="auto"><strong className="font-medium">Original</strong><p>{result.originalText}</p></div>
+      <p>Your photo is unchanged. OCR can misread text; check important details.</p>
+    </div>
+  </details>;
+  return <motion.section ref={panel} tabIndex={-1} aria-label="Local photo translation" aria-busy={stage === "reading" || stage === "translating"}
+    initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : 0.2 }}
+    onKeyDown={event => { if (event.key === "Escape" && !expanded) { event.stopPropagation(); onClose(); } }}
+    className="max-w-full rounded-lg text-left text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-100">
+    {image()}{controls()}{status}{transcript}
+    {expanded && <OverlayPortal onClose={() => setExpanded(false)}><div role="dialog" aria-modal="true" aria-label="Photo translation preview"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/95 p-4 backdrop-blur-xl dark:bg-[#181818]/95 sm:p-8"
+      onMouseDown={event => { if (event.target === event.currentTarget) setExpanded(false); }}>
+      <div className="flex max-h-full w-full max-w-6xl flex-col overflow-auto rounded-xl bg-slate-50 p-3 dark:bg-[#1F1F1F]">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">Photo translation</h2>{controls(true)}</div>
+        <div className="min-h-0 overflow-auto text-center">{image(true)}</div>
+        <div className="mt-3">{status}{transcript}</div>
+      </div>
+    </div></OverlayPortal>}
   </motion.section>;
 }

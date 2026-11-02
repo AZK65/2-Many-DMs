@@ -39,7 +39,9 @@ Ollama stores weights outside Git in its own model storage. Downloads go through
 
 ### Translate a photo privately
 
-Open a downloaded photo's message menu and choose **Translate photo to English locally**. The inline panel first reads the image with local Qwen vision, then translates the recognized text with local TranslateGemma. Expand **Original text from photo** to compare, or copy the translation. Your photo, caption and outgoing messages are unchanged. This also makes the recognized text searchable in this workspace.
+Open a downloaded photo's message menu and choose **Translate photo to English locally**. Translated text appears over its original area on the photo. Switch **Original / Translated** instantly, choose **Enlarge** for a larger view, or expand **Text & original** to compare and copy. Your photo, caption and outgoing messages are unchanged. Recognized text also becomes searchable in this workspace.
+
+On macOS, the included Swift helper uses on-device Vision text detection when the Swift runtime is available. It respects the photo's orientation and returns text positions without uploading the image. If that helper is unavailable (including on other operating systems), the downloaded Qwen vision model supplies estimated positions, labeled in the interface. TranslateGemma translates each region locally while retaining its position. No additional cloud service or model download is required for this overlay. Very dense images should be cropped first; OCR and translated wording still need human review for important details.
 
 PNG, JPEG and WebP photos up to the configured `OCR_MAX_MB` (20 MB by default) are supported. Use **Recover** first for a missing attachment. Remote image URLs are not fetched by OCR. Blurry text can be misread; verify important details against the photo. For dense documents or a text-limit warning, crop into smaller sections.
 

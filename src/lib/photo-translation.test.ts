@@ -7,6 +7,11 @@ import { localOllamaOrigin, localOllamaFetch, requireLocalModel } from "./local-
 import { localPhotoPath, recognizeLocalPhoto, cleanOcrText } from "./local-ocr";
 import { photoTranslationService, type PhotoRecord } from "./photo-translation";
 import { translateText } from "./translation";
+import { parsePhotoRegions } from "./photo-layout";
+import { translatePhotoRegions } from "./photo-region-translation";
+
+const regionFixture = [{ id: "0", text: "Bonjour", box: [0.1, 0.2, 0.8, 0.4] as [number, number, number, number] }];
+const layoutFixture = { originalText: "Bonjour", regions: regionFixture, engine: "apple-vision" };
 
 test("local AI rejects remote, credentialed and path-based endpoints before fetch", async () => {
   for (const value of ["https://api.example.com", "http://192.168.1.2:11434", "http://127.0.0.1.evil.test", "http://user:pass@localhost", "http://localhost/proxy", "http://localhost/?key=secret", "http://localhost/#proxy", "https://localhost"]) assert.throws(() => localOllamaOrigin(value));
@@ -71,8 +76,8 @@ function fixtureService() {
   let photo: PhotoRecord | null = { id: "photo", conversationId: "chat", mediaType: "image", mediaUrl: "/media/photo.png", deletedAt: null, ocrText: null, ocrStatus: null, ocrModel: null };
   let reads = 0, translations = 0;
   const service = photoTranslationService({ find: async () => photo && { ...photo }, save: async (_photo, text, model) => { if (!photo || photo.deletedAt) return false; photo.ocrText = text; photo.ocrModel = model; photo.ocrStatus = "complete"; return true; } }, {
-    recognize: async () => { reads++; return "Bonjour"; },
-    translate: async (text, target, _hint, _samples, mode) => { translations++; assert.equal(text, "Bonjour"); assert.equal(mode, "photo"); assert.equal(target.code, "en"); return { translatedText: "Hello", detectedLanguageCode: "fr", detectedLanguageName: "French", targetLanguageCode: "en", targetLanguageName: "English" }; },
+    recognize: async () => { reads++; return layoutFixture; },
+    translate: async (regions) => { translations++; assert.deepEqual(regions, regionFixture); return { translatedText: "Hello", regions: regions.map(r => ({ ...r, translatedText: "Hello" })), detectedLanguageName: "French" }; },
   });
   return { service, set: (value: PhotoRecord | null) => { photo = value; }, get: () => photo!, counts: () => [reads, translations] };
 }
@@ -82,7 +87,7 @@ test("photo pipeline recognizes, saves searchable text and translates without ed
   await assert.rejects(f.service("chat", "photo", "translate"), /Read the photo/);
   f.set({ ...f.get(), ocrText: "Background snippet", ocrStatus: "complete", ocrModel: "background-indexer" });
   await assert.rejects(f.service("chat", "photo", "translate"), /Read the photo/, "short background snippets cannot be translated as full photos");
-  assert.deepEqual(await f.service("chat", "photo", "recognize"), { originalText: "Bonjour", empty: false });
+  assert.deepEqual(await f.service("chat", "photo", "recognize"), { originalText: "Bonjour", regions: regionFixture, empty: false, layoutApproximate: false });
   assert.equal((await f.service("chat", "photo", "translate")).translatedText, "Hello");
   assert.equal(f.get().mediaUrl, "/media/photo.png"); assert.deepEqual(f.counts(), [1, 1]);
 });
@@ -103,10 +108,39 @@ test("duplicate requests coalesce and a failed read can be retried", async () =>
   assert.equal(f.counts()[0], 1);
   let attempt = 0;
   const service = photoTranslationService({ find: async () => f.get(), save: async () => true }, {
-    recognize: async () => { if (++attempt === 1) throw new Error("Ollama offline"); return "Bonjour"; }, translate: translateText,
+    recognize: async () => { if (++attempt === 1) throw new Error("Ollama offline"); return layoutFixture; }, translate: translatePhotoRegions,
   });
   await assert.rejects(service("chat", "photo", "recognize"), /offline/);
   assert.equal((await service("chat", "photo", "recognize")).originalText, "Bonjour");
+});
+
+test("overlay layout validates coordinates, preserves reading order and rejects incomplete or excessive regions", () => {
+  assert.deepEqual(parsePhotoRegions({ regions: [{ text: "Bonjour", box: [100, 200, 800, 400] }] }), regionFixture);
+  assert.deepEqual(parsePhotoRegions({ regions: [] }), []);
+  for (const box of [[-1, 0, 10, 10], [0, 0, 1001, 50], [0, 0, NaN, 50], [100, 100, 50, 50], [0, 0, 0, 50], [0, 0, "30", 50], [0, 0, 50]]) {
+    assert.throws(() => parsePhotoRegions({ regions: [{ text: "Bonjour", box }] }));
+  }
+  assert.throws(() => parsePhotoRegions({ regions: Array(65).fill({ text: "a", box: [0, 0, 10, 10] }) }));
+});
+
+test("overlay translations match exact region IDs and preserve URLs without moving boxes", async () => {
+  const saved = globalThis.fetch; let rows: any[] = [{ id: "0", text: "Hello OMNI_LINK_0_END" }];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/api/show")) return Response.json({ model_info: { architecture: "gemma" } });
+    const input = JSON.parse(String(init?.body));
+    if (input.format.properties.languageCode) return Response.json({ message: { content: '{"languageCode":"fr","languageName":"French"}' } });
+    assert.ok(!input.messages[0].content.includes("https://example.com"));
+    return Response.json({ message: { content: JSON.stringify({ translations: rows }) } });
+  };
+  const regions = [{ ...regionFixture[0], text: "Bonjour https://example.com/Original" }];
+  try {
+    const result = await translatePhotoRegions(regions);
+    assert.equal(result.translatedText, "Hello https://example.com/Original");
+    assert.deepEqual(result.regions[0].box, regions[0].box);
+    for (const invalid of [[], [{ id: "1", text: "Hello" }], [{ id: "0", text: "" }], [{ id: "0", text: "Hello OMNI_LINK_0_END/Changed" }]]) {
+      rows = invalid; await assert.rejects(translatePhotoRegions(regions));
+    }
+  } finally { globalThis.fetch = saved; }
 });
 
 test("photo translation preserves addresses and rejects silently truncated model output", async () => {
