@@ -1,6 +1,17 @@
 {
-  "current": "0.6.6",
+  "current": "0.6.7",
   "entries": [
+    {
+      "version": "0.6.7",
+      "date": "2026-11-02",
+      "title": "WhatsApp attachment recovery",
+      "notes": [
+        "Manual WhatsApp attachment downloads now use the 250 MB recovery limit instead of the smaller 25 MB background limit. Both limits respect your installation settings.",
+        "Stale attachment links request a fresh copy from the connected phone once, and refreshed download details survive a restart.",
+        "Repeated recovery clicks share one download. Interrupted downloads do not leave partial files behind.",
+        "Size limits, connection interruptions and storage problems no longer appear as expired attachments. Files unavailable on WhatsApp still require the original file or a resend."
+      ]
+    },
     {
       "version": "0.6.6",
       "date": "2026-11-01",

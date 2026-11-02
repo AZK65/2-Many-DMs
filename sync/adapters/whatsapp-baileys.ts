@@ -5,14 +5,15 @@ import qrcodeTerminal from "qrcode-terminal";
 import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
-  downloadMediaMessage,
+  downloadContentFromMessage,
   DisconnectReason,
   getContentType,
   jidNormalizedUser,
   normalizeMessageContent,
   proto,
 } from "@whiskeysockets/baileys";
-import { extFromMime, saveMediaStream, MAX_BYTES } from "../media";
+import { extFromMime, saveMediaStream } from "../media";
+import { downloadWhatsAppMedia, whatsappMediaContent, WhatsAppMediaRecoveryQueue } from "../whatsapp-media-download";
 import { DurableRecords } from "../retention";
 import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { avatarUnavailable } from "../avatar-errors";
@@ -145,6 +146,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private messageCache = new Map<string, any>();
   private rawMessages: DurableRecords<string>;
+  private mediaRecoveries = new WhatsAppMediaRecoveryQueue();
   private credentialsWrite: Promise<void> = Promise.resolve();
   private connectionPromise?: Promise<void>;
   private reconnectAttempts = 0;
@@ -491,6 +493,27 @@ export class WhatsAppBaileysAdapter implements Adapter {
     return saved ? proto.WebMessageInfo.decode(Buffer.from(saved, "base64")) : undefined;
   }
 
+  private rememberMessage(key: string, message: any): void {
+    this.messageCache.set(key, message);
+    this.rawMessages.put(key, Buffer.from(proto.WebMessageInfo.encode(message).finish()).toString("base64"));
+    if (this.messageCache.size > 2000) this.messageCache.delete(this.messageCache.keys().next().value!);
+  }
+
+  private async downloadAttachment(message: any, automatic: boolean) {
+    const key = `whatsapp:${jidNormalizedUser(message.key.remoteJid)}:${message.key.id}`;
+    return downloadWhatsAppMedia(message, {
+      automatic,
+      download: (current, signal) => {
+        const {content, type} = whatsappMediaContent(current);
+        return downloadContentFromMessage(content, type === "file" ? "document" : type, {options: {timeout: 60_000, signal}});
+      },
+      refresh: current => this.sock!.updateMediaMessage(current),
+      remember: current => this.rememberMessage(key, current),
+      save: (stream, {content, type}, maxBytes) => saveMediaStream(key,
+        extFromMime(content.mimetype || "", type === "sticker" ? "webp" : "bin"), stream, maxBytes),
+    });
+  }
+
   private async toInbound(msg: any, downloadMedia = true): Promise<InboundMessage | null> {
     const jid: string | undefined = msg.key?.remoteJid;
     if (isSkippable(jid) || (!isIndividual(jid) && !isGroup(jid))) return null;
@@ -599,9 +622,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
             numberFromJid(participant);
       }
     }
-    this.messageCache.set(base.messageExternalId, msg);
-    this.rawMessages.put(base.messageExternalId, Buffer.from(proto.WebMessageInfo.encode(msg).finish()).toString("base64"));
-    if (this.messageCache.size > 2000) this.messageCache.delete(this.messageCache.keys().next().value!);
+    this.rememberMessage(base.messageExternalId, msg);
 
     // Attribute group messages to the member who sent them (for member tags).
     if (group && !msg.key?.fromMe) {
@@ -629,34 +650,12 @@ export class WhatsAppBaileysAdapter implements Adapter {
     }
 
     if (mt) {
-      let url: string | null = null;
       const content: any = (normalizedMessage as any)[contentType!];
-      const mediaName: string | undefined = content?.fileName;
-      try {
-        if (!downloadMedia) {
-          base.media = { type: mt, url: null, name: mediaName, isGif: content?.gifPlayback === true };
-          return base;
-        }
-        const size = Number(content?.fileLength?.toNumber?.() ?? content?.fileLength ?? 0);
-        if (size > MAX_BYTES) throw new Error("Attachment exceeds automatic download limit");
-        const stream = await downloadMediaMessage(
-          msg,
-          "stream",
-          { options: { timeout: 60_000 } },
-          { logger: silent, reuploadRequest: this.sock!.updateMediaMessage }
-        );
-        if (stream) {
-          const mime: string =
-            content?.mimetype ||
-            content?.message?.documentMessage?.mimetype ||
-            "";
-          const ext = extFromMime(mime, mt === "sticker" ? "webp" : "bin");
-          url = await saveMediaStream(base.messageExternalId, ext, stream, MAX_BYTES);
-        }
-      } catch {
-        /* media expired on WA servers or undownloadable */
+      base.media = { type: mt, url: null, name: content?.fileName, isGif: content?.gifPlayback === true };
+      if (downloadMedia) {
+        try { base.media = await this.downloadAttachment(msg, true); }
+        catch { /* Preserve the message; paced retention/manual recovery reports the actual failure. */ }
       }
-      base.media = { type: mt, url, name: mediaName, isGif: content?.gifPlayback === true };
     }
 
     return base;
@@ -838,9 +837,20 @@ export class WhatsAppBaileysAdapter implements Adapter {
     }
   }
 
-  async recoverMedia(
-    _chatExternalId: string,
-    messageExternalId: string
+  recoverMedia(
+    chatExternalId: string,
+    messageExternalId: string,
+    options: { automatic?: boolean } = {}
+  ): Promise<void> {
+    const key = messageExternalId.replace(/@c\.us(?=:|$)/g, "@s.whatsapp.net");
+    return this.mediaRecoveries.run(key, options.automatic === true,
+      () => this.recoverMediaNow(chatExternalId, key, options.automatic === true));
+  }
+
+  private async recoverMediaNow(
+    chatExternalId: string,
+    messageExternalId: string,
+    automatic: boolean
   ): Promise<void> {
     if (!this.onMessage || !this.sock) {
       throw new Error("WhatsApp is not ready");
@@ -849,15 +859,18 @@ export class WhatsAppBaileysAdapter implements Adapter {
     const message = this.readMessage(messageExternalId);
     if (!message) {
       throw new Error(
-        "WhatsApp no longer has this message in the linked device history."
+        "This attachment's download details are missing from the linked device history. Open the chat in WhatsApp on your phone, then use Chat history here and retry."
       );
     }
-    const recovered = await this.toInbound(message);
-    if (!recovered?.media?.url) {
-      throw new Error(
-        "WhatsApp could not download this attachment. It may have expired."
-      );
+    const chat = jidNormalizedUser(chatExternalId.replace(/@c\.us$/, "@s.whatsapp.net"));
+    if (jidNormalizedUser(message.key?.remoteJid || "") !== chat || messageExternalId !== `whatsapp:${chat}:${message.key?.id}`) {
+      throw new Error("WhatsApp could not verify this attachment belongs to the selected chat.");
     }
+    // Recovery must not depend on unrelated group/avatar lookups and must not
+    // swallow errors or apply the automatic 25 MB budget to a manual click.
+    const recovered = await this.toInbound(message, false);
+    if (!recovered?.media) throw new Error("This WhatsApp message does not contain a downloadable attachment.");
+    recovered.media = await this.downloadAttachment(message, automatic);
     recovered.historical = true;
     await this.onMessage(recovered);
   }
