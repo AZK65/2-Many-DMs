@@ -153,12 +153,16 @@ export class TelegramAdapter implements Adapter {
   private state: AdapterStatus["state"] = "starting";
   private detail?: string;
   private reconnectPromise?: Promise<void>;
+  private liveInitialized = false;
+  private handlersInstalled = false;
+  private stopped = false;
   // forum channel id -> (topicId -> title), fetched once per channel.
   private senderNames = new Map<string, string>();
   private avatarEntities = new Map<string, any>();
   private forumTopics = new Map<string, Map<number, string>>();
   private onMessage?: (message: InboundMessage) => Promise<void>;
   private onReaction?: (reaction: InboundReaction) => Promise<void>;
+  private onRead?: (chatExternalId: string) => Promise<void>;
   private backgroundPauseUntil = 0;
   private historySync?: TelegramHistorySync;
   private historyTimer?: ReturnType<typeof setInterval>;
@@ -226,7 +230,7 @@ export class TelegramAdapter implements Adapter {
     if (message.includes("AUTH_KEY_DUPLICATED")) {
       return "Session invalidated — reconnect Telegram";
     }
-    if (message.includes("AUTH_KEY_UNREGISTERED")) {
+    if (/AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|SESSION_REVOKED|SESSION_EXPIRED|session expired/i.test(message)) {
       return "Session expired — reconnect Telegram";
     }
     return "Connection dropped";
@@ -613,26 +617,56 @@ export class TelegramAdapter implements Adapter {
     // GramJS reconnects internally, but its update loop can lose the socket
     // while our last explicit state is still "ready". Never advertise a dead
     // transport as sendable.
-    if (this.state === "ready" && !this.client.connected) this.state = "starting";
+    if (this.state === "ready" && (!this.client.connected || !this.liveInitialized)) {
+      this.state = "starting";
+      this.detail = "Reconnecting Telegram message sync";
+    }
     return { platform: "telegram", state: this.state, detail: this.detail, sync: this.historySync?.getStatus() };
   }
 
   async ensureReady(): Promise<void> {
-    if (this.client.connected) {
-      this.state = "ready";
-      return;
-    }
+    if (this.stopped) throw new Error("Telegram connector is stopped");
+    if (this.state === "ready" && this.client.connected && this.liveInitialized) return;
+    return this.connectAndInitialize(false);
+  }
+
+  private connectAndInitialize(reconnect: boolean): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error("Telegram connector is stopped"));
     if (!this.reconnectPromise) {
       this.state = "starting";
-      this.reconnectPromise = this.client
-        .connect()
-        .then(() => {
+      this.detail = "Connecting Telegram message sync";
+      // Keep transport, authorization and live-sync setup under one lock. A
+      // socket alone is not a working connector, especially after failed boot.
+      this.reconnectPromise = Promise.resolve()
+        .then(async () => {
+          if (this.stopped) throw new Error("Telegram connector is stopped");
+          if (!this.onMessage) throw new Error("Telegram message sync has not been started");
+          if (reconnect) await this.client.disconnect();
+          if (!this.client.connected) await this.client.connect();
           if (!this.client.connected) throw new Error("Telegram did not reconnect");
+          const me: any = await this.client.getMe();
+          if (!me?.id) throw new Error("Telegram session expired. Reconnect your account.");
+          if (this.stopped) throw new Error("Telegram connector is stopped");
+          const firstInitialization = !this.liveInitialized;
+          this.initializeSync();
+          this.liveInitialized = true;
           this.state = "ready";
+          this.detail = me.username ? "@" + me.username : "account";
+          console.log(`[telegram] live as ${this.detail}`);
+          // Resume checkpointed gaps immediately; do not wait for the next
+          // timer or recreate checkpoints/listeners on every reconnect.
+          this.catchUp();
+          if (firstInitialization && process.env.SYNC_BACKFILL !== "0" && !this.accountId) {
+            void this.backfill(this.onMessage, this.onReaction).catch((error) =>
+              console.error("[telegram] backfill error:", error)
+            );
+          }
         })
         .catch((error) => {
-          this.state = "disconnected";
-          this.detail = this.connectionErrorDetail(error);
+          if (!this.stopped) {
+            this.state = "disconnected";
+            this.detail = this.connectionErrorDetail(error);
+          }
           throw error;
         })
         .finally(() => {
@@ -643,10 +677,7 @@ export class TelegramAdapter implements Adapter {
   }
 
   async recover(): Promise<void> {
-    if (this.reconnectPromise) return this.reconnectPromise;
-    this.state = "starting";
-    await this.client.disconnect().catch(() => {});
-    await this.ensureReady();
+    return this.connectAndInitialize(true);
   }
 
   /**
@@ -700,43 +731,50 @@ export class TelegramAdapter implements Adapter {
     onRead?: (chatExternalId: string) => Promise<void>,
     onReaction?: (r: InboundReaction) => Promise<void>
   ): Promise<void> {
-    await this.ensureReady();
+    if (this.stopped) throw new Error("Telegram connector is stopped");
+    // Save callbacks BEFORE the first network request. Recovery must be able
+    // to finish the entire startup if the initial connection/auth check fails.
     this.onMessage = onMessage;
+    this.onRead = onRead;
     this.onReaction = onReaction;
+    await this.ensureReady();
+  }
 
+  private catchUp(): void {
+    void this.historySync?.run().catch(error => console.error("[telegram] automatic history error:", error));
+  }
+
+  private initializeSync(): void {
     // Register live handlers before starting history import. Backfill can take
     // a long time when chats contain media; live DMs must never wait behind it.
-    this.client.addEventHandler(async (event: NewMessageEvent) => {
-      try {
-        const msg: any = event.message;
-        if (!msg.isPrivate && !msg.isGroup && !msg.isChannel) return; // DMs + groups + channels
-        const chat = await msg.getChat();
-        if (!chat) return;
-        await this.ingestMessage(chat, msg, onMessage, { downloadMedia: false, downloadAvatar: false });
-      } catch (e) {
-        console.error("[telegram] handler error:", e);
-      }
-    }, new NewMessage({}));
+    if (!this.handlersInstalled) {
+      this.client.addEventHandler(async (event: NewMessageEvent) => {
+        try {
+          if (this.stopped || !this.onMessage) return;
+          const msg: any = event.message;
+          if (!msg.isPrivate && !msg.isGroup && !msg.isChannel) return; // DMs + groups + channels
+          const chat = await msg.getChat();
+          if (!chat || this.stopped || !this.onMessage) return;
+          await this.ingestMessage(chat, msg, this.onMessage, { downloadMedia: false, downloadAvatar: false });
+        } catch (e) {
+          console.error("[telegram] handler error:", e);
+        }
+      }, new NewMessage({}));
 
-    // Read-state sync: Telegram pushes UpdateReadHistoryInbox when you read a
-    // chat on another device, so we can clear the unread badge here.
-    if (onRead) {
+      // Read-state sync: Telegram pushes UpdateReadHistoryInbox when you read a
+      // chat on another device, so we can clear the unread badge here.
       this.client.addEventHandler((update: any) => {
+        if (this.stopped || !this.onRead) return;
         if (update?.className !== "UpdateReadHistoryInbox") return;
         const peer = update.peer;
         const uid = peer?.userId ?? peer?.chatId ?? peer?.channelId;
-        if (uid != null) onRead(String(uid)).catch(() => {});
+        if (uid != null) this.onRead(String(uid)).catch(() => {});
       });
-    }
 
-    const me: any = await this.client.getMe();
-    this.detail = me?.username ? "@" + me.username : "account";
-    console.log(`[telegram] live as ${this.detail}`);
-
-    // Live reactions. Telegram pushes UpdateMessageReactions with the current
-    // state for that message, so we forward it as-is and let the store replace.
-    if (onReaction) {
+      // Live reactions. Telegram pushes UpdateMessageReactions with the current
+      // state for that message, so we forward it as-is and let the store replace.
       this.client.addEventHandler((update: any) => {
+        if (this.stopped || !this.onReaction) return;
         if (update?.className !== "UpdateMessageReactions") return;
         try {
           const peer = update.peer;
@@ -748,18 +786,17 @@ export class TelegramAdapter implements Adapter {
             id: update.msgId,
             reactions: update.reactions,
           });
-          if (r) onReaction(r).catch(() => {});
+          if (r) this.onReaction(r).catch(() => {});
         } catch (e) {
           console.error("[telegram] reaction handler error:", e);
         }
       });
+      this.handlersInstalled = true;
     }
 
     // Continuous catch-up is independent of the optional expensive startup
     // import. The launcher disables that import, not durable message storage.
-    if (this.accountId) {
-      this.historySync?.stop();
-      if (this.historyTimer) clearInterval(this.historyTimer);
+    if (this.accountId && !this.historySync) {
       const knownDialogs = new Map<string, { id: string; latestId: number; entity: unknown }>();
       let fullDiscoveryAt = 0;
       this.historySync = new TelegramHistorySync({
@@ -776,19 +813,12 @@ export class TelegramAdapter implements Adapter {
           return [...knownDialogs.values()];
         },
         fetch: async (entity, options) => this.client.getMessages(entity as any, options) as any,
-        save: async (entity, message) => { await this.ingestMessage(entity, message, onMessage, { downloadAvatar: false, downloadMedia: false }, true); },
-        ready: () => Boolean(this.onMessage && this.client.connected && this.state === "ready"),
+        save: async (entity, message) => { if (!this.stopped && this.onMessage) await this.ingestMessage(entity, message, this.onMessage, { downloadAvatar: false, downloadMedia: false }, true); },
+        ready: () => Boolean(!this.stopped && this.liveInitialized && this.onMessage && this.client.connected && this.state === "ready"),
         beforePage: () => this.waitForOutboundPriority(),
       });
-      const catchUp = () => { void this.historySync?.run().catch(e => console.error("[telegram] automatic history error:", e)); };
-      catchUp();
-      this.historyTimer = setInterval(catchUp, 5 * 60_000);
+      this.historyTimer = setInterval(() => this.catchUp(), 5 * 60_000);
       this.historyTimer.unref?.();
-    }
-    if (process.env.SYNC_BACKFILL !== "0" && !this.accountId) {
-      void this.backfill(onMessage, onReaction).catch((e) =>
-        console.error("[telegram] backfill error:", e)
-      );
     }
   }
 
@@ -1457,11 +1487,18 @@ export class TelegramAdapter implements Adapter {
   }
 
   async stop(): Promise<void> {
+    // A delayed connect/getMe must not resurrect a removed or stopped account.
+    this.stopped = true;
+    this.state = "disabled";
+    this.detail = "Telegram connector is stopped";
+    this.liveInitialized = false;
     this.historySync?.stop();
     if (this.historyTimer) clearInterval(this.historyTimer);
     this.historyTimer = undefined;
     this.onMessage = undefined;
     this.onReaction = undefined;
+    this.onRead = undefined;
+    await this.reconnectPromise?.catch(() => {});
     await this.mediaDownloader.stop();
     await this.avatarDownloader.stop();
     await this.client.disconnect();
