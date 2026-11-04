@@ -15,7 +15,7 @@ import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate,
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
-import { downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
+import { downloadNativeXFile, downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
 import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapshot, reconcileXAccountPreviews, xSnapshotProofs } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
 import { waitForXSendConfirmation, type XSendConfirmation } from "../x-send-confirmation";
@@ -164,6 +164,7 @@ export class XAdapter implements Adapter {
   private automaticRepairTimer?: ReturnType<typeof setTimeout>;
   private automaticRepairRunning = false;
   private automaticRepairNextAt = Date.now() + 60_000;
+  private manualRecoveryPending = 0;
   private sendPageIdleTimer?: ReturnType<typeof setTimeout>;
   private reconnectFailures = 0;
   private proxyUrl?: string;
@@ -1042,7 +1043,7 @@ export class XAdapter implements Adapter {
     onMessage: (m: InboundMessage) => Promise<void>,
     initial = false
   ): Promise<void> {
-    if (this.stopping || this.state !== "ready" || !this.page || this.busy || this.outboundPending > 0) return;
+    if (this.stopping || this.state !== "ready" || !this.page || this.busy || this.outboundPending > 0 || this.manualRecoveryPending > 0) return;
     if (Date.now() < this.inboxRetryAt) {
       await this.parkForCooldown();
       return;
@@ -1304,6 +1305,10 @@ export class XAdapter implements Adapter {
 
   private async processAutomaticRepair(): Promise<void> {
     if (this.stopping || this.automaticRepairRunning || this.automaticRepairQueue.size === 0) return;
+    if (this.manualRecoveryPending > 0) {
+      this.scheduleAutomaticRepair(1000);
+      return;
+    }
     if (Date.now() < this.inboxRetryAt) {
       this.scheduleAutomaticRepair(this.inboxRetryAt - Date.now() + 1000);
       return;
@@ -1582,6 +1587,7 @@ export class XAdapter implements Adapter {
       windows.push(await this.readMessageWindow(page, { onWindow }));
     }
     let unchanged = 0;
+    let targetHydrationAttempts = 0;
     let reachedStart = false;
     const historyDeadline = Date.now() + 55_000;
     for (let k = 0; k < scrollRounds; k++) {
@@ -1589,7 +1595,20 @@ export class XAdapter implements Adapter {
       if (Date.now() >= historyDeadline) break;
       if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
       const collected = mergeXHistory(windows);
-      if (range?.targetId && collected.some((message) => message.id === range.targetId)) break;
+      const target = range?.targetId ? collected.find((message) => message.id === range.targetId) : undefined;
+      if (target?.attachments?.length) break;
+      if (target && range?.targetId) {
+        if (targetHydrationAttempts >= 8) throw new Error("X found the message, but has not exposed its attachment controls yet");
+        targetHydrationAttempts += 1;
+        const row = await page.$(xchatSelector(`[data-testid="message-${range.targetId}"]`));
+        if (row) {
+          const focus = await row.$('[data-dm-message-focus-target]');
+          try { await (focus || row).hover().catch(() => null); } finally { await focus?.dispose(); await row.dispose(); }
+        }
+        await delay(500);
+        windows.push(await this.readMessageWindow(page, { onWindow }));
+        continue;
+      }
       if (range?.sinceTimestamp && collected.some((message) => message.timestamp && message.timestamp <= range.sinceTimestamp!)) break;
       if (range && !range.targetId && !range.sinceTimestamp && collected.filter((message) => message.timestamp && (!range.beforeTimestamp || message.timestamp < range.beforeTimestamp)).length >= range.count) break;
       const position = await page.evaluate(scrollXSurface, { kind: "messages", direction: "older" } as const);
@@ -1611,7 +1630,7 @@ export class XAdapter implements Adapter {
     }
     if (isRequest) await this.restoreRequestList(page);
     if (!messages.length) throw new Error("X message history did not load; no repair checkpoint was saved");
-    const covered = xHistoryMatchesPreview(messages, range?.latest) && (range?.targetId ? messages.some((message) => message.id === range.targetId) : reachedStart || !range || (range.sinceTimestamp
+    const covered = xHistoryMatchesPreview(messages, range?.latest) && (range?.targetId ? messages.some((message) => message.id === range.targetId && Boolean(message.attachments?.length)) : reachedStart || !range || (range.sinceTimestamp
       ? messages.some((message) => message.timestamp && message.timestamp <= range.sinceTimestamp!)
       : messages.filter((message) => message.timestamp && (!range.beforeTimestamp || message.timestamp < range.beforeTimestamp)).length >= range.count));
     return { messages, covered };
@@ -1692,9 +1711,11 @@ export class XAdapter implements Adapter {
   ): Promise<NonNullable<InboundMessage["media"]>> {
     const externalKey = index ? `x:${messageId}:attachment:${index}` : `x:${messageId}`;
     const cached = this.attachmentCache.get(externalKey);
-    if (cached?.url && fs.existsSync(path.join(process.cwd(), "public", cached.url))) return { ...cached, isGif: cached.isGif || attachment.isGif };
+    const poisonedIcon = (value?: { name?: string; url?: string | null }) => /svg\+xml|\.svgxml(?:$|[?#])/i.test(`${value?.name || ""} ${value?.url || ""}`);
+    if (cached?.url && cached.type === attachment.type && !poisonedIcon(cached) && fs.existsSync(path.join(process.cwd(), "public", cached.url))) return { ...cached, isGif: cached.isGif || attachment.isGif };
     const saved = await prisma.message.findUnique({ where: { externalKey }, select: { mediaUrl: true, mediaName: true, mediaType: true, mediaIsGif: true } });
-    if (saved?.mediaUrl?.startsWith("/media/") && fs.existsSync(path.join(process.cwd(), "public", saved.mediaUrl))) {
+    const repairingFileCard = poisonedIcon({ name: saved?.mediaName || undefined, url: saved?.mediaUrl });
+    if (saved?.mediaUrl?.startsWith("/media/") && saved.mediaType === attachment.type && !poisonedIcon({ name: saved.mediaName || undefined, url: saved.mediaUrl }) && fs.existsSync(path.join(process.cwd(), "public", saved.mediaUrl))) {
       const result = { type: (saved.mediaType || attachment.type) as NonNullable<InboundMessage["media"]>["type"], url: saved.mediaUrl, name: saved.mediaName || attachment.name, isGif: saved.mediaIsGif || attachment.isGif };
       this.attachmentCache.set(externalKey, result);
       return result;
@@ -1702,16 +1723,25 @@ export class XAdapter implements Adapter {
     const unavailable = { type: attachment.type, url: null, name: attachment.name, isGif: attachment.isGif };
     if ((!attachment.source && !attachment.nativeDownload) || (this.attachmentRetryAt.get(externalKey) || 0) > Date.now()) return unavailable;
     try {
-      const native = attachment.nativeDownload && attachment.type === "audio" && index === 0
-        ? await downloadNativeXVoice(page, messageId, MAX_BYTES) : null;
-      const file = native ? { mime: native.mime, base64: native.bytes.toString('base64') }
+      let native = attachment.nativeDownload && index === 0
+        ? attachment.type === "audio" ? await downloadNativeXVoice(page, messageId, MAX_BYTES)
+          : attachment.type === "file" ? await downloadNativeXFile(page, messageId, MAX_BYTES) : null
+        : null;
+      let file = native ? { mime: native.mime, base64: native.bytes.toString('base64') }
         : await page.evaluate(readXAttachmentBytes, { url: attachment.source!, maxBytes: MAX_BYTES });
-      if (attachment.type !== "file" && !file.mime.startsWith(`${attachment.type}/`)) throw new Error("X returned an unexpected attachment format");
+      let resolvedType = attachment.type;
+      if (attachment.type === "image" && file.mime === "image/svg+xml" && index === 0) {
+        native = await downloadNativeXFile(page, messageId, MAX_BYTES);
+        file = { mime: native.mime, base64: native.bytes.toString('base64') };
+        resolvedType = "file";
+      }
+      if (resolvedType !== "file" && !file.mime.startsWith(`${resolvedType}/`)) throw new Error("X returned an unexpected attachment format");
       const namedExt = path.extname(attachment.name || "").slice(1).replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "bin";
       const mimeExt = file.mime === "application/octet-stream" ? namedExt : extFromMime(file.mime, namedExt);
-      const ext = mimeExt.length <= 12 ? mimeExt : namedExt;
+      const ext = native?.ext || (mimeExt.length <= 12 ? mimeExt : namedExt);
       const url = saveMedia(`x_${messageId}_${index}`, ext, Buffer.from(file.base64, "base64"));
-      const result = { type: attachment.type, url, name: native ? `Voice message.${ext}` : attachment.name || `Attachment.${ext}`, isGif: attachment.isGif || file.mime === "image/gif" };
+      const nativeName = native && "name" in native && typeof native.name === "string" ? native.name : undefined;
+      const result = { type: resolvedType, url, name: nativeName || (native ? `Voice message.${ext}` : attachment.name || `Attachment.${ext}`), isGif: attachment.isGif || file.mime === "image/gif" };
       this.attachmentRetryAt.delete(externalKey);
       this.attachmentCache.set(externalKey, result);
       if (this.attachmentCache.size > 1000) this.attachmentCache.delete(this.attachmentCache.keys().next().value!);
@@ -2078,7 +2108,22 @@ export class XAdapter implements Adapter {
     const conversation = await prisma.conversation.findFirst({ where: { platform: "x", externalId: chatExternalId, ...(this.accountId ? { accountId: this.accountId } : {}) }, select: { inboxCategory: true } });
     this.attachmentRetryAt.delete(messageExternalId);
     this.attachmentCache.delete(messageExternalId);
-    await this.requestHistory(chatExternalId, "", 0, 1, { inboxCategory: conversation?.inboxCategory === "spam" ? "spam" : "general", targetMessageId: id });
+    // A user opening a document must not lose a race with the background
+    // history audit. Hold future passive work, let the current safe operation
+    // finish, then honor the same X request spacing before taking this turn.
+    this.manualRecoveryPending += 1;
+    try {
+      const paceMs = Math.max(30000, Number(process.env.X_HISTORY_PACE_MS || 60000));
+      const deadline = Date.now() + 180000;
+      while (!this.stopping && (this.busy || this.outboundPending > 0 || this.lastHistoryRequestAt + paceMs > Date.now())) {
+        if (Date.now() >= deadline) throw new Error("X is still syncing. Try the document again in a moment");
+        await delay(Math.min(1000, Math.max(100, this.lastHistoryRequestAt + paceMs - Date.now())));
+      }
+      await this.requestHistory(chatExternalId, "", 0, 1, { inboxCategory: conversation?.inboxCategory === "spam" ? "spam" : "general", targetMessageId: id });
+    } finally {
+      this.manualRecoveryPending = Math.max(0, this.manualRecoveryPending - 1);
+      this.scheduleAutomaticRepair(1000);
+    }
   }
 
   async editMessage(chat: string, key: string, body: string, context?: { expectedBody: string }): Promise<void> {

@@ -58,52 +58,75 @@ export function nativeXAudioFormat(bytes: Buffer): { mime: string; ext: string }
   throw new Error('X did not return a recognized audio file');
 }
 
-/** X exposes voice bytes through its native Download action, not the DOM.
- * Only this exact row's Download button is clicked. Capture only this page's
- * bounded download into an isolated temporary directory, never Downloads. */
-export async function downloadNativeXVoice(page: Page, id: string, maxBytes: number): Promise<{ bytes: Buffer; ext: string; mime: string }> {
+const FILE_MIME: Record<string, string> = {
+  pdf: 'application/pdf', zip: 'application/zip', txt: 'text/plain', csv: 'text/csv', rtf: 'application/rtf',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+};
+
+export function nativeXFileFormat(bytes: Buffer, suggestedFilename = 'Attachment'): { mime: string; ext: string; name: string } {
+  if (!bytes.length) throw new Error('X returned an empty file');
+  const clean = path.basename(suggestedFilename).replace(/[\u0000-\u001f\u007f]/g, '').trim() || 'Attachment';
+  const suggestedExt = path.extname(clean).slice(1).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
+  const prefix = bytes.subarray(0, 512).toString('utf8').trimStart().toLowerCase();
+  if (prefix.startsWith('<!doctype html') || prefix.startsWith('<html')) throw new Error('X returned a web page instead of the attached file');
+  let ext = suggestedExt;
+  let mime = FILE_MIME[ext] || 'application/octet-stream';
+  const isPdf = bytes.subarray(0, 5).toString() === '%PDF-';
+  if (isPdf) { ext = 'pdf'; mime = FILE_MIME.pdf; }
+  else if (bytes.subarray(0, 4).toString('hex') === '504b0304') { ext = ['docx', 'xlsx', 'pptx', 'zip'].includes(ext) ? ext : 'zip'; mime = FILE_MIME[ext]; }
+  else if (bytes.subarray(0, 8).toString('hex') === '89504e470d0a1a0a') { ext = 'png'; mime = FILE_MIME.png; }
+  else if (bytes.subarray(0, 3).toString('hex') === 'ffd8ff') { ext = 'jpg'; mime = FILE_MIME.jpg; }
+  if (suggestedExt === 'pdf' && !isPdf) throw new Error('X did not return a valid PDF file');
+  if (!ext) ext = 'bin';
+  const stem = path.basename(clean, path.extname(clean)) || 'Attachment';
+  return { mime, ext, name: `${stem}.${ext}` };
+}
+
+async function downloadNativeXMedia(page: Page, id: string, maxBytes: number, kind: 'voice message' | 'file'): Promise<{ bytes: Buffer; suggestedFilename: string }> {
   const row = await page.$(messageSelector(id));
-  if (!row) throw new Error('X voice message is no longer visible');
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omni-x-voice-'));
+  if (!row) throw new Error(`X ${kind} is no longer visible`);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), kind === 'file' ? 'omni-x-file-' : 'omni-x-voice-'));
   const session = await page.createCDPSession();
   const browserContextId = page.browserContext().id;
   let guid: string | undefined;
+  let suggestedFilename = kind === 'file' ? 'Attachment' : 'Voice message';
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { frameTree } = await session.send('Page.getFrameTree');
     await session.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: directory, eventsEnabled: true, browserContextId });
     const downloaded = new Promise<string>((resolve, reject) => {
       session.on('Browser.downloadWillBegin', event => {
-        if (event.frameId !== frameTree.frame.id) return;
-        if (!/^[a-f0-9-]+$/i.test(event.guid)) return;
+        if (event.frameId !== frameTree.frame.id || !/^[a-f0-9-]+$/i.test(event.guid)) return;
         guid = event.guid;
-        if (!/^(?:blob:https:\/\/x\.com\/|https:\/\/(?:[^/]+\.)?(?:twimg\.com|twitter\.com|x\.com)\/)/i.test(event.url)) {
+        suggestedFilename = event.suggestedFilename || suggestedFilename;
+        if (!/^(?:blob:https:\/\/x\.com\/|https:\/\/(?:[^/]+\.)?(?:twimg\.com|twitter\.com|x\.com)\/|https:\/\/ton\.twitter\.com\/)/i.test(event.url)) {
           void session.send('Browser.cancelDownload', { guid: event.guid, browserContextId }).catch(() => {});
-          reject(new Error('Unsupported X voice download source'));
+          reject(new Error(`Unsupported X ${kind} download source`));
         }
       });
       session.on('Browser.downloadProgress', event => {
         if (event.guid !== guid) return;
         if (event.totalBytes > maxBytes || event.receivedBytes > maxBytes) {
           void session.send('Browser.cancelDownload', { guid: event.guid, browserContextId }).catch(() => {});
-          reject(new Error('X voice message exceeds the download size limit'));
+          reject(new Error(`X ${kind} exceeds the download size limit`));
         } else if (event.state === 'completed') resolve(event.guid);
-        else if (event.state === 'canceled') reject(new Error('X voice download was canceled'));
+        else if (event.state === 'canceled') reject(new Error(`X ${kind} download was canceled`));
       });
-      timer = setTimeout(() => reject(new Error('X voice download timed out')), 20000);
+      timer = setTimeout(() => reject(new Error(`X ${kind} download timed out`)), 20000);
     });
-    // Attach a handler immediately, including while the button is appearing.
     void downloaded.catch(() => {});
     const content = await row.$('[data-dm-message-focus-target]');
     try { await (content || row).hover(); } finally { await content?.dispose(); }
-    const button = await row.waitForSelector('button[aria-label="Download"]', { timeout: 2500 });
-    if (!button) throw new Error('X has not exposed this voice message for download');
+    const button = await row.waitForSelector('button[aria-label="Download"],button[aria-label="download"]', { timeout: 2500 });
+    if (!button) throw new Error(`X has not exposed this ${kind} for download`);
     await button.click();
     const file = path.join(directory, await downloaded);
     const stat = await fs.stat(file);
-    if (!stat.isFile() || !stat.size || stat.size > maxBytes) throw new Error('Invalid X voice download size');
-    const bytes = await fs.readFile(file);
-    return { bytes, ...nativeXAudioFormat(bytes) };
+    if (!stat.isFile() || !stat.size || stat.size > maxBytes) throw new Error(`Invalid X ${kind} download size`);
+    return { bytes: await fs.readFile(file), suggestedFilename };
   } finally {
     if (timer) clearTimeout(timer);
     if (guid) await session.send('Browser.cancelDownload', { guid, browserContextId }).catch(() => {});
@@ -112,4 +135,17 @@ export async function downloadNativeXVoice(page: Page, id: string, maxBytes: num
     await row.dispose();
     await fs.rm(directory, { recursive: true, force: true });
   }
+}
+
+/** X exposes voice bytes through its native Download action, not the DOM.
+ * Only this exact row's Download button is clicked. Capture only this page's
+ * bounded download into an isolated temporary directory, never Downloads. */
+export async function downloadNativeXVoice(page: Page, id: string, maxBytes: number): Promise<{ bytes: Buffer; ext: string; mime: string }> {
+  const result = await downloadNativeXMedia(page, id, maxBytes, 'voice message');
+  return { bytes: result.bytes, ...nativeXAudioFormat(result.bytes) };
+}
+
+export async function downloadNativeXFile(page: Page, id: string, maxBytes: number): Promise<{ bytes: Buffer; ext: string; mime: string; name: string }> {
+  const result = await downloadNativeXMedia(page, id, maxBytes, 'file');
+  return { bytes: result.bytes, ...nativeXFileFormat(result.bytes, result.suggestedFilename) };
 }

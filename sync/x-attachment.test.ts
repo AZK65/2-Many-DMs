@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { readXAttachmentBytes, readXMessageDom } from './x-message-dom';
 import { mergeXHistory } from './x-history';
 import { parseXMessageInfoDate, xHistoryMatchesPreview } from './x-history';
-import { downloadNativeXVoice, nativeXAudioFormat, readNativeXMessageTime } from './x-native-media';
+import { downloadNativeXVoice, nativeXAudioFormat, nativeXFileFormat, readNativeXMessageTime } from './x-native-media';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -114,6 +114,16 @@ test('voice format is verified from bytes, not an untrusted filename', () => {
   assert.throws(() => nativeXAudioFormat(Buffer.from('<html>login</html>')), /recognized audio/);
 });
 
+test('native X files keep safe document names and verify PDFs from bytes', () => {
+  assert.deepEqual(nativeXFileFormat(Buffer.from('%PDF-1.7 fixture'), 'Q4 Report.pdf'), {
+    mime: 'application/pdf', ext: 'pdf', name: 'Q4 Report.pdf',
+  });
+  assert.equal(nativeXFileFormat(Buffer.from('PK\x03\x04fixture'), 'Forecast.xlsx').mime,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  assert.throws(() => nativeXFileFormat(Buffer.from('<html>Sign in</html>'), 'Report.pdf'), /web page/);
+  assert.throws(() => nativeXFileFormat(Buffer.from('not a pdf'), 'Report.pdf'), /valid PDF/);
+});
+
 test('native Info reads the exact row without scrolling virtualized message handles', async () => {
   const events: string[] = [];
   const nativeId = '4fe69963-037d-4723-8abd-74773a204e58';
@@ -166,7 +176,7 @@ test('native voice capture only clicks the scoped Download button and cleans tem
     $: async (selector: string) => {
       assert.match(selector, /message-3fcf22eb-5eed-4608-a8b6-4269af5b65e1/);
       return { $: async () => ({ hover: async () => {}, dispose: async () => {} }), hover: async () => { throw new Error('Do not hover the empty row center'); }, dispose: async () => {}, waitForSelector: async (selector: string) => {
-        assert.equal(selector, 'button[aria-label="Download"]');
+        assert.equal(selector, 'button[aria-label="Download"],button[aria-label="download"]');
         return { click: async () => {
           session.emit('Browser.downloadWillBegin', { frameId: 'other', url: 'blob:https://x.com/other', guid: 'other' });
           session.emit('Browser.downloadProgress', { guid: 'other', state: 'completed', totalBytes: 10, receivedBytes: 10 });

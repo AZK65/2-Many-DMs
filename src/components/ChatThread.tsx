@@ -51,6 +51,7 @@ import {
   loadConversationDraft,
   saveConversationDraft,
 } from "@/lib/drafts";
+import { messageLinks } from "@/lib/message-links";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -58,9 +59,6 @@ const DATE_RE =
 function mentionsDate(text: string): boolean {
   return !!text && DATE_RE.test(text);
 }
-
-const MESSAGE_URL_RE = /https?:\/\/[^\s<>"']+/gi;
-const TRAILING_URL_PUNCTUATION_RE = /[),.!?;:\]}]+$/;
 
 function compactUrlLabel(rawUrl: string): string {
   try {
@@ -218,11 +216,8 @@ function MessageText({
     ...(message.mentionTargets || {}),
   };
 
-  for (const match of message.body.matchAll(MESSAGE_URL_RE)) {
-    const start = match.index ?? 0;
-    let url = match[0];
-    const trailingPunctuation = url.match(TRAILING_URL_PUNCTUATION_RE)?.[0] || "";
-    if (trailingPunctuation) url = url.slice(0, -trailingPunctuation.length);
+  for (const match of messageLinks(message.body)) {
+    const { start, url, trailingPunctuation } = match;
     const urlLabel = compactUrlLabel(url);
 
     if (start > cursor) {
@@ -253,7 +248,7 @@ function MessageText({
     );
 
     if (trailingPunctuation) content.push(trailingPunctuation);
-    cursor = start + match[0].length;
+    cursor = start + match.matched.length;
   }
 
   if (cursor < message.body.length) {

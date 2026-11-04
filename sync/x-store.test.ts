@@ -115,6 +115,12 @@ test("X history repairs dates without unread inflation, duplicates, or changing 
     assert.equal(warmWrites.length, 1, "route changes during an async read must discard results");
     await persistInbound({ ...photo, messageExternalId: "x:document-native", media: { type: "file", url: "/media/document-fixture.pdf", name: "Report.pdf" } });
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:document-native" } })).mediaName, "Report.pdf");
+    await persistInbound({ ...photo, messageExternalId: "x:misclassified-file", media: { type: "image", url: "/media/file-icon.svgxml", name: "Attachment.svg+xml" } });
+    await persistInbound({ ...photo, messageExternalId: "x:misclassified-file", media: { type: "file", url: "/media/recovered-report.pdf", name: "Recovered report.pdf" } });
+    const recoveredFile = await prisma.message.findUniqueOrThrow({ where: { externalKey: "x:misclassified-file" } });
+    assert.equal(recoveredFile.mediaType, "file");
+    assert.equal(recoveredFile.mediaUrl, "/media/recovered-report.pdf");
+    assert.equal(recoveredFile.mediaName, "Recovered report.pdf");
 
     const gif = { ...message, historical: true, messageExternalId: "x:gif-native", body: "", media: { type: "video" as const, url: "/media/gif-fixture.mp4" } };
     await persistInbound(gif);

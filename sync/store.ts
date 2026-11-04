@@ -320,7 +320,8 @@ async function persistInboundNow(m: InboundMessage): Promise<string | null> {
       // animated stickers). Replace stale paths as well as filling missing
       // ones so an explicit recovery can repair an already-broken attachment.
       patch.mediaUrl = m.media.url;
-      if (m.media.name && !existing.mediaName) patch.mediaName = m.media.name;
+      if (m.media.type !== existing.mediaType) patch.mediaType = m.media.type;
+      if (m.media.name && (!existing.mediaName || m.media.type !== existing.mediaType)) patch.mediaName = m.media.name;
       if (m.body && !existing.body) patch.body = m.body;
       // A repaired/re-downloaded image may differ from the file previously
       // indexed. Queue it for fresh local OCR instead of keeping stale text.

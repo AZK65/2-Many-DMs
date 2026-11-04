@@ -6,6 +6,7 @@ import { CloseIcon, ExternalLinkIcon, GlobeIcon, RefreshIcon } from "./icons";
 import { OverlayPortal } from "./OverlayPortal";
 
 type PreviewState = "loading" | "ready" | "slow" | "error";
+type XPostPreview = { postUrl: string; authorName: string; authorUrl?: string; text: string };
 
 function linkDetails(url: string) {
   try {
@@ -84,8 +85,24 @@ export function LinkPreview({
 }) {
   const [state, setState] = useState<PreviewState>("loading");
   const [frameKey, setFrameKey] = useState(0);
+  const [xPost, setXPost] = useState<XPostPreview | null>(null);
   const details = linkDetails(url);
   const source = previewSource(url);
+
+  useEffect(() => {
+    if (source.kind !== "post") return;
+    const controller = new AbortController();
+    setState("loading");
+    setXPost(null);
+    void fetch(`/api/link-preview?url=${encodeURIComponent(url)}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Preview unavailable");
+        if (!controller.signal.aborted) { setXPost(data); setState("ready"); }
+      })
+      .catch(() => { if (!controller.signal.aborted) setState("error"); });
+    return () => controller.abort();
+  }, [frameKey, source.kind, url]);
 
   useEffect(() => {
     if (state !== "loading") return;
@@ -223,16 +240,33 @@ export function LinkPreview({
                 </div>
               </div>
             )}
-            <iframe
-              key={frameKey}
-              src={source.url}
-              title={`Preview of ${label}`}
-              className="h-full w-full border-0 bg-white"
-              sandbox={previewSandbox(source.url)}
-              referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={() => setState("ready")}
-              onError={() => setState("error")}
-            />
+            {source.kind === "post" ? (
+              xPost && state === "ready" ? (
+                <div className="grid h-full place-items-center overflow-y-auto p-4 sm:p-8">
+                  <article className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none">
+                    <div className="mb-5 flex items-center gap-3">
+                      <span className="grid h-10 w-10 place-items-center rounded-full bg-black text-sm font-bold text-white dark:bg-white dark:text-black">X</span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{xPost.authorName}</p>
+                        <p className="text-xs text-slate-500 dark:text-neutral-400">Public post on X</p>
+                      </div>
+                    </div>
+                    <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-800 dark:text-neutral-100">{xPost.text}</p>
+                  </article>
+                </div>
+              ) : null
+            ) : (
+              <iframe
+                key={frameKey}
+                src={source.url}
+                title={`Preview of ${label}`}
+                className="h-full w-full border-0 bg-white"
+                sandbox={previewSandbox(source.url)}
+                referrerPolicy="strict-origin-when-cross-origin"
+                onLoad={() => setState("ready")}
+                onError={() => setState("error")}
+              />
+            )}
           </div>
 
           <footer className="flex min-h-9 items-center justify-between gap-3 border-t border-slate-200 bg-white px-3 text-[11px] text-slate-500 sm:px-4 dark:border-white/10 dark:bg-[#181818] dark:text-neutral-400">

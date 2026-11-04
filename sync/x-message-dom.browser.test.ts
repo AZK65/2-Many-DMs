@@ -34,5 +34,23 @@ test("real X text-wrapper structure excludes both timestamp copies without trimm
     assert.equal(richerXMessageText("Meet at 5:30 PM", "Meet at"), "Meet at 5:30 PM");
     assert.equal(richerXMessageText("First line\n11:45 AM", "First line"), "First line\n11:45 AM");
     assert.equal(richerXMessageText("First line\n11:45 AM\n11:46 AM", "First line"), "First line\n11:45 AM\n11:46 AM");
+
+    await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="xchatEmbedRoute"]')!.shadowRoot!;
+      const row = document.createElement('div');
+      row.dataset.testid = 'message-11111111-1111-4111-8111-111111111111';
+      row.innerHTML = '<div data-side="start"><button aria-label="Download"><img src="data:image/svg+xml,%3Csvg/%3E"></button><span>Annual Report.pdf</span><span id="file-time">2:35 PM</span></div>';
+      root.querySelector('[data-testid="dm-message-list"]')!.append(row);
+      const blobIcon = document.createElement('div');
+      blobIcon.dataset.testid = 'message-22222222-2222-4222-8222-222222222222';
+      blobIcon.innerHTML = '<div data-side="start"><img src="blob:https://x.com/file-card-glyph"><button aria-label="Download"></button><span id="blob-file-time">2:36 PM</span></div>';
+      root.querySelector('[data-testid="dm-message-list"]')!.append(blobIcon);
+    });
+    const withFile = await page.evaluate(readXMessageDom);
+    const file = withFile.find(row => row.id === '11111111-1111-4111-8111-111111111111')!;
+    assert.deepEqual(file.attachments, [{ type: 'file', source: null, name: 'Annual Report.pdf', nativeDownload: true }]);
+    const blobFile = withFile.find(row => row.id === '22222222-2222-4222-8222-222222222222')!;
+    assert.equal(blobFile.attachments[0].type, 'image');
+    assert.equal(blobFile.attachments[0].nativeDownload, true, 'blob SVG file glyph keeps the native document-download signal');
   } finally { await browser.close(); }
 });

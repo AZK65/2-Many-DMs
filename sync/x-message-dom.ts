@@ -34,13 +34,26 @@ export function readXMessageDom() {
       if (described && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(described.textContent || '') && !described.querySelector('img,video,audio,a')) textElement = described;
     }
     const attachments: Array<{ type: 'image' | 'video' | 'audio' | 'file'; source: string | null; name?: string; isGif?: boolean; nativeDownload?: boolean }> = [];
+    const waveform = bubble.querySelector('[data-testid="audio-waveform"]');
+    const download = bubble.querySelector<HTMLElement>('button[aria-label*="Download"],button[aria-label*="download"],a[download]');
+    // XChat's voice player uses Web Audio, not an <audio> element. Its native
+    // Download control is the source of the decrypted file; never let the
+    // waveform's decorative SVG get misclassified as an image.
+    if (waveform) {
+      attachments.push({ type: 'audio', source: null, name: 'Voice message', nativeDownload: true });
+    }
     const seen = new Set<string>();
-    for (const element of bubble.querySelectorAll<HTMLImageElement | HTMLVideoElement | HTMLAudioElement | HTMLAnchorElement>('img,video,audio,a[download]')) {
+    for (const element of waveform ? [] : bubble.querySelectorAll<HTMLImageElement | HTMLVideoElement | HTMLAudioElement | HTMLAnchorElement>('img,video,audio,a[download]')) {
       const isLink = element.tagName === 'A';
       const source = isLink ? (element as HTMLAnchorElement).href : (element as HTMLImageElement).currentSrc || element.getAttribute('src') || element.querySelector('source')?.src || '';
       if (!source || seen.has(source)) continue;
       // Avatars, emoji and link-card thumbnails are not DM attachments.
       if (/profile_images|profile_banners|\/emoji\//i.test(source)) continue;
+      // File cards render their generic document glyph as an inline SVG. The
+      // glyph is UI chrome, not the attachment bytes, and used to produce
+      // broken "Attachment.svg+xml" messages in Omni.
+      if (/^(?:data:image\/svg\+xml|blob:[^#?]+\.svg(?:[?#]|$))|\.svg(?:[?#]|$)/i.test(source)) continue;
+      if (!isLink && element.closest('button[aria-label*="Download"],button[aria-label*="download"],a[download]')) continue;
       const link = element.closest('a');
       if (!isLink && link && !link.hasAttribute('download') && link.href !== source) continue;
       if (element.closest('[data-testid*="card"],[data-testid*="tweet"]')) continue;
@@ -52,20 +65,21 @@ export function readXMessageDom() {
         Boolean(element.closest('[data-testid="gif"],[data-testid="dmGif"]')) ||
         /^(?:animated\s+)?gif$/i.test(element.getAttribute('aria-label') || '')
       ));
-      attachments.push({ type, source, isGif, name: isLink ? (element.getAttribute('download') || element.textContent?.trim() || 'Attachment') : undefined });
+      attachments.push({ type, source, isGif, name: isLink ? (element.getAttribute('download') || element.textContent?.trim() || 'Attachment') : undefined,
+        // Some X file cards put a blob-backed SVG glyph beside (not inside)
+        // the native Download button. Preserve that evidence so the worker
+        // can replace the glyph with the real downloaded document.
+        nativeDownload: type === 'image' && Boolean(download) ? true : undefined });
       seen.add(source);
     }
-    // XChat's voice player uses Web Audio, not an <audio> element. Its native
-    // Download control is the source of the decrypted file; never treat the
-    // waveform/duration or the sender avatar as the message itself.
-    if (!attachments.length && bubble.querySelector('[data-testid="audio-waveform"]')) {
-      attachments.push({ type: 'audio', source: null, name: 'Voice message', nativeDownload: true });
-    }
     // Do not silently discard a file whose native download button hasn't
-    // exposed a URL yet. Keep an honest unavailable-file placeholder.
-    if (!attachments.length) {
-      const download = bubble.querySelector<HTMLElement>('button[aria-label*="Download"],button[aria-label*="download"],a[download]');
-      if (download) attachments.push({ type: 'file', source: null, name: download.getAttribute('download') || bubble.innerText.match(/[^\n]+\.(?:pdf|docx?|xlsx?|csv|zip|txt|pptx?)/i)?.[0]?.trim() || 'Attachment' });
+    // exposed a URL yet. Recovery clicks this exact row's native control.
+    if (!attachments.length && download) {
+      const leafText = Array.from(bubble.querySelectorAll<HTMLElement>('*')).filter(element => !element.children.length).map(element => element.textContent?.trim());
+      const label = [download.getAttribute('download'), download.getAttribute('aria-label'), download.getAttribute('title'), ...leafText, bubble.innerText]
+        .filter(Boolean).join('\n');
+      const name = label.match(/[^\n/\\]+\.(?:pdf|docx?|xlsx?|xls|csv|zip|txt|rtf|pptx?|pages|numbers|key)(?=\s|$)/i)?.[0]?.trim() || 'Attachment';
+      attachments.push({ type: 'file', source: null, name, nativeDownload: true });
     }
     const timeElements = [bubble, ...Array.from(bubble.querySelectorAll('time,[datetime],[data-timestamp],[title],[aria-label]'))];
     const dateHints = timeElements.flatMap((element) => [element.getAttribute('datetime'), element.getAttribute('data-timestamp'), element.getAttribute('title'), element.getAttribute('aria-label')]).filter((value): value is string => Boolean(value));
