@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { canAutoLoadMedia, VisibleMediaQueue } from "./automatic-media";
 
-test("only Telegram stickers and positively identified GIFs auto-download", () => {
-  assert.equal(canAutoLoadMedia("telegram", { mediaType: "sticker" }), true);
-  assert.equal(canAutoLoadMedia("telegram", { mediaType: "video", mediaIsGif: true }), true);
-  assert.equal(canAutoLoadMedia("telegram", { mediaType: "file", mediaName: "dance.gif" }), true);
-  for (const platform of ["x", "whatsapp", "discord"]) assert.equal(canAutoLoadMedia(platform, { mediaType: "sticker" }), false);
-  for (const mediaType of ["video", "file", "audio", "image"]) assert.equal(canAutoLoadMedia("telegram", { mediaType }), false);
+test("recoverable platform attachments load automatically when visible", () => {
+  for (const platform of ["gmail", "telegram", "whatsapp", "x"]) {
+    for (const mediaType of ["sticker", "video", "file", "audio", "image"]) {
+      assert.equal(canAutoLoadMedia(platform, { mediaType }), true);
+    }
+  }
+  assert.equal(canAutoLoadMedia("discord", { mediaType: "file" }), false);
+  assert.equal(canAutoLoadMedia("x", { mediaType: null }), false);
 });
 
 test("visible queue is serial, deduplicated, and skips cards scrolled away", async () => {

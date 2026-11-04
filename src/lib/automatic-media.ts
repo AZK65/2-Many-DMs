@@ -1,9 +1,7 @@
-import { isGifMedia } from "./gif-media";
-
 export function canAutoLoadMedia(platform: string, media: {
   mediaType?: string | null; mediaIsGif?: boolean; mediaName?: string | null; mediaUrl?: string | null;
 }): boolean {
-  return platform === "telegram" && (media.mediaType === "sticker" || isGifMedia(media));
+  return Boolean(media.mediaType) && ["gmail", "telegram", "whatsapp", "x"].includes(platform);
 }
 
 /** Shared by visible cards, including multi-view. Queued cards that have left

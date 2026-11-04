@@ -568,7 +568,6 @@ export function ChatThread({
   const [backfillMessage, setBackfillMessage] = useState("");
   const [showBackfillMenu, setShowBackfillMenu] = useState(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
-  const [recoveringMediaId, setRecoveringMediaId] = useState<string | null>(null);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
   const [reactingMessageId, setReactingMessageId] = useState<string | null>(null);
   const [pinningMessageId, setPinningMessageId] = useState<string | null>(null);
@@ -1813,42 +1812,34 @@ export function ChatThread({
     }
   }
 
-  async function recoverMessageMedia(message: MessageDTO, automatic = false): Promise<void> {
-    if (!automatic && recoveringMediaId) {
-      throw new Error("Another attachment is already being recovered.");
+  async function loadMessageMedia(message: MessageDTO): Promise<void> {
+    const response = await fetch(
+      `/api/messages/${encodeURIComponent(message.id)}/media?force=1`,
+      { method: "POST" }
+    );
+    const data = (await response.json().catch(() => ({}))) as {
+      mediaUrl?: string | null;
+      mediaName?: string | null;
+      mediaIsGif?: boolean;
+      mediaType?: MessageDTO["mediaType"];
+      error?: string;
+    };
+    if (!response.ok || !data.mediaUrl) {
+      throw new Error(data.error || "The attachment could not be loaded.");
     }
-    if (!automatic) setRecoveringMediaId(message.id);
-    try {
-      const response = await fetch(
-        `/api/messages/${encodeURIComponent(message.id)}/media?${automatic ? "automatic=1" : "force=1"}`,
-        { method: "POST" }
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        mediaUrl?: string | null;
-        mediaName?: string | null;
-        mediaIsGif?: boolean;
-        mediaType?: MessageDTO["mediaType"];
-        error?: string;
-      };
-      if (!response.ok || !data.mediaUrl) {
-        throw new Error(data.error || "The attachment could not be recovered.");
-      }
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                mediaUrl: data.mediaUrl || item.mediaUrl,
-                mediaName: data.mediaName ?? item.mediaName,
-                mediaIsGif: data.mediaIsGif ?? item.mediaIsGif,
-                mediaType: data.mediaType ?? item.mediaType,
-              }
-            : item
-        )
-      );
-    } finally {
-      if (!automatic) setRecoveringMediaId(null);
-    }
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              mediaUrl: data.mediaUrl || item.mediaUrl,
+              mediaName: data.mediaName ?? item.mediaName,
+              mediaIsGif: data.mediaIsGif ?? item.mediaIsGif,
+              mediaType: data.mediaType ?? item.mediaType,
+            }
+          : item
+      )
+    );
   }
 
   function BackfillButton({ compact = false }: { compact?: boolean }) {
@@ -3410,17 +3401,11 @@ export function ChatThread({
                     {!readOnly && photoTranslationId === m.id && !m.deletedAt ? <PhotoTranslation key={`${conversation.id}:${m.id}:${m.mediaUrl}`}
                       conversationId={conversation.id} messageId={m.id} source={mediaSource(m)} onClose={closePhotoTranslation} /> : <MediaContent
                       message={m}
-                      onAutoRecover={canSyncConversation && canAutoLoadMedia(conversation.platform, m)
-                        ? () => recoverMessageMedia(m, true) : undefined}
+                      onLoadMissing={canSyncConversation && canAutoLoadMedia(conversation.platform, m)
+                        ? () => loadMessageMedia(m) : undefined}
                       onOpenImage={setSpotlightImage}
                       onOpenVideo={(url, name, isGif) => setSpotlightVideo({ url, name, isGif })}
                       onOpenPdf={(url, name) => setPdfPreview({ url, name })}
-                      onRecoverMissing={
-                        canSyncConversation
-                          ? () => recoverMessageMedia(m)
-                          : undefined
-                      }
-                      recovering={recoveringMediaId === m.id}
                     />}
                     {m.body && !(m.mediaType === "sticker" && m.mediaUrl) && (
                       <div
@@ -4264,17 +4249,13 @@ function MediaContent({
   onOpenImage,
   onOpenVideo,
   onOpenPdf,
-  onRecoverMissing,
-  onAutoRecover,
-  recovering = false,
+  onLoadMissing,
 }: {
   message: MessageDTO;
   onOpenImage: (url: string) => void;
   onOpenVideo: (url: string, name: string, isGif?: boolean) => void;
   onOpenPdf: (url: string, name: string) => void;
-  onRecoverMissing?: () => Promise<void>;
-  onAutoRecover?: () => Promise<void>;
-  recovering?: boolean;
+  onLoadMissing?: () => Promise<void>;
 }) {
   const { mediaType, mediaUrl, mediaName } = message;
   const isGif = isGifMedia(message);
@@ -4283,15 +4264,15 @@ function MediaContent({
   const [retry, setRetry] = useState(0);
   const source = mediaSource(message);
   const autoRef = useRef<HTMLDivElement>(null);
-  const autoCallback = useRef(onAutoRecover);
+  const autoCallback = useRef(onLoadMissing);
   const autoAttempted = useRef(false);
-  autoCallback.current = onAutoRecover;
+  autoCallback.current = onLoadMissing;
   const [autoState, setAutoState] = useState<"idle" | "loading" | "failed">("idle");
   const needsLoad = !source || loadFailed;
-  const canAutoRecover = !!onAutoRecover;
+  const canLoadMissing = !!onLoadMissing;
 
   useEffect(() => {
-    if (!canAutoRecover || !needsLoad || !autoRef.current) return;
+    if (!canLoadMissing || !needsLoad || !autoRef.current) return;
     // A decoder error after a successful fetch must not start an endless loop.
     if (autoAttempted.current) { setAutoState("failed"); return; }
     let mounted = true;
@@ -4310,8 +4291,10 @@ function MediaContent({
         if (loaded) { setLoadFailed(false); setRetry(value => value + 1); }
         else { attempted = false; autoAttempted.current = false; }
         setAutoState("idle");
-      }).catch(() => {
-        if (mounted) setAutoState("failed");
+      }).catch((error) => {
+        if (!mounted) return;
+        setRecoveryError(error instanceof Error ? error.message : "Try again in a moment.");
+        setAutoState("failed");
       });
     };
     const observer = new IntersectionObserver(([entry]) => {
@@ -4321,87 +4304,66 @@ function MediaContent({
     observer.observe(autoRef.current);
     document.addEventListener("visibilitychange", start);
     return () => { mounted = false; observer.disconnect(); document.removeEventListener("visibilitychange", start); };
-  }, [canAutoRecover, needsLoad, message.id]);
+  }, [canLoadMissing, needsLoad, message.id]);
 
   useEffect(() => {
     setLoadFailed(false);
     setRecoveryError(null);
     setRetry(0);
+    autoAttempted.current = false;
+    setAutoState("idle");
   }, [mediaUrl]);
 
   if (!mediaType) return null;
 
-  if (needsLoad && canAutoRecover) {
-    const label = mediaType === "sticker" ? "sticker" : "GIF";
-    const busy = autoState === "loading" || recovering;
+  if (needsLoad && canLoadMissing) {
+    const label = mediaType === "sticker" ? "sticker" : isGif ? "GIF" : MEDIA_LABEL[mediaType].toLowerCase();
+    const displayName = !mediaName
+      ? label
+      : /svg\+xml|\.svgxml(?:$|[?#])/i.test(mediaName)
+        ? "attachment"
+        : mediaName.trim();
+    const visualPlaceholder = mediaType === "image" || mediaType === "video" || mediaType === "sticker" || isGif;
+    const busy = autoState !== "failed";
+    const retryLoad = async () => {
+      setRecoveryError(null);
+      setAutoState("loading");
+      try {
+        await onLoadMissing();
+        setLoadFailed(false);
+        setRetry((value) => value + 1);
+        setAutoState("idle");
+      } catch (error) {
+        setRecoveryError(error instanceof Error ? error.message : "Try again in a moment.");
+        setAutoState("failed");
+      }
+    };
     return (
       <div ref={autoRef} aria-busy={busy}
-        className={`mb-1 flex max-w-full flex-col items-center justify-center gap-2 rounded-xl bg-black/5 p-3 text-center text-xs dark:bg-white/5 ${mediaType === "sticker" ? "min-h-28 w-28" : "aspect-video w-64"}`}>
+        className={`mb-1 flex max-w-full items-center justify-center gap-3 rounded-xl border border-black/5 bg-black/5 p-3 text-xs dark:border-white/5 dark:bg-white/5 ${mediaType === "sticker" ? "min-h-28 w-28 flex-col text-center" : visualPlaceholder ? "aspect-video w-64 flex-col text-center" : "min-h-16 min-w-56"}`}>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
+          <PaperclipIcon className={`h-4 w-4 opacity-60 ${busy ? "animate-pulse" : ""}`} />
+        </span>
         {autoState !== "failed" ? (
-          <span role="status" className="text-slate-500 dark:text-neutral-400">
-            {busy ? `Loading ${label}…` : label === "GIF" ? "GIF" : "Sticker"}
+          <span role="status" className="min-w-0 truncate text-slate-500 dark:text-neutral-400">
+            Loading {displayName}…
           </span>
         ) : (
-          <>
+          <div className={visualPlaceholder ? "min-w-0" : "min-w-0 flex-1"}>
             <span className="text-slate-500 dark:text-neutral-400">Couldn&apos;t load {label}.</span>
-            <button type="button" disabled={busy} onClick={async () => {
-              setRecoveryError(null);
-              try { await onRecoverMissing?.(); setLoadFailed(false); setRetry(value => value + 1); }
-              catch (error) { setRecoveryError(error instanceof Error ? error.message : "Try again later."); }
-            }} aria-label={`Retry loading ${label}`}
-              className="rounded-lg px-3 py-2 font-semibold text-slate-700 transition-colors hover:bg-black/10 active:bg-black/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-white/10">
-              {busy ? "Loading…" : "Try again"}
-            </button>
-            {recoveryError && <span role="alert" className="break-words text-red-600 dark:text-red-300">{recoveryError}</span>}
-          </>
+            {recoveryError && <span role="alert" className="mt-0.5 block max-w-64 break-words text-red-600 dark:text-red-300">{recoveryError}</span>}
+          </div>
         )}
+        {autoState === "failed" && <button type="button" onClick={() => void retryLoad()} aria-label={`Retry loading ${label}`}
+          className="shrink-0 rounded-lg px-3 py-2 font-semibold text-slate-700 transition-colors hover:bg-black/10 active:bg-black/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-200 dark:hover:bg-white/10">
+          Try again
+        </button>}
       </div>
     );
   }
 
   // Old syncs can contain the message record without its binary attachment.
   if (!source) {
-    if (mediaType === "video") {
-      return (
-        <div className="mb-1 w-80 max-w-full overflow-hidden rounded-xl bg-[#181818] text-white ring-1 ring-black/10 dark:ring-white/10">
-          <div className="flex min-h-48 flex-col items-center justify-center p-6 text-center">
-            <span className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-base">
-              ▶
-            </span>
-            <span className="mt-3 text-sm font-semibold">Video is not downloaded yet</span>
-            <span className="mt-1 max-w-sm text-xs text-neutral-400">
-              Fetch this exact attachment from the connected account to watch it here.
-            </span>
-            {onRecoverMissing && (
-              <button
-                type="button"
-                onClick={async () => {
-                  setRecoveryError(null);
-                  try {
-                    await onRecoverMissing();
-                  } catch (error) {
-                    setRecoveryError(
-                      error instanceof Error
-                        ? error.message
-                        : "The video could not be recovered."
-                    );
-                  }
-                }}
-                disabled={recovering}
-                className="mt-4 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-black transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-neutral-200 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
-              >
-                {recovering ? "Fetching video…" : "Fetch and play"}
-              </button>
-            )}
-            {recoveryError && (
-              <span className="mt-3 max-w-sm text-xs text-red-300" role="alert">
-                {recoveryError}
-              </span>
-            )}
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="mb-1 flex min-w-56 flex-wrap items-center gap-3 rounded-xl border border-black/10 bg-black/5 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/5">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
@@ -4411,36 +4373,8 @@ function MediaContent({
           <span className="block truncate font-semibold">
             {mediaName || `${MEDIA_LABEL[mediaType]} unavailable`}
           </span>
-          <span className="mt-0.5 block opacity-60">Attachment was not included in the last sync.</span>
+          <span className="mt-0.5 block opacity-60">This attachment is unavailable from the connected platform.</span>
         </span>
-        {onRecoverMissing && (
-          <button
-            type="button"
-            onClick={async () => {
-              setRecoveryError(null);
-              try {
-                await onRecoverMissing();
-                setLoadFailed(false);
-                setRetry((value) => value + 1);
-              } catch (error) {
-                setRecoveryError(
-                  error instanceof Error
-                    ? error.message
-                    : "The attachment could not be recovered."
-                );
-              }
-            }}
-            disabled={recovering}
-            className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 dark:bg-white/10 dark:hover:bg-white/15"
-          >
-            {recovering ? "Checking…" : "Recover"}
-          </button>
-        )}
-        {recoveryError && (
-          <span className="basis-full text-xs text-red-600 dark:text-red-300" role="alert">
-            {recoveryError}
-          </span>
-        )}
       </div>
     );
   }
@@ -4459,45 +4393,16 @@ function MediaContent({
           <span className="block truncate font-semibold">{mediaName || MEDIA_LABEL[mediaType]}</span>
           <span className="mt-0.5 block opacity-60">Couldn&apos;t display this attachment.</span>
         </span>
-        {onRecoverMissing ? (
-          <button
-            type="button"
-            onClick={async () => {
-              setRecoveryError(null);
-              try {
-                await onRecoverMissing();
-                setLoadFailed(false);
-                setRetry((value) => value + 1);
-              } catch (error) {
-                setRecoveryError(
-                  error instanceof Error
-                    ? error.message
-                    : "The attachment could not be recovered."
-                );
-              }
-            }}
-            disabled={recovering}
-            className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 dark:bg-white/10 dark:hover:bg-white/15"
-          >
-            {recovering ? "Recovering…" : mediaType === "sticker" ? "Recover sticker" : "Recover"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setLoadFailed(false);
-              setRetry((value) => value + 1);
-            }}
-            className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-white/10 dark:hover:bg-white/15"
-          >
-            Try again
-          </button>
-        )}
-        {recoveryError && (
-          <span className="basis-full text-xs text-red-600 dark:text-red-300" role="alert">
-            {recoveryError}
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            setLoadFailed(false);
+            setRetry((value) => value + 1);
+          }}
+          className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-white/10 dark:hover:bg-white/15"
+        >
+          Try again
+        </button>
       </div>
     );
   }
