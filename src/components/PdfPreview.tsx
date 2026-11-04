@@ -50,7 +50,7 @@ export function PdfPreview({
   onClose: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageElement, setStageElement] = useState<HTMLDivElement | null>(null);
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
@@ -62,14 +62,13 @@ export function PdfPreview({
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    const measure = () => setStageWidth(stage.clientWidth);
+    if (!stageElement) return;
+    const measure = () => setStageWidth(stageElement.clientWidth);
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(stage);
+    observer.observe(stageElement);
     return () => observer.disconnect();
-  }, []);
+  }, [stageElement]);
 
   useEffect(() => {
     let active = true;
@@ -274,7 +273,7 @@ export function PdfPreview({
           </div>
         </nav>
 
-        <div ref={stageRef} className="relative min-h-0 flex-1 overflow-auto bg-[#272727]">
+        <div ref={setStageElement} className="relative min-h-0 flex-1 overflow-auto bg-[#272727]">
           {(loading || rendering) && !error && (
             <div
               className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg bg-[#181818] px-3 py-2 text-xs font-medium text-neutral-300 shadow-lg"
