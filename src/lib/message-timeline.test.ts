@@ -127,3 +127,21 @@ test("non-X platforms never get text-based projection; cache reload is idempoten
   const once = project([preview, reply, native]);
   assert.deepEqual(project(once.messages).messages, once.messages);
 });
+
+test("a successful manual retry replaces its earlier failed X bubble", () => {
+  const failed = message("client_failed4", 10, {
+    externalKey: null,
+    direction: "out",
+    body: "Please send the example account ID",
+    deliveryStatus: "failed",
+  });
+  const sent = message("client_sent5", 12, {
+    direction: "out",
+    body: failed.body,
+    deliveryStatus: "sent",
+  });
+  const result = project([failed, sent]);
+  assert.deepEqual(ids(result.messages), [sent.id]);
+  assert.equal(result.aliases.get(failed.id), sent.id);
+  assert.equal(projectMessageTimeline([failed, sent], "telegram").messages.length, 2);
+});

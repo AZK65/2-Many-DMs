@@ -28,6 +28,10 @@ import { deliveryIds, mergeDelivery, mergeDeliveryReceipt, observedMessageIds, r
 import { mergeMessageWindow, orderMessageWindow, projectMessageTimeline } from "@/lib/message-timeline";
 import { pendingMediaIds, mergeMediaUpdates, type MessageMediaUpdate } from "@/lib/message-media";
 import {
+  canRetryFailedMessageInPlace,
+  findSupersedingSentMessage,
+} from "@/lib/message-retry";
+import {
   MEDIA_LABEL,
   type ConversationDTO,
   type MessageDTO,
@@ -520,6 +524,7 @@ export function ChatThread({
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const [retryMessageId, setRetryMessageId] = useState<string | null>(null);
   const [aiDrafting, setAiDrafting] = useState(false);
   const [aiDraftError, setAiDraftError] = useState<string | null>(null);
   const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(true);
@@ -627,7 +632,12 @@ export function ChatThread({
   useEffect(() => {
     setDraft(loadConversationDraft(conversation.id));
     setAutoCorrectionNotice(null);
+    setRetryMessageId(null);
   }, [conversation.id]);
+
+  useEffect(() => {
+    if (retryMessageId && !draft.trim()) setRetryMessageId(null);
+  }, [draft, retryMessageId]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(AUTOCORRECT_STORAGE_KEY);
@@ -2092,8 +2102,22 @@ export function ChatThread({
     const replyTarget = replyingTo;
     const mentions = selectedMentions;
     const previewUrl = attachmentUrl;
+    const retryTarget = retryMessageId
+      ? deliveryMessagesRef.current.find(
+          (message) =>
+            message.id === retryMessageId &&
+            canRetryFailedMessageInPlace(conversation.platform, message) &&
+            !findSupersedingSentMessage(
+              conversation.platform,
+              message,
+              deliveryMessagesRef.current
+            )
+        )
+      : undefined;
+    const retryId = !file ? retryTarget?.id ?? null : null;
 
-    const tempId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const tempId =
+      retryId || `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const temp: MessageDTO = {
       id: tempId,
       body,
@@ -2108,13 +2132,14 @@ export function ChatThread({
       mediaIsGif: file?.type === "image/gif",
       pinnedAt: null,
       createdAt: new Date().toISOString(),
-      replyToExternalKey: replyTarget?.replyToExternalKey || null,
+      replyToExternalKey:
+        replyTarget?.replyToExternalKey || retryTarget?.replyToExternalKey || null,
       replyPreview: replyTarget
         ? replyTarget.body || (replyTarget.mediaType ? MEDIA_LABEL[replyTarget.mediaType] : "Message")
-        : null,
+        : retryTarget?.replyPreview || null,
       replySender: replyTarget
         ? replyTarget.direction === "out" ? "You" : replyTarget.senderName || conversation.contact.name
-        : null,
+        : retryTarget?.replySender || null,
       senderName: null,
       senderAvatarUrl: null,
       senderTags: [],
@@ -2135,7 +2160,14 @@ export function ChatThread({
       deliveryError: null,
     };
     const preview = body || (temp.mediaType ? MEDIA_LABEL[temp.mediaType] : "Message");
-    setMessages((m) => [...m, temp]);
+    setMessages((current) =>
+      retryId
+        ? current.map((message) =>
+            message.id === retryId ? { ...message, ...temp } : message
+          )
+        : [...current, temp]
+    );
+    setRetryMessageId(null);
     setDraft("");
     saveConversationDraft(conversation.id, "");
     setReplyingTo(null);
@@ -2179,6 +2211,7 @@ export function ChatThread({
             mentions,
             replyToMessageId: replyTarget?.id,
             clientMessageId: tempId,
+            retryFailed: Boolean(retryId),
           }),
           signal: controller.signal,
         });
@@ -3592,10 +3625,18 @@ export function ChatThread({
                           onClick={() => {
                             setDraft(m.originalBody || m.body);
                             setAttachError(null);
+                            setRetryMessageId(
+                              deliveryStatus === "failed" &&
+                                canRetryFailedMessageInPlace(conversation.platform, m)
+                                ? m.id
+                                : null
+                            );
                             setComposerNotice(
                               deliveryStatus === "unconfirmed"
                                 ? `Check ${PLATFORMS[conversation.platform].label} first. If the message is absent, press Send.`
-                                : "Message restored. Press Send to retry."
+                                : canRetryFailedMessageInPlace(conversation.platform, m)
+                                  ? "Message restored. Sending will replace the failed attempt."
+                                  : "Message restored. Press Send to retry."
                             );
                             requestAnimationFrame(() => textareaRef.current?.focus());
                           }}

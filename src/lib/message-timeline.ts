@@ -2,6 +2,7 @@ import type { MessageDTO } from "./types";
 import { mergeDelivery } from "./message-delivery";
 import { mergeMediaUpdates } from "./message-media";
 import { isNativeXMessageKey, normalizeXMessageText, xPreviewMatchesText } from "./x-message-text";
+import { findSupersedingSentMessage } from "./message-retry";
 
 function timestamp(message: MessageDTO): number {
   const value = Date.parse(message.createdAt);
@@ -62,6 +63,11 @@ export function projectMessageTimeline(raw: MessageDTO[], platform: string): {
   const previousByDirection = new Map<string, MessageDTO>();
   const messages: MessageDTO[] = [];
   for (const message of ordered) {
+    const successfulRetry = findSupersedingSentMessage("x", message, ordered);
+    if (successfulRetry) {
+      aliases.set(message.id, successfulRetry.id);
+      continue;
+    }
     if (plainPreview(message)) {
       const nativeMatches = natives.filter(native => native.direction === message.direction &&
         !native.mediaType && !native.mediaUrl && xPreviewMatchesText(message.body, native.body));

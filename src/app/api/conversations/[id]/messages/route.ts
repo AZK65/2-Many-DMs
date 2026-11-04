@@ -13,6 +13,7 @@ import {
 } from "@/lib/platforms";
 import { translateText } from "@/lib/translation";
 import { parseDeliveryIds } from "@/lib/message-delivery";
+import { canRetryFailedMessageInPlace } from "@/lib/message-retry";
 
 export const runtime = "nodejs";
 
@@ -352,6 +353,7 @@ export async function POST(
   let mentions: string[] = [];
   let replyToMessageId = "";
   let clientMessageId = "";
+  let retryFailed = false;
   let media:
     | { type: string; url: string; name: string; isGif?: boolean }
     | undefined;
@@ -372,6 +374,7 @@ export async function POST(
     }
     replyToMessageId = String(form.get("replyToMessageId") || "");
     clientMessageId = String(form.get("clientMessageId") || "");
+    retryFailed = String(form.get("retryFailed") || "") === "true";
     const file = form.get("file");
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "No file" }, { status: 400 });
@@ -415,6 +418,7 @@ export async function POST(
     replyToMessageId = typeof json.replyToMessageId === "string" ? json.replyToMessageId : "";
     clientMessageId =
       typeof json.clientMessageId === "string" ? json.clientMessageId : "";
+    retryFailed = json.retryFailed === true;
     mentions = Array.isArray(json.mentions)
       ? json.mentions.filter((item: unknown): item is string => typeof item === "string").slice(0, 50)
       : [];
@@ -451,23 +455,55 @@ export async function POST(
   const duplicate = await prisma.message.findUnique({
     where: { id: clientMessageId },
   });
+  let retryMessage: PrismaMessage | null = null;
   if (duplicate) {
     if (duplicate.conversationId !== params.id) {
       return NextResponse.json({ error: "Invalid message request id." }, { status: 409 });
     }
-    const pending = ["pending", "unconfirmed"].includes(
-      duplicate.deliveryStatus || ""
-    );
-    return NextResponse.json(
-      pending
-        ? {
-            pending: true,
+    if (
+      retryFailed &&
+      !media &&
+      canRetryFailedMessageInPlace(platform, duplicate)
+    ) {
+      const supersedingSent = await prisma.message.findFirst({
+        where: {
+          conversationId: params.id,
+          direction: "out",
+          deliveryStatus: "sent",
+          mediaType: null,
+          body: duplicate.body,
+          createdAt: {
+            gt: duplicate.createdAt,
+            lte: new Date(duplicate.createdAt.getTime() + 10 * 60_000),
+          },
+        },
+        select: { id: true },
+      });
+      if (supersedingSent) {
+        return NextResponse.json(
+          {
+            error: "A later matching X message was already sent.",
             message: outgoingMessageDTO(duplicate),
-            error: duplicate.deliveryError,
-          }
-        : outgoingMessageDTO(duplicate),
-      { status: pending ? 202 : duplicate.deliveryStatus === "failed" ? 409 : 200 }
-    );
+          },
+          { status: 409 }
+        );
+      }
+      retryMessage = duplicate;
+    } else {
+      const pending = ["pending", "unconfirmed"].includes(
+        duplicate.deliveryStatus || ""
+      );
+      return NextResponse.json(
+        pending
+          ? {
+              pending: true,
+              message: outgoingMessageDTO(duplicate),
+              error: duplicate.deliveryError,
+            }
+          : outgoingMessageDTO(duplicate),
+        { status: pending ? 202 : duplicate.deliveryStatus === "failed" ? 409 : 200 }
+      );
+    }
   }
 
   const originalText = text;
@@ -547,23 +583,73 @@ export async function POST(
       : replyTarget.senderContact?.name || "Contact"
     : null;
 
-  let message = await prisma.message.create({
-    data: {
-      id: clientMessageId,
-      conversationId: params.id,
-      body: text,
-      direction: "out",
-      createdAt,
-      replyToExternalKey: replyTarget?.externalKey,
-      replyPreview,
-      replySender,
-      deliveryStatus: conversation.externalId ? "pending" : "sent",
-      sendAttempts: conversation.externalId ? 1 : 0,
-      lastSendAttemptAt: conversation.externalId ? createdAt : null,
-      ...translationMeta,
-      ...mediaData,
-    },
-  });
+  const effectiveReplyToExternalKey =
+    replyTarget?.externalKey ?? retryMessage?.replyToExternalKey ?? null;
+  let message: PrismaMessage;
+  if (retryMessage) {
+    // Claim the failed row atomically. A duplicated browser request must see
+    // the pending claim and return it instead of dispatching a second X send.
+    const claimed = await prisma.message.updateMany({
+      where: {
+        id: retryMessage.id,
+        deliveryStatus: "failed",
+        externalKey: null,
+        mediaType: null,
+      },
+      data: {
+        body: text,
+        originalBody: translationMeta.originalBody ?? null,
+        translationSourceLanguage:
+          translationMeta.translationSourceLanguage ?? null,
+        translationTargetLanguage:
+          translationMeta.translationTargetLanguage ?? null,
+        createdAt,
+        replyToExternalKey: effectiveReplyToExternalKey,
+        replyPreview: replyTarget ? replyPreview : retryMessage.replyPreview,
+        replySender: replyTarget ? replySender : retryMessage.replySender,
+        deliveryStatus: conversation.externalId ? "pending" : "sent",
+        deliveryError: null,
+        sendAttempts: { increment: 1 },
+        lastSendAttemptAt: conversation.externalId ? createdAt : null,
+      },
+    });
+    message = await prisma.message.findUniqueOrThrow({
+      where: { id: retryMessage.id },
+    });
+    if (claimed.count === 0) {
+      const pending = ["pending", "unconfirmed"].includes(
+        message.deliveryStatus || ""
+      );
+      return NextResponse.json(
+        pending
+          ? {
+              pending: true,
+              message: outgoingMessageDTO(message),
+              error: message.deliveryError,
+            }
+          : outgoingMessageDTO(message),
+        { status: pending ? 202 : message.deliveryStatus === "failed" ? 409 : 200 }
+      );
+    }
+  } else {
+    message = await prisma.message.create({
+      data: {
+        id: clientMessageId,
+        conversationId: params.id,
+        body: text,
+        direction: "out",
+        createdAt,
+        replyToExternalKey: effectiveReplyToExternalKey,
+        replyPreview,
+        replySender,
+        deliveryStatus: conversation.externalId ? "pending" : "sent",
+        sendAttempts: conversation.externalId ? 1 : 0,
+        lastSendAttemptAt: conversation.externalId ? createdAt : null,
+        ...translationMeta,
+        ...mediaData,
+      },
+    });
+  }
 
   // Mock conversations are local-only and therefore confirmed immediately.
   if (!conversation.externalId) {
@@ -592,7 +678,7 @@ export async function POST(
         text,
         media,
         mentions,
-        replyToExternalId: replyTarget?.externalKey,
+        replyToExternalId: effectiveReplyToExternalKey,
         pendingMessageId: message.id,
         waitForConfirmation: false,
         inboxCategory: conversation.inboxCategory,

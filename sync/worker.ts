@@ -83,7 +83,7 @@ function isUncertainSendError(error: unknown): boolean {
     /(?:finding composer|preparing message|attaching media|typing message|waiting for Send button) failed/i.test(
       message
     ) ||
-    /(?:composer|file input) not found/i.test(message)
+    /(?:composer|file input) not found|did not finish loading its composer/i.test(message)
   )
     return false;
   // Once X's trusted Send click has happened, any later exception is an
@@ -175,7 +175,7 @@ async function markDeliveryProblem(
   const uncertain = isUncertainSendError(error);
   const detail = String(error).replace(/^Error:\s*/, "");
   const knownNotSent = !uncertain &&
-    /(?:finding composer|preparing message|attaching media|typing message|waiting for Send button) failed|(?:composer|file input) not found/i.test(
+    /(?:finding composer|preparing message|attaching media|typing message|waiting for Send button) failed|(?:composer|file input) not found|did not finish loading its composer/i.test(
       detail
     );
   await prisma.message.updateMany({
