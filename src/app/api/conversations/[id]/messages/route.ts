@@ -287,8 +287,17 @@ export async function GET(
   const deliveries = deliveryMessageIds.length ? await prisma.message.findMany({
     where: { conversationId: params.id, direction: "out", id: { in: deliveryMessageIds } },
   }) : [];
+  // Only refresh requested attachments from this exact conversation. These
+  // compact receipts cover downloads that finish outside the newest page.
+  const mediaIds = parseDeliveryIds(req.nextUrl.searchParams.get("mediaIds"));
+  const mediaUpdates = mediaIds.length ? await prisma.message.findMany({
+    where: { conversationId: params.id, id: { in: mediaIds }, mediaUrl: { not: null }, deletedAt: null },
+    select: { id: true, externalKey: true, mediaType: true, mediaUrl: true, mediaName: true,
+      mediaIsGif: true, editedAt: true, deletedAt: true },
+  }) : [];
   return NextResponse.json({
     messages: data,
+    mediaUpdates,
     missingObservedIds: observedIds.filter(id => !presentIds.has(id)),
     deliveries: deliveries.map(message => {
       const dto = outgoingMessageDTO(message);

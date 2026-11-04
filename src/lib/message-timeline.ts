@@ -1,5 +1,6 @@
 import type { MessageDTO } from "./types";
 import { mergeDelivery } from "./message-delivery";
+import { mergeMediaUpdates } from "./message-media";
 import { isNativeXMessageKey, normalizeXMessageText, xPreviewMatchesText } from "./x-message-text";
 
 function timestamp(message: MessageDTO): number {
@@ -26,6 +27,9 @@ export function mergeMessageWindow(current: MessageDTO[], incoming: MessageDTO[]
     if (previous && isNativeXMessageKey(previous.externalKey) && candidate.externalKey?.startsWith("x:preview:")) {
       next = previous;
     }
+    // An overlapping poll begun before download completion must not revert
+    // the same unchanged message to its missing-attachment placeholder.
+    if (previous?.mediaUrl && !next.mediaUrl) next = mergeMediaUpdates([next], [previous])[0];
     rows.set(candidate.id, previous && JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
   }
   const ordered = orderMessageWindow([...rows.values()]);
