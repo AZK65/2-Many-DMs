@@ -199,11 +199,13 @@ function MessageText({
   platform,
   mentionTargets,
   onOpenMention,
+  onOpenLink,
 }: {
   message: MessageDTO;
   platform: Platform;
   mentionTargets?: Record<string, string>;
   onOpenMention?: (target: string, label: string) => void;
+  onOpenLink?: (url: string, label: string) => void;
 }) {
   const content: React.ReactNode[] = [];
   let cursor = 0;
@@ -233,18 +235,17 @@ function MessageText({
     }
 
     content.push(
-      <a
+      <button
         key={`url-${start}`}
-        href={url}
-        target="_blank"
-        rel="noreferrer noopener"
-        title={url}
-        aria-label={`Open ${urlLabel} in a new tab`}
-        className="inline-flex max-w-full items-center gap-1 align-bottom font-medium underline decoration-current/30 underline-offset-2 transition hover:decoration-current"
+        type="button"
+        onClick={() => onOpenLink?.(url, urlLabel)}
+        title={`Preview ${urlLabel} in 2 Many DMs`}
+        aria-label={`Preview ${urlLabel} in 2 Many DMs`}
+        className="inline-flex max-w-full items-center gap-1 align-bottom font-medium underline decoration-current/30 underline-offset-2 transition hover:decoration-current focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-current/40"
       >
         <span className="truncate">{urlLabel}</span>
-        <ExternalLinkIcon className="h-3.5 w-3.5 shrink-0" />
-      </a>,
+        <GlobeIcon className="h-3.5 w-3.5 shrink-0" />
+      </button>,
     );
 
     if (trailingPunctuation) content.push(trailingPunctuation);
@@ -276,6 +277,7 @@ import { ChatTypeIcon } from "./ChatTypeIcon";
 import { ForwardModal } from "./ForwardModal";
 import { EmojiPicker } from "./EmojiPicker";
 import { PdfPreview } from "./PdfPreview";
+import { LinkPreview } from "./LinkPreview";
 import { KeywordAlertControl } from "./KeywordAlertControl";
 import { ChatSearch } from "./ChatSearch";
 import { WisprDictation } from "./WisprDictation";
@@ -551,6 +553,7 @@ export function ChatThread({
     isGif?: boolean;
   } | null>(null);
   const [pdfPreview, setPdfPreview] = useState<{ url: string; name: string } | null>(null);
+  const [linkPreview, setLinkPreview] = useState<{ url: string; label: string } | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageDTO | null>(null);
   const [replyFocus, setReplyFocus] = useState<{
@@ -618,6 +621,7 @@ export function ChatThread({
     setReplyFocus(null);
     setReplyJumpingId(null);
     setReplyJumpErrorId(null);
+    setLinkPreview(null);
   }, [conversation.id, focusMessageId]);
 
   useEffect(() => {
@@ -3400,6 +3404,7 @@ export function ChatThread({
                           message={displayMessage}
                           platform={conversation.platform}
                           mentionTargets={mentionTargets}
+                          onOpenLink={(url, label) => setLinkPreview({ url, label })}
                           onOpenMention={
                             onOpenTaggedPerson &&
                             (conversation.platform === "telegram" ||
@@ -4117,6 +4122,14 @@ export function ChatThread({
             url={pdfPreview.url}
             name={pdfPreview.name}
             onClose={() => setPdfPreview(null)}
+          />
+        )}
+        {linkPreview && (
+          <LinkPreview
+            key={linkPreview.url}
+            url={linkPreview.url}
+            label={linkPreview.label}
+            onClose={() => setLinkPreview(null)}
           />
         )}
         {forwardMsg && (
