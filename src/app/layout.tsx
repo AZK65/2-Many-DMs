@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { WorkspaceMotion } from "@/components/WorkspaceMotion";
+import "skullet/styles.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

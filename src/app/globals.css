@@ -189,6 +189,17 @@ body {
   .workspace-body:has(.contact-inspector) .thread-header .thread-done { @apply h-8 w-8 justify-center p-0; }
 }
 .message-bubble > img { border-radius: 0.75rem; }
+.attachment-skullet {
+  --skullet-base: rgb(15 23 42 / 0.08);
+  --skullet-highlight: rgb(255 255 255 / 0.7);
+  --skullet-radius: 0.5rem;
+  --skullet-animation: group-shimmer;
+  --skullet-speed: fast;
+}
+.dark .attachment-skullet {
+  --skullet-base: rgb(255 255 255 / 0.08);
+  --skullet-highlight: rgb(255 255 255 / 0.14);
+}
 @media (hover: hover) and (pointer: fine) {
   .message-actions-trigger { opacity: 0; }
   .message-row:hover .message-actions-trigger, .message-row:focus-within .message-actions-trigger, .message-actions[data-menu-open] .message-actions-trigger { opacity: 1; }

@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { Skeleton } from "skullet/react";
 import { MenuDetails } from "./MenuDetails";
 import { ClosePaneButton } from "./ClosePaneButton";
 import { OverlayPortal } from "./OverlayPortal";
@@ -4244,6 +4245,90 @@ function VideoSpotlight({
   );
 }
 
+function AttachmentLoadingShape({
+  mediaType,
+  mediaName,
+  isGif,
+}: {
+  mediaType: NonNullable<MessageDTO["mediaType"]>;
+  mediaName: string | null;
+  isGif: boolean;
+}) {
+  const name = mediaName?.trim() || (isGif ? "GIF" : MEDIA_LABEL[mediaType]);
+  const isPdfFile = mediaType === "file" && /\.pdf(?:$|[?#])/i.test(name);
+
+  if (mediaType === "sticker") {
+    return (
+      <div
+        skullet-block=""
+        className="mb-1 h-28 w-28 rounded-lg bg-black/5 dark:bg-white/5"
+      />
+    );
+  }
+
+  if (mediaType === "image" || mediaType === "video" || isGif) {
+    return (
+      <div
+        skullet-block=""
+        className="mb-1 aspect-video w-64 max-w-full rounded-lg bg-black/5 dark:bg-white/5"
+      />
+    );
+  }
+
+  if (mediaType === "audio") {
+    return (
+      <div className="mb-1 flex min-h-16 w-56 max-w-full items-center gap-3 rounded-xl bg-black/5 px-3 py-2.5 dark:bg-white/5">
+        <span skullet-block="" className="h-9 w-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold">{name}</span>
+          <span className="mt-0.5 block text-xs opacity-60">Ready to play</span>
+        </span>
+      </div>
+    );
+  }
+
+  if (isPdfFile) {
+    return (
+      <div className="mb-1 flex min-w-64 max-w-full items-center gap-3 rounded-xl bg-black/5 p-2.5 dark:bg-white/5">
+        <span skullet-block="" className="h-10 w-10 shrink-0 rounded-lg bg-black/5 dark:bg-white/5" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold">{name}</span>
+          <span className="mt-0.5 block text-xs opacity-60">Open preview</span>
+        </span>
+        <span skullet-block="" className="h-9 w-9 shrink-0 rounded-lg bg-black/5 dark:bg-white/5" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-1 flex min-w-56 max-w-full items-center gap-2 rounded-lg bg-black/5 px-3 py-2 dark:bg-white/5">
+      <span skullet-block="" className="h-4 w-4 shrink-0 rounded bg-black/5 dark:bg-white/5" />
+      <span className="min-w-0 flex-1 truncate text-xs">{name}</span>
+      <span skullet-block="" className="h-4 w-4 shrink-0 rounded bg-black/5 dark:bg-white/5" />
+    </div>
+  );
+}
+
+function AttachmentReveal({
+  loading,
+  label,
+  children,
+  containerRef,
+}: {
+  loading: boolean;
+  label: string;
+  children: React.ReactNode;
+  containerRef?: React.Ref<HTMLDivElement>;
+}) {
+  return (
+    <div ref={containerRef} className="attachment-skullet">
+      <Skeleton loading={loading} label={label}>
+        {children}
+      </Skeleton>
+    </div>
+  );
+}
+
 function MediaContent({
   message,
   onOpenImage,
@@ -4339,43 +4424,48 @@ function MediaContent({
       }
     };
     return (
-      <div ref={autoRef} aria-busy={busy}
-        className={`mb-1 flex max-w-full items-center justify-center gap-3 rounded-xl border border-black/5 bg-black/5 p-3 text-xs dark:border-white/5 dark:bg-white/5 ${mediaType === "sticker" ? "min-h-28 w-28 flex-col text-center" : visualPlaceholder ? "aspect-video w-64 flex-col text-center" : "min-h-16 min-w-56"}`}>
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
-          <PaperclipIcon className={`h-4 w-4 opacity-60 ${busy ? "animate-pulse" : ""}`} />
-        </span>
-        {autoState !== "failed" ? (
-          <span role="status" className="min-w-0 truncate text-slate-500 dark:text-neutral-400">
-            Loading {displayName}…
-          </span>
+      <AttachmentReveal
+        loading={busy}
+        label={`Loading ${displayName}`}
+        containerRef={autoRef}
+      >
+        {busy ? (
+          <AttachmentLoadingShape mediaType={mediaType} mediaName={displayName} isGif={isGif} />
         ) : (
-          <div className={visualPlaceholder ? "min-w-0" : "min-w-0 flex-1"}>
-            <span className="text-slate-500 dark:text-neutral-400">Couldn&apos;t load {label}.</span>
-            {recoveryError && <span role="alert" className="mt-0.5 block max-w-64 break-words text-red-600 dark:text-red-300">{recoveryError}</span>}
+          <div className={`mb-1 flex max-w-full items-center gap-3 rounded-xl bg-black/5 p-3 text-xs dark:bg-white/5 ${visualPlaceholder ? "w-64" : "min-w-56"}`}>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
+              <PaperclipIcon className="h-4 w-4 opacity-60" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <span className="text-slate-500 dark:text-neutral-400">Couldn&apos;t load {label}.</span>
+              {recoveryError && <span role="alert" className="mt-0.5 block max-w-64 break-words text-red-600 dark:text-red-300">{recoveryError}</span>}
+            </div>
+            <button type="button" onClick={() => void retryLoad()} aria-label={`Retry loading ${label}`}
+              className="shrink-0 rounded-lg px-3 py-2 font-semibold text-slate-700 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-200 dark:hover:bg-white/10">
+              Try again
+            </button>
           </div>
         )}
-        {autoState === "failed" && <button type="button" onClick={() => void retryLoad()} aria-label={`Retry loading ${label}`}
-          className="shrink-0 rounded-lg px-3 py-2 font-semibold text-slate-700 transition-colors hover:bg-black/10 active:bg-black/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-200 dark:hover:bg-white/10">
-          Try again
-        </button>}
-      </div>
+      </AttachmentReveal>
     );
   }
 
   // Old syncs can contain the message record without its binary attachment.
   if (!source) {
     return (
-      <div className="mb-1 flex min-w-56 flex-wrap items-center gap-3 rounded-xl border border-black/10 bg-black/5 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/5">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
-          <PaperclipIcon className="h-4 w-4 opacity-60" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-semibold">
-            {mediaName || `${MEDIA_LABEL[mediaType]} unavailable`}
+      <AttachmentReveal loading={false} label={`${MEDIA_LABEL[mediaType]} unavailable`}>
+        <div className="mb-1 flex min-w-56 flex-wrap items-center gap-3 rounded-xl bg-black/5 px-3 py-2.5 text-xs dark:bg-white/5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
+            <PaperclipIcon className="h-4 w-4 opacity-60" />
           </span>
-          <span className="mt-0.5 block opacity-60">This attachment is unavailable from the connected platform.</span>
-        </span>
-      </div>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-semibold">
+              {mediaName || `${MEDIA_LABEL[mediaType]} unavailable`}
+            </span>
+            <span className="mt-0.5 block opacity-60">This attachment is unavailable from the connected platform.</span>
+          </span>
+        </div>
+      </AttachmentReveal>
     );
   }
 
@@ -4383,34 +4473,41 @@ function MediaContent({
     retry > 0 && !source.startsWith("blob:") && !source.startsWith("data:")
       ? `${source}${source.includes("?") ? "&" : "?"}retry=${retry}`
       : source;
+  const revealLoaded = (children: React.ReactNode) => (
+    <AttachmentReveal loading={false} label={`${mediaName || MEDIA_LABEL[mediaType]} ready`}>
+      {children}
+    </AttachmentReveal>
+  );
   if (loadFailed) {
     return (
-      <div className="mb-1 flex min-w-56 flex-wrap items-center gap-3 rounded-xl border border-black/10 bg-black/5 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/5">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
-          <PaperclipIcon className="h-4 w-4 opacity-60" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-semibold">{mediaName || MEDIA_LABEL[mediaType]}</span>
-          <span className="mt-0.5 block opacity-60">Couldn&apos;t display this attachment.</span>
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            setLoadFailed(false);
-            setRetry((value) => value + 1);
-          }}
-          className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-white/10 dark:hover:bg-white/15"
-        >
-          Try again
-        </button>
-      </div>
+      <AttachmentReveal loading={false} label={`Could not display ${mediaName || MEDIA_LABEL[mediaType]}`}>
+        <div className="mb-1 flex min-w-56 flex-wrap items-center gap-3 rounded-xl bg-black/5 px-3 py-2.5 text-xs dark:bg-white/5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/5 dark:bg-white/5">
+            <PaperclipIcon className="h-4 w-4 opacity-60" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-semibold">{mediaName || MEDIA_LABEL[mediaType]}</span>
+            <span className="mt-0.5 block opacity-60">Couldn&apos;t display this attachment.</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setLoadFailed(false);
+              setRetry((value) => value + 1);
+            }}
+            className="shrink-0 rounded-lg bg-black/10 px-3 py-2 font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-black/15 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-white/10 dark:hover:bg-white/15"
+          >
+            Try again
+          </button>
+        </div>
+      </AttachmentReveal>
     );
   }
 
   const wrap = "mb-1 overflow-hidden rounded-lg";
   switch (mediaType === "file" && isGifMedia({ mediaName, mediaUrl }) ? "image" : mediaType) {
     case "image":
-      return (
+      return revealLoaded(
         <button type="button" onClick={() => onOpenImage(retrySource)} className={`block cursor-zoom-in text-left ${wrap}`} aria-label="Open image">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -4424,7 +4521,7 @@ function MediaContent({
         </button>
       );
     case "sticker":
-      return (
+      return revealLoaded(
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={retrySource}
@@ -4436,7 +4533,7 @@ function MediaContent({
         />
       );
     case "video":
-      return (
+      return revealLoaded(
         <InlineVideoPlayer
           key={retrySource}
           source={retrySource}
@@ -4447,11 +4544,11 @@ function MediaContent({
         />
       );
     case "audio":
-      return <audio src={retrySource} controls preload="metadata" onError={() => setLoadFailed(true)} className="mb-1 w-56 max-w-full" />;
+      return revealLoaded(<audio src={retrySource} controls preload="metadata" onError={() => setLoadFailed(true)} className="mb-1 w-56 max-w-full" />);
     case "file":
       if (isPdf(message)) {
         const name = mediaName || "Document.pdf";
-        return (
+        return revealLoaded(
           <div className="mb-1 flex min-w-64 items-center gap-3 rounded-xl border border-black/10 bg-black/5 p-2.5 dark:border-white/10 dark:bg-white/5">
             <button
               type="button"
@@ -4480,7 +4577,7 @@ function MediaContent({
           </div>
         );
       }
-      return (
+      return revealLoaded(
         <a
           href={downloadSource(retrySource)}
           download={mediaName || true}
