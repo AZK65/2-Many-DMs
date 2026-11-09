@@ -40,7 +40,7 @@ export async function startLogin(userId: string, phone: string, credentials: { a
   cooldown.set(userId, now + 60_000); // claim before awaiting: prevents duplicate sends
   for (const [id, pending] of logins) if (pending.userId === userId) await cancelLogin(id, userId);
   const client = new TelegramClient(new StringSession(""), credentials.apiId, credentials.apiHash, {
-    connectionRetries: 1, requestRetries: 1, floodSleepThreshold: 0,
+    connectionRetries: 1, requestRetries: 2, floodSleepThreshold: 0,
     baseLogger: new Logger(LogLevel.NONE),
   });
   try {

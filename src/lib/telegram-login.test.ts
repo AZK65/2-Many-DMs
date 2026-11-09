@@ -64,9 +64,11 @@ test("failed Telegram send cleans up the temporary client and preserves provider
 });
 test("non-rate-limited Telegram failures can retry immediately", async () => {
   let attempts = 0;
+  let requestRetries = 0;
   mock.method(TelegramClient.prototype, "connect", async () => true);
   mock.method(TelegramClient.prototype, "disconnect", async () => {});
-  mock.method(TelegramClient.prototype, "sendCode", async () => {
+  mock.method(TelegramClient.prototype, "sendCode", async function (this: TelegramClient) {
+    requestRetries = (this as unknown as { _requestRetries?: number })._requestRetries ?? 0;
     attempts++;
     if (attempts === 1) throw new Error("Not connected");
     return { phoneCodeHash: "fake", isCodeViaApp: true };
@@ -76,6 +78,7 @@ test("non-rate-limited Telegram failures can retry immediately", async () => {
     assert.ok("error" in first); assert.equal(first.retryAfter, undefined);
     const retry = await startLogin("owner-4", "+12025550150", { apiId: 1234, apiHash: "a".repeat(32) });
     assert.ok("loginId" in retry);
+    assert.ok(requestRetries >= 2, "Telegram needs a second request attempt to follow PHONE_MIGRATE redirects");
     if ("loginId" in retry) await cancelLogin(retry.loginId!, "owner-4");
   } finally { mock.restoreAll(); }
 });
