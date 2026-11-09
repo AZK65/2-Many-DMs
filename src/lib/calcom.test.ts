@@ -94,3 +94,51 @@ test("keeps the selected duration for multi-duration event types", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("adds an in-person address to the confirmed Cal.com booking", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: { url: string; method: string; body: Record<string, unknown> }[] = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      method: init?.method || "GET",
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    });
+    if (calls.length === 1) {
+      return Response.json({
+        data: {
+          uid: "booking_in_person",
+          start: "2026-11-12T20:00:00.000Z",
+          end: "2026-11-12T20:30:00.000Z",
+          duration: 30,
+          status: "accepted",
+        },
+      }, { status: 201 });
+    }
+    return Response.json({ status: "success" });
+  };
+
+  try {
+    const booking = await createCalBooking("cal_test_key_123456", {
+      bookingLink: "cal.com/chris/coffee",
+      startsAt: "2026-11-12T20:00:00.000Z",
+      durationMinutes: 30,
+      attendee: { name: "Test Guest", email: "guest@example.com", timeZone: "America/Toronto" },
+      guests: [],
+      meetingType: "in_person",
+      location: "123 King St W, Toronto",
+    });
+    assert.equal(calls.length, 2);
+    assert.equal("meetingUrl" in calls[0].body, false);
+    assert.match(calls[1].url, /\/bookings\/booking_in_person\/location$/);
+    assert.equal(calls[1].method, "PATCH");
+    assert.deepEqual(calls[1].body, {
+      location: { type: "address", address: "123 King St W, Toronto" },
+    });
+    assert.equal(booking.meetingType, "in_person");
+    assert.equal(booking.location, "123 King St W, Toronto");
+    assert.equal(booking.meetingUrl, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

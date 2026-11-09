@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { buildCallInvite, type CallInvite } from "@/lib/call-invite";
-import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
+import { buildCallInvite, type CallInvite, type MeetingType } from "@/lib/call-invite";
+import { BuildingIcon, CalendarIcon, CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
 import { OverlayPortal } from "./OverlayPortal";
 
 const DURATIONS = [15, 30, 45, 60] as const;
@@ -155,7 +155,7 @@ export function CallScheduler({
   const initialMinutes = initialInvite
     ? Math.round((new Date(initialInvite.endsAt).getTime() - new Date(initialInvite.startsAt).getTime()) / 60_000)
     : 30;
-  const [title, setTitle] = useState(initialInvite?.title || `Call with ${contactName}`);
+  const [title, setTitle] = useState(initialInvite?.title || `Meeting with ${contactName}`);
   const [date, setDate] = useState(dateKey(initial));
   const [time, setTime] = useState(timeKey(initial));
   const [duration, setDuration] = useState<(typeof DURATIONS)[number]>(
@@ -163,7 +163,9 @@ export function CallScheduler({
       ? initialMinutes as (typeof DURATIONS)[number]
       : 30,
   );
+  const [meetingType, setMeetingType] = useState<MeetingType>(initialInvite?.meetingType || "online");
   const [meetingUrl, setMeetingUrl] = useState(initialInvite?.meetingUrl || "");
+  const [location, setLocation] = useState(initialInvite?.location || "");
   const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const [guestTimeZone, setGuestTimeZone] = useState(initialInvite?.guestTimeZone || "Europe/London");
   const [guests, setGuests] = useState<string[]>(() => {
@@ -205,14 +207,14 @@ export function CallScheduler({
     event.preventDefault();
     const startsAt = new Date(`${date}T${time}:00`);
     if (!title.trim()) {
-      setError("Add a call title.");
+      setError("Add a meeting title.");
       return;
     }
     if (Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
       setError("Choose a time in the future.");
       return;
     }
-    if (meetingUrl.trim()) {
+    if (meetingType === "online" && meetingUrl.trim()) {
       try {
         const url = new URL(/^https?:\/\//i.test(meetingUrl.trim()) ? meetingUrl.trim() : `https://${meetingUrl.trim()}`);
         if (!['http:', 'https:'].includes(url.protocol)) throw new Error("scheme");
@@ -229,7 +231,24 @@ export function CallScheduler({
       return;
     }
     const allGuests = [...new Set([...guests, ...pendingGuests])].slice(0, 20);
-    onInsert(buildCallInvite({ title, startsAt, durationMinutes: duration, meetingUrl, guests: allGuests, guestTimeZone }));
+    if (!allGuests.length) {
+      setError("Add at least one guest email so Cal.com can send the invitation.");
+      return;
+    }
+    if (meetingType === "in_person" && !location.trim()) {
+      setError("Add the in-person meeting location.");
+      return;
+    }
+    onInsert(buildCallInvite({
+      title,
+      startsAt,
+      durationMinutes: duration,
+      meetingType,
+      meetingUrl: meetingType === "online" ? meetingUrl : undefined,
+      location: meetingType === "in_person" ? location : undefined,
+      guests: allGuests,
+      guestTimeZone,
+    }));
   }
 
   const selectedStart = useMemo(() => new Date(`${date}T${time}:00`), [date, time]);
@@ -283,8 +302,8 @@ export function CallScheduler({
               <ClockIcon className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 id="call-scheduler-title" className="text-base font-semibold text-slate-950 dark:text-white">Schedule a call</h2>
-              <p className="mt-0.5 text-sm text-slate-500 dark:text-neutral-400">Add an invite to your draft for review.</p>
+              <h2 id="call-scheduler-title" className="text-base font-semibold text-slate-950 dark:text-white">Schedule a meeting</h2>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-neutral-400">Book it through Cal.com, then send a short confirmation.</p>
             </div>
             <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-neutral-800 dark:hover:text-white" aria-label="Close call scheduler">
               <CloseIcon className="h-4 w-4" />
@@ -383,7 +402,7 @@ export function CallScheduler({
                       }}
                       aria-expanded={timeOpen}
                       aria-controls="call-time-slots"
-                      aria-label={`Call time, ${formatClockValue(time)}`}
+                      aria-label={`Meeting time, ${formatClockValue(time)}`}
                       className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-white dark:hover:bg-neutral-800"
                     >
                       <ClockIcon className="h-4 w-4 text-accent" /> {formatClockValue(time)}
@@ -417,6 +436,28 @@ export function CallScheduler({
               </fieldset>
             </div>
 
+            <fieldset>
+              <legend className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300">Meeting type</legend>
+              <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-[#1F1F1F]">
+                <button
+                  type="button"
+                  onClick={() => { setMeetingType("online"); setError(null); }}
+                  aria-pressed={meetingType === "online"}
+                  className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${meetingType === "online" ? "bg-white text-slate-900 shadow-sm dark:bg-neutral-700 dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-white"}`}
+                >
+                  <LinkIcon className="h-3.5 w-3.5" /> Online
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMeetingType("in_person"); setError(null); }}
+                  aria-pressed={meetingType === "in_person"}
+                  className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${meetingType === "in_person" ? "bg-white text-slate-900 shadow-sm dark:bg-neutral-700 dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-neutral-400 dark:hover:text-white"}`}
+                >
+                  <BuildingIcon className="h-3.5 w-3.5" /> In person
+                </button>
+              </div>
+            </fieldset>
+
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-neutral-700 dark:bg-[#1F1F1F]">
               <label htmlFor="call-guest-timezone" className="flex items-center justify-between gap-3">
                 <span className="text-xs font-semibold text-slate-600 dark:text-neutral-300">Guest time zone</span>
@@ -446,10 +487,10 @@ export function CallScheduler({
 
             <div>
               <label htmlFor="call-guests" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300">
-                <MailIcon className="h-3.5 w-3.5" /> Guests <span className="font-normal text-slate-400">optional</span>
+                <MailIcon className="h-3.5 w-3.5" /> Invite by email
               </label>
               {guests.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5" aria-label="Call guests">
+                <div className="mb-2 flex flex-wrap gap-1.5" aria-label="Meeting guests">
                   {guests.map(email => (
                     <span key={email} className="inline-flex min-w-0 items-center gap-1 rounded-lg bg-accent/10 px-2 py-1 text-xs font-medium text-accent">
                       <span className="max-w-48 truncate">{email}</span>
@@ -476,21 +517,29 @@ export function CallScheduler({
                 placeholder="guest@company.com — press Enter"
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white dark:placeholder:text-neutral-600"
               />
-              <p className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">The first email is the attendee; the rest receive guest invites.</p>
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">Cal.com emails the first attendee and every additional guest.</p>
             </div>
 
-            <label className="block">
-              <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300"><LinkIcon className="h-3.5 w-3.5" /> Meet or Zoom link <span className="font-normal text-slate-400">optional</span></span>
-              <input type="url" value={meetingUrl} onChange={(event) => { setMeetingUrl(event.target.value); setError(null); }} placeholder="meet.google.com/…" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white dark:placeholder:text-neutral-600" />
-            </label>
+            {meetingType === "online" ? (
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300"><LinkIcon className="h-3.5 w-3.5" /> Meeting link <span className="font-normal text-slate-400">optional</span></span>
+                <input type="url" value={meetingUrl} onChange={(event) => { setMeetingUrl(event.target.value); setError(null); }} placeholder="Leave blank to use the Cal.com event location" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white dark:placeholder:text-neutral-600" />
+              </label>
+            ) : (
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300"><BuildingIcon className="h-3.5 w-3.5" /> Location</span>
+                <input value={location} onChange={(event) => { setLocation(event.target.value); setError(null); }} maxLength={300} placeholder="123 King St W, Toronto" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white dark:placeholder:text-neutral-600" />
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">This address is added to the Cal.com booking and confirmation email.</p>
+              </label>
+            )}
 
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>}
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-5 py-4 dark:border-neutral-800 dark:bg-[#1F1F1F]">
-            <p className="max-w-56 text-xs leading-5 text-slate-400 dark:text-neutral-500">Nothing is sent until you review and press Send.</p>
+            <p className="max-w-64 text-xs leading-5 text-slate-400 dark:text-neutral-500">Cal.com books and emails everyone when you press Send.</p>
             <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#1F1F1F]">
-              <CheckIcon className="h-4 w-4" /> Add to draft
+              <CheckIcon className="h-4 w-4" /> Review meeting
             </button>
           </div>
         </motion.form>
@@ -525,26 +574,26 @@ export function CallInviteCard({
   const guestDifference = invite.guestTimeZone ? timeDifferenceLabel(startsAt, localTimeZone, invite.guestTimeZone) : null;
 
   return (
-    <section aria-label={`Call invite: ${invite.title}`} className="w-full min-w-64 max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-neutral-700 dark:bg-[#272727] dark:text-white">
+    <section aria-label={`Meeting: ${invite.title}`} className="w-full min-w-64 max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-neutral-700 dark:bg-[#272727] dark:text-white">
       <div className="flex items-start gap-3 px-3.5 py-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent"><ClockIcon className="h-4 w-4" /></span>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">{invite.meetingType === "in_person" ? <BuildingIcon className="h-4 w-4" /> : <ClockIcon className="h-4 w-4" />}</span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-accent">Call invite</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-accent">{invite.calBookingUid ? "Booked via Cal.com" : "Meeting details"}</p>
           <h3 className="mt-0.5 truncate text-sm font-semibold">{invite.title}</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">{when}–{endTime} · {minutes} min</p>
           {guestWhen && <p className="mt-0.5 text-xs leading-5 text-accent">Guest · {guestWhen}–{guestEndTime} · {guestDifference}</p>}
-          {invite.guests.length > 0 && <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{invite.guests.length} {invite.guests.length === 1 ? "guest" : "guests"} · {invite.guests.join(", ")}</p>}
+          {invite.guests.length > 0 && <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{invite.calBookingUid ? "Invite sent to" : "Will invite"} · {invite.guests.join(", ")}</p>}
+          {invite.location && <p className="mt-1 flex items-start gap-1.5 text-xs leading-5 text-slate-600 dark:text-neutral-300"><BuildingIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" /><span>{invite.location}</span></p>}
         </div>
       </div>
-      <div className="flex gap-2 border-t border-slate-100 px-3 py-2.5 dark:border-neutral-700">
+      {(draftActions || invite.meetingUrl) && <div className="flex gap-2 border-t border-slate-100 px-3 py-2.5 dark:border-neutral-700">
         {draftActions ? <>
           <button type="button" onClick={draftActions.onRemove} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-slate-100 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700">Remove</button>
-          <button type="button" onClick={draftActions.onEdit} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-accent px-3 text-xs font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Edit invite</button>
-        </> : <>
-          <button type="button" onClick={() => onOpen(invite.calendarUrl, "Add call to calendar")} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-slate-100 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700">Add to calendar</button>
-          {invite.meetingUrl && <button type="button" onClick={() => onOpen(invite.meetingUrl!, "Join call")} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-accent px-3 text-xs font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Join call</button>}
-        </>}
-      </div>
+          <button type="button" onClick={draftActions.onEdit} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-accent px-3 text-xs font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Edit meeting</button>
+        </> : invite.meetingUrl ? (
+          <button type="button" onClick={() => onOpen(invite.meetingUrl!, "Join meeting")} className="flex min-h-9 flex-1 items-center justify-center rounded-lg bg-accent px-3 text-xs font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Join meeting</button>
+        ) : null}
+      </div>}
     </section>
   );
 }

@@ -45,7 +45,7 @@ import {
   mimeToMediaType,
 } from "@/lib/platforms";
 import { clockTime, dayLabel, sameDay } from "@/lib/time";
-import { loadSettings, calcomUrl } from "@/lib/settings";
+import { loadSettings } from "@/lib/settings";
 import { emailsIn } from "@/lib/email";
 import { MESSAGE_PIN_CHANGED_EVENT } from "@/lib/shared-content";
 import {
@@ -1002,22 +1002,13 @@ export function ChatThread({
     setCallSchedulerOpen(true);
   }
 
-  function insertCalLink() {
-    const url = calcomUrl(calcom.link, conversation.contact);
-    if (!url) return;
-    insertText(`Want to grab a time? Here's my calendar: ${url}`, true);
-    setCalDismissed(dateMsg?.id ?? null);
-  }
-
   function insertCallInvite(body: string) {
-    const next = draftCallInvite
-      ? body
-      : draft.trim() ? `${draft.trimEnd()}\n\n${body}` : body;
+    const next = body;
     draftRef.current = next;
     setDraft(next);
     setCallSchedulerOpen(false);
     setComposerExpanded(true);
-    setComposerNotice("Call invite added · review it before sending");
+    setComposerNotice("Meeting ready · Cal.com books it when you press Send");
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(next.length, next.length);
@@ -2128,13 +2119,17 @@ export function ChatThread({
     if (sendInFlightRef.current) return;
     sendInFlightRef.current = true;
     const pendingCall = parseCallInvite(body);
-    if (
-      pendingCall &&
-      pendingCall.guests.length > 0 &&
-      !pendingCall.calBookingUid &&
-      calcom.enabled &&
-      calcom.link.trim()
-    ) {
+    if (pendingCall && !pendingCall.calBookingUid) {
+      if (!pendingCall.guests.length) {
+        setAttachError("Add at least one guest email before booking the meeting.");
+        sendInFlightRef.current = false;
+        return;
+      }
+      if (!calcom.enabled || !calcom.link.trim()) {
+        setAttachError("Connect Cal.com and add an event link in Settings before booking the meeting.");
+        sendInFlightRef.current = false;
+        return;
+      }
       setAttachError(null);
       setComposerNotice("Creating the Cal.com booking…");
       try {
@@ -2154,11 +2149,22 @@ export function ChatThread({
               timeZone: pendingCall.guestTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
             guests: pendingCall.guests.slice(1),
+            meetingType: pendingCall.meetingType,
             meetingUrl: pendingCall.meetingUrl,
+            location: pendingCall.location,
           }),
         });
         const payload = await response.json().catch(() => ({})) as {
-          booking?: { uid: string; startsAt: string; endsAt: string; durationMinutes: number; meetingUrl: string | null; guests: string[] };
+          booking?: {
+            uid: string;
+            startsAt: string;
+            endsAt: string;
+            durationMinutes: number;
+            meetingUrl: string | null;
+            location: string | null;
+            meetingType: "online" | "in_person";
+            guests: string[];
+          };
           error?: string;
         };
         if (!response.ok || !payload.booking) throw new Error(payload.error || "Cal.com could not create this booking.");
@@ -2167,7 +2173,9 @@ export function ChatThread({
           title: pendingCall.title,
           startsAt: new Date(booking.startsAt),
           durationMinutes: booking.durationMinutes,
+          meetingType: booking.meetingType,
           meetingUrl: booking.meetingUrl || pendingCall.meetingUrl || undefined,
+          location: booking.location || pendingCall.location || undefined,
           guests: pendingCall.guests,
           guestTimeZone: pendingCall.guestTimeZone || undefined,
           calBookingUid: booking.uid,
@@ -3886,16 +3894,16 @@ export function ChatThread({
           <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-xs">
             <span className="text-base leading-none">📅</span>
             <span className="flex-1 text-slate-600 dark:text-neutral-300">
-              Looks like a date came up — share your Cal.com link?
+              Looks like a date came up — book the meeting with Cal.com?
               {conversation.contact.email
                 ? ` Invites ${conversation.contact.email}.`
                 : ""}
             </span>
             <button
-              onClick={insertCalLink}
+              onClick={() => { setCalDismissed(dateMsg.id); openCallScheduler(); }}
               className="shrink-0 rounded-md bg-accent px-2.5 py-1 font-semibold text-accent-fg transition hover:opacity-90"
             >
-              Insert link
+              Schedule
             </button>
             <button
               onClick={() => setCalDismissed(dateMsg.id)}
@@ -4097,12 +4105,12 @@ export function ChatThread({
               exit={{ opacity: 0, y: 4, height: 0 }}
               className="mx-auto mb-2 flex max-w-3xl items-center gap-2 overflow-hidden rounded-xl border border-accent/20 bg-accent/10 px-2.5 py-2 text-xs text-slate-700 dark:text-neutral-200"
               role="region"
-              aria-label="Call scheduling suggestion"
+              aria-label="Meeting scheduling suggestion"
             >
               <ClockIcon className="h-4 w-4 shrink-0 text-accent" />
-              <span className="min-w-0 flex-1 truncate"><span className="font-semibold">Planning a call?</span> Add the time and invite before sending.</span>
+              <span className="min-w-0 flex-1 truncate"><span className="font-semibold">Planning a meeting?</span> Book it and send a short confirmation.</span>
               <button type="button" onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="shrink-0 rounded-lg bg-accent px-2.5 py-1.5 font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Schedule</button>
-              <button type="button" onClick={() => setCallPromptDismissed(true)} aria-label="Dismiss call scheduling suggestion" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-black/5 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-white/10 dark:hover:text-white"><CloseIcon className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setCallPromptDismissed(true)} aria-label="Dismiss meeting scheduling suggestion" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-black/5 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-white/10 dark:hover:text-white"><CloseIcon className="h-3.5 w-3.5" /></button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -4127,7 +4135,7 @@ export function ChatThread({
                   onRemove: () => {
                     draftRef.current = "";
                     setDraft("");
-                    setComposerNotice("Call invite removed");
+                    setComposerNotice("Meeting removed");
                   },
                 }}
               />
@@ -4230,7 +4238,7 @@ export function ChatThread({
                       <summary aria-label="Writing tools" title="AI, autocorrect and snippets" className="composer-tool list-none cursor-pointer [&::-webkit-details-marker]:hidden"><SparklesIcon className="h-4 w-4" /></summary>
               <div className="workspace-menu absolute bottom-full left-0 z-40 mb-3 w-64 p-2">
                 <button type="button" data-close-menu onClick={event => { void generateAiDraft(); }} disabled={aiDrafting || loading || messages.length === 0 || (!draft.trim() && conversation.lastDirection !== "in")} className="composer-menu-item disabled:opacity-40"><SparklesIcon /><span>{aiDrafting ? "Writing…" : draft.trim() ? "Polish draft with AI" : "Draft reply with AI"}</span></button>
-                <button type="button" data-close-menu onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="composer-menu-item"><ClockIcon /><span className="min-w-0 flex-1">Schedule a call</span><kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">⌘⇧M</kbd></button>
+                <button type="button" data-close-menu onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="composer-menu-item"><ClockIcon /><span className="min-w-0 flex-1">Schedule a meeting</span><kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">⌘⇧M</kbd></button>
                 <button type="button" aria-pressed={autoCorrectEnabled} onClick={() => {
                   const next = !autoCorrectEnabled;
                   setAutoCorrectEnabled(next);

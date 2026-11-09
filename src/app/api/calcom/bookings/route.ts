@@ -16,7 +16,9 @@ export async function POST(req: NextRequest) {
     durationMinutes?: unknown;
     attendee?: { name?: unknown; email?: unknown; timeZone?: unknown };
     guests?: unknown;
+    meetingType?: unknown;
     meetingUrl?: unknown;
+    location?: unknown;
   } | null;
   const bookingLink = typeof body?.bookingLink === "string" ? body.bookingLink.trim() : "";
   const startsAt = typeof body?.startsAt === "string" ? body.startsAt : "";
@@ -24,6 +26,8 @@ export async function POST(req: NextRequest) {
   const attendeeName = typeof body?.attendee?.name === "string" ? body.attendee.name.trim() : "";
   const attendeeEmail = typeof body?.attendee?.email === "string" ? body.attendee.email.trim().toLowerCase() : "";
   const timeZone = typeof body?.attendee?.timeZone === "string" ? body.attendee.timeZone : "";
+  const meetingType = body?.meetingType === "in_person" ? "in_person" : "online";
+  const location = typeof body?.location === "string" ? body.location.replace(/\s+/g, " ").trim().slice(0, 300) : "";
   const guests = Array.isArray(body?.guests)
     ? [...new Set(body.guests.filter((email): email is string => typeof email === "string").map(email => email.trim().toLowerCase()))]
     : [];
@@ -36,6 +40,8 @@ export async function POST(req: NextRequest) {
   if (!attendeeName || !EMAIL.test(attendeeEmail))
     return NextResponse.json({ error: "Add the primary guest's name and email." }, { status: 400 });
   if (!timeZone) return NextResponse.json({ error: "The guest time zone is missing." }, { status: 400 });
+  if (meetingType === "in_person" && !location)
+    return NextResponse.json({ error: "Add the in-person meeting location." }, { status: 400 });
   if (guests.length > 20 || guests.some(email => !EMAIL.test(email)))
     return NextResponse.json({ error: "Check the guest email list. Up to 20 guests are supported." }, { status: 400 });
 
@@ -50,7 +56,9 @@ export async function POST(req: NextRequest) {
       durationMinutes,
       attendee: { name: attendeeName, email: attendeeEmail, timeZone },
       guests: guests.filter(email => email !== attendeeEmail),
-      meetingUrl: typeof body?.meetingUrl === "string" ? body.meetingUrl : null,
+      meetingType,
+      meetingUrl: meetingType === "online" && typeof body?.meetingUrl === "string" ? body.meetingUrl : null,
+      location: meetingType === "in_person" ? location : null,
     });
     return NextResponse.json({ booking }, { status: 201 });
   } catch (error) {
