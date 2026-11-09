@@ -27,7 +27,7 @@ export function isSharedXPostMessage(text: string): boolean {
     .replace(X_POST_URL_RE, "")
     .replace(/\s+/g, " ")
     .trim();
-  return /^(?:sent|shared) (?:a )?post$/i.test(label);
+  return label === "" || /^(?:sent|shared) (?:a )?post$/i.test(label);
 }
 
 function decodeEntities(value: string): string {

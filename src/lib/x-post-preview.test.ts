@@ -14,6 +14,7 @@ test("shared X posts are recognized inside a DM body", () => {
   assert.equal(xPostUrlFromText("Sent a post\nhttps://twitter.com/finityx/status/2012584288298901546?s=20"),
     "https://x.com/finityx/status/2012584288298901546");
   assert.equal(isSharedXPostMessage("Sent a post\nx.com/finityx/status/2012584288298901546"), true);
+  assert.equal(isSharedXPostMessage("https://x.com/finityx/status/2012584288298901546"), true);
   assert.equal(isSharedXPostMessage("Look at this x.com/finityx/status/2012584288298901546"), false);
 });
 
