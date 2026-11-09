@@ -78,7 +78,7 @@ function phaseTitle(phase: RestartPhase): string {
 function statusLabel(status: PlatformStatus): string {
   if (status.state === "ready") return "Connected";
   if (status.state === "qr") return "Scan QR";
-  if (status.state === "disconnected") return "Needs attention";
+  if (status.state === "disconnected") return "Disconnected";
   if (status.state === "disabled") return "Not running";
   return "Connecting";
 }

@@ -11,6 +11,7 @@ test("connected is not evidence of complete history", () => {
   assert.equal(syncHealthView({ ...ready, sync: { pendingChats: 390, blockedChats: 2, lastCheckedAt: 999_000 } }, 1_000_000).label, "Repairing history");
   assert.match(syncHealthView({ ...ready, sync: { pendingChats: 390, blockedChats: 2, lastCheckedAt: 999_000 } }, 1_000_000).detail, /2 paused chats will retry automatically/);
   assert.equal(syncHealthView({ ...ready, sync: { pendingChats: 0, blockedChats: 3 } }).tone, "attention");
+  assert.equal(syncHealthView({ platform: "telegram", state: "disconnected", detail: "Session invalidated — reconnect Telegram" }).label, "Reconnect required");
   assert.equal(syncHealthView({ platform: "telegram", state: "disconnected", detail: "Session invalidated — reconnect Telegram" }).detail, "Session invalidated — reconnect Telegram");
   assert.equal(syncHealthView({ ...ready, sync: { pendingChats: 0, blockedChats: 0, lastCheckedAt: 1 } }, 1_000_000).label, "Checks delayed");
   assert.equal(syncHealthView({ ...ready, sync: { pendingChats: 0, blockedChats: 0, lastCheckedAt: 950_000 } }, 1_000_000).label, "Recent inbox checked");
