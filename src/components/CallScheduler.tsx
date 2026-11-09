@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { motion } from "motion/react";
 import { buildCallInvite, type CallInvite } from "@/lib/call-invite";
-import { CheckIcon, ClockIcon, CloseIcon, LinkIcon } from "./icons";
+import { CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
 import { OverlayPortal } from "./OverlayPortal";
 
 const DURATIONS = [15, 30, 45, 60] as const;
@@ -43,11 +43,13 @@ function upcomingDays(): Date[] {
 
 export function CallScheduler({
   contactName,
+  contactEmail,
   initialInvite,
   onClose,
   onInsert,
 }: {
   contactName: string;
+  contactEmail?: string | null;
   initialInvite?: CallInvite | null;
   onClose: () => void;
   onInsert: (body: string) => void;
@@ -69,6 +71,12 @@ export function CallScheduler({
       : 30,
   );
   const [meetingUrl, setMeetingUrl] = useState(initialInvite?.meetingUrl || "");
+  const [guests, setGuests] = useState<string[]>(() => {
+    if (initialInvite?.guests.length) return initialInvite.guests;
+    const email = contactEmail?.trim().toLowerCase() || "";
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? [email] : [];
+  });
+  const [guestInput, setGuestInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,6 +86,19 @@ export function CallScheduler({
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [onClose]);
+
+  function addGuestEmails(value: string): boolean {
+    const additions = value.split(/[\s,;]+/).map(email => email.trim().toLowerCase()).filter(Boolean);
+    if (!additions.length) return true;
+    if (additions.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      setError("Check the guest email address.");
+      return false;
+    }
+    setGuests(current => [...new Set([...current, ...additions])].slice(0, 20));
+    setGuestInput("");
+    setError(null);
+    return true;
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -99,7 +120,15 @@ export function CallScheduler({
         return;
       }
     }
-    onInsert(buildCallInvite({ title, startsAt, durationMinutes: duration, meetingUrl }));
+    const pendingGuests = guestInput.trim()
+      ? guestInput.split(/[\s,;]+/).map(email => email.trim().toLowerCase()).filter(Boolean)
+      : [];
+    if (pendingGuests.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      setError("Check the guest email address.");
+      return;
+    }
+    const allGuests = [...new Set([...guests, ...pendingGuests])].slice(0, 20);
+    onInsert(buildCallInvite({ title, startsAt, durationMinutes: duration, meetingUrl, guests: allGuests }));
   }
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, " ");
@@ -139,7 +168,7 @@ export function CallScheduler({
             </button>
           </div>
 
-          <div className="space-y-5 px-5 py-5">
+          <div className="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-5">
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-neutral-300">Title</span>
               <input autoFocus value={title} onChange={(event) => { setTitle(event.target.value); setError(null); }} maxLength={120} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white" />
@@ -180,6 +209,41 @@ export function CallScheduler({
                 </div>
                 <span className="mt-1 block text-[11px] text-slate-400 dark:text-neutral-500">minutes</span>
               </fieldset>
+            </div>
+
+            <div>
+              <label htmlFor="call-guests" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300">
+                <MailIcon className="h-3.5 w-3.5" /> Guests <span className="font-normal text-slate-400">optional</span>
+              </label>
+              {guests.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5" aria-label="Call guests">
+                  {guests.map(email => (
+                    <span key={email} className="inline-flex min-w-0 items-center gap-1 rounded-lg bg-accent/10 px-2 py-1 text-xs font-medium text-accent">
+                      <span className="max-w-48 truncate">{email}</span>
+                      <button type="button" onClick={() => setGuests(current => current.filter(item => item !== email))} className="grid h-4 w-4 place-items-center rounded hover:bg-accent/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={`Remove ${email}`}>
+                        <CloseIcon className="h-2.5 w-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <input
+                id="call-guests"
+                type="email"
+                multiple
+                value={guestInput}
+                onChange={(event) => { setGuestInput(event.target.value); setError(null); }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === ",") {
+                    event.preventDefault();
+                    addGuestEmails(guestInput);
+                  }
+                }}
+                onBlur={() => { if (guestInput.trim()) addGuestEmails(guestInput); }}
+                placeholder="guest@company.com — press Enter"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white dark:placeholder:text-neutral-600"
+              />
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-neutral-500">The first email is the attendee; the rest receive guest invites.</p>
             </div>
 
             <label className="block">
@@ -231,6 +295,7 @@ export function CallInviteCard({
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-accent">Call invite</p>
           <h3 className="mt-0.5 truncate text-sm font-semibold">{invite.title}</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">{when}–{endTime} · {minutes} min</p>
+          {invite.guests.length > 0 && <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{invite.guests.length} {invite.guests.length === 1 ? "guest" : "guests"} · {invite.guests.join(", ")}</p>}
         </div>
       </div>
       <div className="flex gap-2 border-t border-slate-100 px-3 py-2.5 dark:border-neutral-700">

@@ -54,7 +54,7 @@ import {
 } from "@/lib/drafts";
 import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
-import { parseCallInvite } from "@/lib/call-invite";
+import { buildCallInvite, parseCallInvite } from "@/lib/call-invite";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -2097,10 +2097,63 @@ export function ChatThread({
   }
 
   async function send() {
-    const body = draft.trim();
+    let body = draft.trim();
     if (!body && !attachment) return;
     if (sendInFlightRef.current) return;
     sendInFlightRef.current = true;
+    const pendingCall = parseCallInvite(body);
+    if (
+      pendingCall &&
+      pendingCall.guests.length > 0 &&
+      !pendingCall.calBookingUid &&
+      calcom.enabled &&
+      calcom.link.trim()
+    ) {
+      setAttachError(null);
+      setComposerNotice("Creating the Cal.com booking…");
+      try {
+        const attendeeEmail = pendingCall.guests[0];
+        const response = await fetch("/api/calcom/bookings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookingLink: calcom.link,
+            startsAt: pendingCall.startsAt,
+            durationMinutes: Math.round((new Date(pendingCall.endsAt).getTime() - new Date(pendingCall.startsAt).getTime()) / 60_000),
+            attendee: {
+              name: conversation.contact.email?.toLowerCase() === attendeeEmail
+                ? conversation.contact.name
+                : attendeeEmail.split("@")[0].replace(/[._-]+/g, " "),
+              email: attendeeEmail,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            },
+            guests: pendingCall.guests.slice(1),
+            meetingUrl: pendingCall.meetingUrl,
+          }),
+        });
+        const payload = await response.json().catch(() => ({})) as {
+          booking?: { uid: string; startsAt: string; endsAt: string; durationMinutes: number; meetingUrl: string | null; guests: string[] };
+          error?: string;
+        };
+        if (!response.ok || !payload.booking) throw new Error(payload.error || "Cal.com could not create this booking.");
+        const booking = payload.booking;
+        body = buildCallInvite({
+          title: pendingCall.title,
+          startsAt: new Date(booking.startsAt),
+          durationMinutes: booking.durationMinutes,
+          meetingUrl: booking.meetingUrl || pendingCall.meetingUrl || undefined,
+          guests: pendingCall.guests,
+          calBookingUid: booking.uid,
+        });
+        draftRef.current = body;
+        setDraft(body);
+      } catch (error) {
+        setComposerNotice(null);
+        setAttachError(error instanceof Error ? error.message : "Cal.com could not create this booking.");
+        sendInFlightRef.current = false;
+        return;
+      }
+    }
     autocorrectAbortRef.current?.abort();
     autocorrectAbortRef.current = null;
     setAutoCorrecting(false);
@@ -4171,6 +4224,7 @@ export function ChatThread({
         {callSchedulerOpen && (
           <CallScheduler
             contactName={conversation.contact.name}
+            contactEmail={conversation.contact.email}
             initialInvite={draftCallInvite}
             onClose={() => setCallSchedulerOpen(false)}
             onInsert={insertCallInvite}

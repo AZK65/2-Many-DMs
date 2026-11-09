@@ -10,12 +10,27 @@ datasource db {
 // ── Multi-tenant SaaS foundation ──────────────────────────────────────────
 // A customer of the SaaS. Each user connects one or more platform Accounts.
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  name      String?
-  signupIp  String? // IP we first saw them on — drives proxy region matching
-  createdAt DateTime  @default(now())
-  accounts  Account[]
+  id                     String                  @id @default(cuid())
+  email                  String                  @unique
+  name                   String?
+  signupIp               String? // IP we first saw them on — drives proxy region matching
+  createdAt              DateTime                @default(now())
+  accounts               Account[]
+  integrationCredentials IntegrationCredential[]
+}
+
+// API credentials entered in Settings. Secrets are encrypted with
+// APP_ENCRYPTION_KEY before they reach the database and are never returned.
+model IntegrationCredential {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  String
+  secret    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, provider])
 }
 
 // One connected platform login for a user (their Telegram, WhatsApp, X…).

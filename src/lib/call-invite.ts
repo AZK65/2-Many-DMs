@@ -7,6 +7,8 @@ export type CallInvite = {
   endsAt: string;
   calendarUrl: string;
   meetingUrl: string | null;
+  guests: string[];
+  calBookingUid: string | null;
 };
 
 type BuildCallInviteInput = {
@@ -14,6 +16,8 @@ type BuildCallInviteInput = {
   startsAt: Date;
   durationMinutes: number;
   meetingUrl?: string;
+  guests?: string[];
+  calBookingUid?: string;
 };
 
 function compactLine(value: string): string {
@@ -40,11 +44,14 @@ export function buildCallInvite({
   startsAt,
   durationMinutes,
   meetingUrl,
+  guests = [],
+  calBookingUid,
 }: BuildCallInviteInput): string {
   const cleanTitle = compactLine(title) || "Call";
   const minutes = Math.max(15, Math.min(240, Math.round(durationMinutes)));
   const endsAt = new Date(startsAt.getTime() + minutes * 60_000);
   const joinUrl = safeMeetingUrl(meetingUrl);
+  const guestEmails = [...new Set(guests.map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
   const calendarUrl = new URL(GOOGLE_CALENDAR_BASE);
   calendarUrl.searchParams.set("action", "TEMPLATE");
   calendarUrl.searchParams.set("text", cleanTitle);
@@ -54,6 +61,7 @@ export function buildCallInvite({
   );
   calendarUrl.searchParams.set("details", "Call invite from this conversation.");
   if (joinUrl) calendarUrl.searchParams.set("location", joinUrl);
+  for (const email of guestEmails) calendarUrl.searchParams.append("add", email);
 
   const when = new Intl.DateTimeFormat(undefined, {
     weekday: "short",
@@ -70,6 +78,8 @@ export function buildCallInvite({
     `${when} · ${minutes} min`,
     calendarUrl.toString(),
     joinUrl ? `Join: ${joinUrl}` : null,
+    guestEmails.length ? `Guests: ${guestEmails.join(", ")}` : null,
+    calBookingUid ? `Cal.com booking: ${compactLine(calBookingUid)}` : null,
   ].filter(Boolean).join("\n");
 }
 
@@ -96,12 +106,19 @@ export function parseCallInvite(body: string): CallInvite | null {
     if (!startsAt || !endsAt || endsAt <= startsAt) return null;
     const title = compactLine(calendarUrl.searchParams.get("text") || "Call") || "Call";
     const meetingUrl = safeMeetingUrl(calendarUrl.searchParams.get("location") || undefined);
+    const guests = [...new Set([
+      ...calendarUrl.searchParams.getAll("add"),
+      ...(body.match(/^Guests:\s*(.+)$/im)?.[1]?.split(",") || []),
+    ].map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+    const calBookingUid = compactLine(body.match(/^Cal\.com booking:\s*(.+)$/im)?.[1] || "") || null;
     return {
       title,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       calendarUrl: calendarUrl.toString(),
       meetingUrl,
+      guests,
+      calBookingUid,
     };
   } catch {
     return null;

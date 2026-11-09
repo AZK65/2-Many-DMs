@@ -120,6 +120,10 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [newTag, setNewTag] = useState("");
   const [newFolder, setNewFolder] = useState("");
+  const [calApiStatus, setCalApiStatus] = useState<{ configured: boolean; managedByEnvironment: boolean } | null>(null);
+  const [calApiKeyInput, setCalApiKeyInput] = useState("");
+  const [calApiBusy, setCalApiBusy] = useState(false);
+  const [calApiError, setCalApiError] = useState<string | null>(null);
 
   const [notifDenied, setNotifDenied] = useState(false);
 
@@ -137,6 +141,44 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
     if (perm === "default") perm = await Notification.requestPermission();
     setNotifDenied(perm === "denied");
     update({ notifications: perm === "granted" });
+  }
+
+  async function connectCalApi() {
+    if (!calApiKeyInput.trim() || calApiBusy) return;
+    setCalApiBusy(true);
+    setCalApiError(null);
+    try {
+      const response = await fetch("/api/calcom/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: calApiKeyInput }),
+      });
+      const payload = await response.json().catch(() => ({})) as { configured?: boolean; error?: string };
+      if (!response.ok || !payload.configured) throw new Error(payload.error || "Cal.com could not be connected.");
+      setCalApiStatus({ configured: true, managedByEnvironment: false });
+      setCalApiKeyInput("");
+      update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, enabled: true } } });
+    } catch (error) {
+      setCalApiError(error instanceof Error ? error.message : "Cal.com could not be connected.");
+    } finally {
+      setCalApiBusy(false);
+    }
+  }
+
+  async function disconnectCalApi() {
+    if (calApiBusy) return;
+    setCalApiBusy(true);
+    setCalApiError(null);
+    try {
+      const response = await fetch("/api/calcom/config", { method: "DELETE" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Cal.com could not be disconnected.");
+      setCalApiStatus({ configured: false, managedByEnvironment: false });
+    } catch (error) {
+      setCalApiError(error instanceof Error ? error.message : "Cal.com could not be disconnected.");
+    } finally {
+      setCalApiBusy(false);
+    }
   }
 
   // ── Tags (server) ──
@@ -234,6 +276,7 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
     setThemeState(currentTheme());
     fetch("/api/tags").then((r) => r.json()).then(setTags).catch(() => {});
     fetch("/api/folders").then((r) => r.json()).then(setFolders).catch(() => {});
+    fetch("/api/calcom/config", { cache: "no-store" }).then((r) => r.json()).then(setCalApiStatus).catch(() => setCalApiStatus({ configured: false, managedByEnvironment: false }));
     const refreshConnections = () => {
       fetch("/api/accounts", { cache: "no-store" })
         .then((r) => r.json())
@@ -639,12 +682,39 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
 
               {page === "integrations" && (
                 <div className="space-y-5">
-                  <IntegrationPanel icon={<ClockIcon className="h-5 w-5" />} name="Cal.com" description="Suggest your booking link when a conversation mentions a date." enabled={s.plugins.calcom.enabled} onToggle={(enabled) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, enabled } } })}>
+                  <IntegrationPanel icon={<ClockIcon className="h-5 w-5" />} name="Cal.com" description="Create confirmed bookings and email every guest from the chat scheduler." enabled={s.plugins.calcom.enabled} onToggle={(enabled) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, enabled } } })}>
                     {s.plugins.calcom.enabled && (
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-neutral-200">Booking link</span>
-                        <input value={s.plugins.calcom.link} onChange={(event) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, link: event.target.value } } })} placeholder="cal.com/you/30min" className={INPUT_CLASS} />
-                      </label>
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-[#1F1F1F]">
+                          <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-neutral-200">
+                            <span className={`h-2.5 w-2.5 rounded-full ${calApiStatus?.configured ? "bg-emerald-500" : "bg-amber-500"}`} />
+                            {calApiStatus == null ? "Checking API connection…" : calApiStatus.configured ? "API connected" : "API key required"}
+                          </div>
+                          {calApiStatus?.configured && !calApiStatus.managedByEnvironment && (
+                            <button type="button" onClick={() => void disconnectCalApi()} disabled={calApiBusy} className="text-xs font-semibold text-slate-500 transition hover:text-red-600 disabled:opacity-50 dark:text-neutral-400 dark:hover:text-red-300">Disconnect</button>
+                          )}
+                          {calApiStatus?.managedByEnvironment && <span className="text-xs text-slate-400 dark:text-neutral-500">Managed by server</span>}
+                        </div>
+
+                        {!calApiStatus?.configured && (
+                          <div>
+                            <label htmlFor="cal-api-key" className="mb-2 block text-sm font-medium text-slate-700 dark:text-neutral-200">API key</label>
+                            <div className="flex gap-2">
+                              <input id="cal-api-key" type="password" autoComplete="off" value={calApiKeyInput} onChange={(event) => { setCalApiKeyInput(event.target.value); setCalApiError(null); }} placeholder="cal_…" className={`${INPUT_CLASS} min-w-0 flex-1`} />
+                              <button type="button" onClick={() => void connectCalApi()} disabled={calApiBusy || !calApiKeyInput.trim()} className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50">{calApiBusy ? "Connecting…" : "Connect"}</button>
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-slate-400 dark:text-neutral-500">Stored encrypted. Find it in Cal.com → Settings → Developer → API keys.</p>
+                          </div>
+                        )}
+
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-neutral-200">Event link</span>
+                          <input value={s.plugins.calcom.link} onChange={(event) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, link: event.target.value } } })} placeholder="cal.com/you/30min" className={INPUT_CLASS} />
+                          <span className="mt-2 block text-xs leading-5 text-slate-400 dark:text-neutral-500">This event type controls availability and the conferencing app. Guest emails are added from the chat scheduler.</span>
+                        </label>
+
+                        {calApiError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-300">{calApiError}</p>}
+                      </div>
                     )}
                   </IntegrationPanel>
 
