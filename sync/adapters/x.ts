@@ -99,6 +99,20 @@ interface AutomaticRepair {
   activityAt?: number;
 }
 
+const X_REPAIR_STATE_VERSION = 3;
+
+export function migrateXSharedPostRetryEntries(
+  version: number | undefined,
+  queue: Array<[string, Pick<AutomaticRepair, "previewKey">]>,
+  retryAt: Array<[string, number]>
+): Array<[string, number]> {
+  if (version !== 2) return retryAt;
+  const sharedPosts = new Set(queue.filter(([, repair]) =>
+    /^(?:media-v2:)?(?:in|out):(?:sent|shared) (?:a )?post:/i.test(repair.previewKey)
+  ).map(([key]) => key));
+  return retryAt.filter(([key]) => !sharedPosts.has(key));
+}
+
 function previewSignature(conversation: ScrapedConversation): string {
   const mediaVersion = /(?:sent|shared) (?:(?:a|an|\d+) )?(?:photo|image|video|gif|voice|audio|attachment|file|document)/i.test(conversation.preview) ? "media-v2:" : "";
   return `${mediaVersion}${conversation.direction}:${conversation.preview}:${conversation.timestamp || "undated"}`;
@@ -289,7 +303,7 @@ export class XAdapter implements Adapter {
         lastRepairAt?: Array<[string, number]>;
         lastHistoryAuditAt?: number;
       };
-      if (saved.version !== 2) return; // Old checkpoints marked partial viewport reads as complete.
+      if (![2, X_REPAIR_STATE_VERSION].includes(saved.version || 0)) return; // Older checkpoints marked partial viewport reads as complete.
       for (const [key, value] of Object.entries(saved.previews || {})) {
         if (typeof value === "string") this.repairedPreviews.set(key, value);
       }
@@ -300,7 +314,7 @@ export class XAdapter implements Adapter {
         if (repair?.id && typeof repair.previewKey === "string") this.automaticRepairQueue.set(key, repair);
       }
       this.inboxDates = new Map(saved.dates || []);
-      this.repairRetryAt = new Map(saved.retryAt || []);
+      this.repairRetryAt = new Map(migrateXSharedPostRetryEntries(saved.version, saved.queue || [], saved.retryAt || []));
       this.lastRepairAt = new Map(saved.lastRepairAt || []);
       this.lastHistoryAuditAt = saved.lastHistoryAuditAt || 0;
       if (saved.offsets) this.discoveryOffsets = saved.offsets;
@@ -312,7 +326,7 @@ export class XAdapter implements Adapter {
   private persistRepairState(): void {
     try {
       const target = this.repairStateFile();
-      fs.writeFileSync(`${target}.tmp`, JSON.stringify({ version: 2, previews: Object.fromEntries(this.repairedPreviews), observations: [...this.conversationPreviews], queue: [...this.automaticRepairQueue], dates: [...this.inboxDates], retryAt: [...this.repairRetryAt], offsets: this.discoveryOffsets, lastRepairAt: [...this.lastRepairAt], lastHistoryAuditAt: this.lastHistoryAuditAt }));
+      fs.writeFileSync(`${target}.tmp`, JSON.stringify({ version: X_REPAIR_STATE_VERSION, previews: Object.fromEntries(this.repairedPreviews), observations: [...this.conversationPreviews], queue: [...this.automaticRepairQueue], dates: [...this.inboxDates], retryAt: [...this.repairRetryAt], offsets: this.discoveryOffsets, lastRepairAt: [...this.lastRepairAt], lastHistoryAuditAt: this.lastHistoryAuditAt }));
       fs.renameSync(`${target}.tmp`, target);
     } catch {
       // A read-only install can still use the in-memory queue for this run.

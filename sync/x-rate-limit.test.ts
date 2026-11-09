@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { XAdapter } from "./adapters/x";
+import { migrateXSharedPostRetryEntries, XAdapter } from "./adapters/x";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "./x-rate-limit";
 
 test("server retry deadlines accept seconds and HTTP dates without allowing invalid or past dates", () => {
@@ -39,6 +39,16 @@ test("telemetry throttles do not disable DMs", () => {
   assert.equal(isXRateLimitRelevant("https://x.com/i/chat", "document"), true);
   assert.equal(isXRateLimitRelevant("https://example.com/i/chat", "document"), false);
   assert.equal(isXRateLimitRelevant("https://x.com/image", "image"), false);
+});
+
+test("the post-card parser upgrade retries only previously blocked shared posts", () => {
+  const retryAt: Array<[string, number]> = [["general:post", 200], ["general:text", 300]];
+  const queue = [
+    ["general:post", { previewKey: "in:Sent a post:100" }],
+    ["general:text", { previewKey: "in:hello:100" }],
+  ] as Array<[string, { previewKey: string }]>;
+  assert.deepEqual(migrateXSharedPostRetryEntries(2, queue, retryAt), [["general:text", 300]]);
+  assert.deepEqual(migrateXSharedPostRetryEntries(3, queue, retryAt), retryAt);
 });
 
 function connectorHarness() {
