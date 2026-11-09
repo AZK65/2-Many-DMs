@@ -93,7 +93,22 @@ export function readXMessageDom() {
     // and the visible timestamp/checkmarks. The direction-aware text span is
     // the actual authored body. Never strip clock-looking text from that span.
     const authored = textElement?.querySelector<HTMLElement>('[dir="auto"]');
-    const text = (authored?.innerText ?? textElement?.innerText ?? '').trim();
+    const authoredText = (authored?.innerText ?? textElement?.innerText ?? '').trim();
+    // Shared posts are rendered as link cards, while X exposes only the
+    // generic "Sent a post" label in the message text node. Preserve the
+    // canonical status URL so Omni can render and reopen the actual post.
+    const postUrl = Array.from(bubble.querySelectorAll<HTMLAnchorElement>('a[href]')).map(anchor => {
+      try {
+        const url = new URL(anchor.getAttribute('href') || anchor.href, location.origin === 'null' ? 'https://x.com' : location.origin);
+        const match = url.pathname.match(/^\/([^/]+)\/status\/(\d+)/);
+        return (url.hostname === 'x.com' || url.hostname === 'www.x.com' || url.hostname === 'twitter.com' || url.hostname === 'www.twitter.com') && match
+          ? `https://x.com/${encodeURIComponent(match[1])}/status/${match[2]}`
+          : null;
+      } catch { return null; }
+    }).find((url): url is string => Boolean(url));
+    const text = postUrl && /^(?:sent|shared) (?:a )?post$/i.test(authoredText)
+      ? `${authoredText}\n${postUrl}`
+      : authoredText || postUrl || '';
     return { id, direction, text, dateHints, timeText, day, attachments };
   }).filter((row) => row.text || row.attachments.length);
 }

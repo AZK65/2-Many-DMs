@@ -18,6 +18,11 @@ export function xPreviewMatchesText(preview: string, full: string): boolean {
   const short = normalizeXMessageText(preview);
   const complete = normalizeXMessageText(full);
   if (short === complete) return true;
+  // X's inbox reduces a shared post to this generic label. The native DM row
+  // exposes the post URL only after the conversation hydrates, so allow that
+  // exact label to promote into the richer, link-backed message.
+  if (/^(?:sent|shared) (?:a )?post$/i.test(short) &&
+      /(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/[^/\s]+\/status\/\d+/i.test(complete)) return true;
   const prefix = short.replace(/(?:…|\.{3})$/, "").trimEnd();
   if (prefix !== short && prefix.length >= 24 && complete.length > prefix.length && complete.startsWith(prefix)) return true;
   if (short.length < 24 || complete.length <= short.length) return false;

@@ -1,4 +1,5 @@
 import { richerXMessageText, xPreviewMatchesText } from "./x-message-text";
+import { xPostUrlFromText } from "../src/lib/x-post-preview";
 
 // Never substitute import time for a message's sent time. UUIDv4 XChat IDs
 // contain no date; only legacy snowflakes and dates displayed by X are usable.
@@ -109,6 +110,7 @@ export function xHistoryMatchesPreview(
     if (message.direction !== preview.direction) return false;
     if (preview.timestamp && (!message.timestamp || Math.abs(message.timestamp - preview.timestamp) > tolerance)) return false;
     if (xPreviewMatchesText(preview.preview, message.text) || xPreviewMatchesText(body, normalize(message.text))) return true;
+    if (/^(?:sent|shared) (?:a )?post$/i.test(body) && xPostUrlFromText(message.text)) return true;
     const mediaPreview = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|file|document|attachment)s?$/i.exec(body);
     const kind = mediaPreview?.[2]?.toLowerCase();
     const expected = Number(mediaPreview?.[1]) || 1;

@@ -23,12 +23,15 @@ test("X previews match the exact 200-character boundary, not arbitrary prefixes"
   assert.equal(xPreviewMatchesText(emoji.slice(0, 200), emoji), true);
   assert.equal(xPreviewMatchesText(full.slice(0, 199), full), false);
   assert.equal(xPreviewMatchesText("yes", "yes please"), false);
+  assert.equal(xPreviewMatchesText("Sent a post", "Sent a post\nhttps://x.com/example/status/123"), true);
+  assert.equal(xPreviewMatchesText("Sent a post", "Sent a photo"), false);
   assert.equal(xPreviewMatchesText("a short standalone message", "a short standalone message followed by another thought"), false);
   assert.equal(xPreviewMatchesText(prefix, `${prefix.slice(0, -1)}! different ending`), false);
   assert.equal(xPreviewMatchesText(full, prefix), false);
   assert.equal(xHistoryMatchesPreview([{ id: "native", text: full, direction: "in", timestamp: at }], { preview: prefix, direction: "in", timestamp: at }), true);
   assert.equal(xHistoryMatchesPreview([{ id: "native", text: full, direction: "out", timestamp: at }], { preview: prefix, direction: "in", timestamp: at }), false);
   assert.equal(xHistoryMatchesPreview([{ id: "native", text: full, direction: "in", timestamp: at - 86400000 }], { preview: prefix, direction: "in", timestamp: at }), false);
+  assert.equal(xHistoryMatchesPreview([{ id: "post", text: "Sent a post\nhttps://x.com/example/status/123", direction: "in", timestamp: at }], { preview: "Sent a post", direction: "in", timestamp: at }), true);
 });
 
 test("clipped previews reconcile across chats without losing native messages or protected data", async () => {

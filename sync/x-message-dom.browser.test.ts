@@ -52,5 +52,17 @@ test("real X text-wrapper structure excludes both timestamp copies without trimm
     const blobFile = withFile.find(row => row.id === '22222222-2222-4222-8222-222222222222')!;
     assert.equal(blobFile.attachments[0].type, 'image');
     assert.equal(blobFile.attachments[0].nativeDownload, true, 'blob SVG file glyph keeps the native document-download signal');
+
+    await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="xchatEmbedRoute"]')!.shadowRoot!;
+      const row = document.createElement('div');
+      row.dataset.testid = 'message-33333333-3333-4333-8333-333333333333';
+      row.innerHTML = '<div data-side="start"><div data-testid="message-text-33333333-3333-4333-8333-333333333333"><span dir="auto">Sent a post</span></div><a data-testid="tweet-card" href="https://twitter.com/finityx/status/2012584288298901546?s=20"><img src="https://pbs.twimg.com/media/example.jpg"></a><span id="post-time">1:45 PM</span></div>';
+      root.querySelector('[data-testid="dm-message-list"]')!.append(row);
+    });
+    const withPost = await page.evaluate(readXMessageDom);
+    const post = withPost.find(row => row.id === '33333333-3333-4333-8333-333333333333')!;
+    assert.equal(post.text, 'Sent a post\nhttps://x.com/finityx/status/2012584288298901546');
+    assert.deepEqual(post.attachments, [], 'link-card artwork is not a message attachment');
   } finally { await browser.close(); }
 });

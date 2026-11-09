@@ -53,6 +53,7 @@ import {
   saveConversationDraft,
 } from "@/lib/drafts";
 import { messageLinks } from "@/lib/message-links";
+import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -278,6 +279,7 @@ import { ForwardModal } from "./ForwardModal";
 import { EmojiPicker } from "./EmojiPicker";
 import { PdfPreview } from "./PdfPreview";
 import { LinkPreview } from "./LinkPreview";
+import { XPostCard } from "./XPostCard";
 import { KeywordAlertControl } from "./KeywordAlertControl";
 import { ChatSearch } from "./ChatSearch";
 import { WisprDictation } from "./WisprDictation";
@@ -3196,6 +3198,8 @@ export function ChatThread({
             const displayMessage = showsAutoEnglish
               ? { ...m, body: m.translatedBody || m.body }
               : m;
+            const xPostUrl = conversation.platform === "x" ? xPostUrlFromText(m.body) : null;
+            const sharedXPost = Boolean(xPostUrl && isSharedXPostMessage(m.body));
             const translationPending =
               translatingMessageId === m.id || autoTranslatingIds.has(m.id);
             const focused = m.id === renderedFocusMessageId;
@@ -3408,7 +3412,13 @@ export function ChatThread({
                       onOpenVideo={(url, name, isGif) => setSpotlightVideo({ url, name, isGif })}
                       onOpenPdf={(url, name) => setPdfPreview({ url, name })}
                     />}
-                    {m.body && !(m.mediaType === "sticker" && m.mediaUrl) && (
+                    {xPostUrl && (
+                      <XPostCard
+                        url={xPostUrl}
+                        onOpen={() => setLinkPreview({ url: xPostUrl, label: "X post" })}
+                      />
+                    )}
+                    {m.body && !sharedXPost && !(m.mediaType === "sticker" && m.mediaUrl) && (
                       <div
                         className={
                           m.mediaType === "image" ? "px-2 pb-1 pt-1.5" : ""

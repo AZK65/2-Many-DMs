@@ -10,6 +10,26 @@ export function normalizedXPostUrl(rawUrl: string): string | null {
   }
 }
 
+const X_POST_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/[^\s<>"']+\/status\/\d+(?:\?[^\s<>"']*)?/gi;
+
+export function xPostUrlFromText(text: string): string | null {
+  for (const match of text.matchAll(X_POST_URL_RE)) {
+    const normalized = normalizedXPostUrl(match[0]);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+export function isSharedXPostMessage(text: string): boolean {
+  const url = xPostUrlFromText(text);
+  if (!url) return false;
+  const label = text
+    .replace(X_POST_URL_RE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:sent|shared) (?:a )?post$/i.test(label);
+}
+
 function decodeEntities(value: string): string {
   const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, key: string) => {
