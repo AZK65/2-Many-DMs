@@ -54,6 +54,7 @@ import {
 } from "@/lib/drafts";
 import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
+import { parseCallInvite } from "@/lib/call-invite";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -280,6 +281,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { PdfPreview } from "./PdfPreview";
 import { LinkPreview } from "./LinkPreview";
 import { XPostCard } from "./XPostCard";
+import { CallInviteCard, CallScheduler } from "./CallScheduler";
 import { KeywordAlertControl } from "./KeywordAlertControl";
 import { ChatSearch } from "./ChatSearch";
 import { WisprDictation } from "./WisprDictation";
@@ -288,6 +290,7 @@ import { chatSyncIssue, sourceChatUrl, syncHealthView, type SyncStatus } from "@
 import {
   ArchiveIcon,
   CheckCircleIcon,
+  ClockIcon,
   CloseIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -530,6 +533,8 @@ export function ChatThread({
   const [autoCorrectionNotice, setAutoCorrectionNotice] =
     useState<AutoCorrectionNotice | null>(null);
   const [forwardMsg, setForwardMsg] = useState<MessageDTO | null>(null);
+  const [callSchedulerOpen, setCallSchedulerOpen] = useState(false);
+  useEffect(() => setCallSchedulerOpen(false), [conversation.id]);
   const [calcom, setCalcom] = useState<{ enabled: boolean; link: string }>({
     enabled: false,
     link: "",
@@ -969,12 +974,28 @@ export function ChatThread({
     }
     return null;
   }, [messages, calcom]);
+  const draftCallInvite = useMemo(() => parseCallInvite(draft), [draft]);
 
   function insertCalLink() {
     const url = calcomUrl(calcom.link, conversation.contact);
     if (!url) return;
     insertText(`Want to grab a time? Here's my calendar: ${url}`, true);
     setCalDismissed(dateMsg?.id ?? null);
+  }
+
+  function insertCallInvite(body: string) {
+    const next = draftCallInvite
+      ? body
+      : draft.trim() ? `${draft.trimEnd()}\n\n${body}` : body;
+    draftRef.current = next;
+    setDraft(next);
+    setCallSchedulerOpen(false);
+    setComposerExpanded(true);
+    setComposerNotice("Call invite added · review it before sending");
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.length, next.length);
+    });
   }
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageContentRef = useRef<HTMLDivElement>(null);
@@ -3200,6 +3221,7 @@ export function ChatThread({
               : m;
             const xPostUrl = conversation.platform === "x" ? xPostUrlFromText(m.body) : null;
             const sharedXPost = Boolean(xPostUrl && isSharedXPostMessage(m.body));
+            const callInvite = parseCallInvite(m.body);
             const translationPending =
               translatingMessageId === m.id || autoTranslatingIds.has(m.id);
             const focused = m.id === renderedFocusMessageId;
@@ -3418,7 +3440,13 @@ export function ChatThread({
                         onOpen={() => setLinkPreview({ url: xPostUrl, label: "X post" })}
                       />
                     )}
-                    {m.body && !sharedXPost && !(m.mediaType === "sticker" && m.mediaUrl) && (
+                    {callInvite && (
+                      <CallInviteCard
+                        invite={callInvite}
+                        onOpen={(url, label) => setLinkPreview({ url, label })}
+                      />
+                    )}
+                    {m.body && !sharedXPost && !callInvite && !(m.mediaType === "sticker" && m.mediaUrl) && (
                       <div
                         className={
                           m.mediaType === "image" ? "px-2 pb-1 pt-1.5" : ""
@@ -3991,6 +4019,22 @@ export function ChatThread({
           </div>
         )}
         <div className="composer-card" data-compact-composer data-expanded={composerExpanded || undefined}>
+          {draftCallInvite ? (
+            <div className="relative min-w-0 p-1">
+              <CallInviteCard
+                invite={draftCallInvite}
+                onOpen={(url, label) => setLinkPreview({ url, label })}
+                draftActions={{
+                  onEdit: () => setCallSchedulerOpen(true),
+                  onRemove: () => {
+                    draftRef.current = "";
+                    setDraft("");
+                    setComposerNotice("Call invite removed");
+                  },
+                }}
+              />
+            </div>
+          ) : (
           <AutoGrowTextarea
             ref={textareaRef}
             onMultilineChange={multiline => {
@@ -4077,6 +4121,7 @@ export function ChatThread({
             }
             className="resize-none bg-transparent px-2 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
           />
+          )}
           <div className="composer-toolbar">
             <button type="button" onClick={() => fileInputRef.current?.click()} className="composer-tool" title={caps.hint} aria-label="Attach a file"><PaperclipIcon className="h-4 w-4" /></button>
             <div className="relative">
@@ -4087,6 +4132,7 @@ export function ChatThread({
                       <summary aria-label="Writing tools" title="AI, autocorrect and snippets" className="composer-tool list-none cursor-pointer [&::-webkit-details-marker]:hidden"><SparklesIcon className="h-4 w-4" /></summary>
               <div className="workspace-menu absolute bottom-full left-0 z-40 mb-3 w-64 p-2">
                 <button type="button" data-close-menu onClick={event => { void generateAiDraft(); }} disabled={aiDrafting || loading || messages.length === 0 || (!draft.trim() && conversation.lastDirection !== "in")} className="composer-menu-item disabled:opacity-40"><SparklesIcon /><span>{aiDrafting ? "Writing…" : draft.trim() ? "Polish draft with AI" : "Draft reply with AI"}</span></button>
+                <button type="button" data-close-menu onClick={() => setCallSchedulerOpen(true)} className="composer-menu-item"><ClockIcon /> Schedule a call</button>
                 <button type="button" aria-pressed={autoCorrectEnabled} onClick={() => {
                   const next = !autoCorrectEnabled;
                   setAutoCorrectEnabled(next);
@@ -4122,6 +4168,14 @@ export function ChatThread({
       )}
 
       <AnimatePresence>
+        {callSchedulerOpen && (
+          <CallScheduler
+            contactName={conversation.contact.name}
+            initialInvite={draftCallInvite}
+            onClose={() => setCallSchedulerOpen(false)}
+            onInsert={insertCallInvite}
+          />
+        )}
         {spotlightImage && (
           <OverlayPortal onClose={() => setSpotlightImage(null)}><motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
