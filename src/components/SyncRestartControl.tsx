@@ -198,7 +198,7 @@ export function SyncRestartControl({
     (platform) => platform.state !== "disabled",
   );
   const statusPhase: RestartPhase = active ? snapshot.phase
-    : visiblePlatforms.length && visiblePlatforms.every(platform => platform.state === "ready" && !["attention", "progress"].includes(syncHealthView(platform).tone)) ? "ready"
+    : visiblePlatforms.length && visiblePlatforms.every(platform => platform.state === "ready" && syncHealthView(platform).tone !== "attention") ? "ready"
     : "attention";
   const hasRestartDetails = open;
 
@@ -349,6 +349,7 @@ export function SyncRestartControl({
                   {visiblePlatforms.slice(0, 3).map((platform) => {
                     const key = platform.platform as Platform;
                     const meta = PLATFORMS[key];
+                    const healthView = syncHealthView(platform);
                     return (
                       <div
                         key={platform.platform}
@@ -359,15 +360,17 @@ export function SyncRestartControl({
                         <span className="text-xs text-slate-500 dark:text-neutral-400">{statusLabel(platform)}</span>
                         </div>
                         <p className={`mt-1 text-xs font-medium ${
-                          syncHealthView(platform).tone === "success"
+                          healthView.tone === "success"
                             ? "text-emerald-600 dark:text-emerald-400"
-                            : ["attention", "progress"].includes(syncHealthView(platform).tone)
+                            : healthView.tone === "progress"
+                              ? "text-accent"
+                              : healthView.tone === "attention"
                               ? "text-amber-600 dark:text-amber-400"
                               : "text-slate-400 dark:text-neutral-500"
                         }`}>
-                          {syncHealthView(platform).label}
+                          {healthView.label}
                         </p>
-                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">{syncHealthView(platform).detail}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">{healthView.detail}</p>
                         {platform.sync?.lastCheckedAt ? <p className="mt-1 text-xs text-slate-500 dark:text-neutral-400">Last inbox check: {new Date(platform.sync.lastCheckedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p> : null}
                         {platform.sync?.lastMessageAt ? <p className="mt-1 text-xs text-slate-500 dark:text-neutral-400">Last message saved: {new Date(platform.sync.lastMessageAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p> : null}
                         {platform.sync?.retryAt && platform.sync.retryAt > Date.now() ? <p className="mt-1 text-xs text-slate-500 dark:text-neutral-400">Retry after {new Date(platform.sync.retryAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p> : null}
@@ -406,7 +409,7 @@ export function SyncRestartControl({
                     {statusPhase === "ready" ? (
                       <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
                         <CheckIcon className="h-3.5 w-3.5" />
-                        Connections ready
+                        Live connections ready
                       </div>
                     ) : statusPhase === "error" || statusPhase === "attention" ? (
                       <div className="rounded-lg bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">

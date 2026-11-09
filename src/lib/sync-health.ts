@@ -27,10 +27,10 @@ export function syncHealthView(status?: SyncStatus, now = Date.now()) {
   const paused = Boolean(health?.retryAt && health.retryAt > now);
   if (!status || status.state === "disabled") return { label: "Status unavailable", tone: "attention", detail: "Message coverage could not be checked." } as const;
   if (paused) return { label: "Sync paused", tone: "attention", detail: "Automatic recovery is waiting for the platform. Saved messages remain available." } as const;
-  if (status.state !== "ready") return { label: status.state === "qr" ? "Scan QR" : status.state === "starting" ? "Connecting" : "Needs attention", tone: "attention", detail: "New messages may be delayed. Saved history remains available." } as const;
-  if (health?.blockedChats) return { label: "History needs attention", tone: "attention", detail: `${health.blockedChats} chats waiting to retry; ${health.pendingChats} queued for history checks.` } as const;
+  if (status.state !== "ready") return { label: status.state === "qr" ? "Scan QR" : status.state === "starting" ? "Connecting" : "Needs attention", tone: "attention", detail: status.detail || "New messages may be delayed. Saved history remains available." } as const;
   if (health?.lastCheckedAt && now - health.lastCheckedAt > 15 * 60_000) return { label: "Checks delayed", tone: "attention", detail: "Connected, but the last successful inbox check is over 15 minutes old." } as const;
-  if (health?.pendingChats) return { label: "Checking history", tone: "progress", detail: `${health.pendingChats} chats queued. Live messages and older history are checked separately.` } as const;
+  if (health?.pendingChats) return { label: "Repairing history", tone: "progress", detail: `${health.pendingChats} chats queued${health.blockedChats ? `; ${health.blockedChats} paused chats will retry automatically` : ""}. Live messages stay connected.` } as const;
+  if (health?.blockedChats) return { label: "History needs attention", tone: "attention", detail: `${health.blockedChats} chats are waiting for a later retry. Live messages remain connected, and saved history is safe.` } as const;
   if (health?.lastCheckedAt) return { label: "Recent inbox checked", tone: "success", detail: "No known pending history checks. This does not guarantee all older messages or attachments are available." } as const;
   return { label: "Connected · history unverified", tone: "neutral", detail: "The connection is live; complete history has not been verified." } as const;
 }
