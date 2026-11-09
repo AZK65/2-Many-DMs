@@ -67,6 +67,26 @@ async function responseError(response: Response): Promise<string> {
   return body?.error?.message || body?.message || `Cal.com returned ${response.status}.`;
 }
 
+function rejectsCustomDuration(message: string): boolean {
+  return /lengthInMinutes/i.test(message) && /does not have multiple possible lengths/i.test(message);
+}
+
+function bookingPayload(
+  eventType: NonNullable<ReturnType<typeof parseCalBookingLink>>,
+  input: CalBookingRequest,
+  includeDuration: boolean,
+) {
+  return {
+    ...eventType,
+    start: input.startsAt,
+    attendee: input.attendee,
+    guests: input.guests,
+    ...(includeDuration ? { lengthInMinutes: input.durationMinutes } : {}),
+    meetingUrl: input.meetingUrl || undefined,
+    metadata: { source: "omni-crm" },
+  };
+}
+
 export async function validateCalApiKey(value: unknown): Promise<string> {
   const apiKey = cleanApiKey(value);
   if (!apiKey) throw new Error("Enter a Cal.com API key beginning with cal_.");
@@ -105,29 +125,30 @@ export async function calApiKey(userId: string): Promise<string | null> {
 export async function createCalBooking(apiKey: string, input: CalBookingRequest): Promise<CalBooking> {
   const eventType = parseCalBookingLink(input.bookingLink);
   if (!eventType) throw new Error("Use a Cal.com event link such as cal.com/you/30min.");
-  const response = await requestCal("/bookings", apiKey, {
+  let response = await requestCal("/bookings", apiKey, {
     method: "POST",
-    body: JSON.stringify({
-      ...eventType,
-      start: input.startsAt,
-      attendee: input.attendee,
-      guests: input.guests,
-      lengthInMinutes: input.durationMinutes,
-      meetingUrl: input.meetingUrl || undefined,
-      metadata: { source: "omni-crm" },
-    }),
+    body: JSON.stringify(bookingPayload(eventType, input, true)),
   });
-  if (!response.ok) throw new Error(await responseError(response));
+  if (!response.ok) {
+    const message = await responseError(response);
+    if (!rejectsCustomDuration(message)) throw new Error(message);
+    response = await requestCal("/bookings", apiKey, {
+      method: "POST",
+      body: JSON.stringify(bookingPayload(eventType, input, false)),
+    });
+    if (!response.ok) throw new Error(await responseError(response));
+  }
   const payload = await response.json() as {
     data?: { uid?: string; start?: string; end?: string; duration?: number; meetingUrl?: string; location?: string; guests?: string[]; status?: string };
   };
   const booking = payload.data;
   if (!booking?.uid || !booking.start || !booking.end) throw new Error("Cal.com created the booking but returned incomplete details.");
+  const returnedDuration = Math.round((new Date(booking.end).getTime() - new Date(booking.start).getTime()) / 60_000);
   return {
     uid: booking.uid,
     startsAt: booking.start,
     endsAt: booking.end,
-    durationMinutes: booking.duration || input.durationMinutes,
+    durationMinutes: booking.duration || (returnedDuration > 0 ? returnedDuration : input.durationMinutes),
     meetingUrl: booking.location || booking.meetingUrl || input.meetingUrl || null,
     guests: booking.guests || input.guests,
     status: booking.status || "accepted",
