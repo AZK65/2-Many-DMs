@@ -2125,7 +2125,7 @@ export function ChatThread({
                 ? conversation.contact.name
                 : attendeeEmail.split("@")[0].replace(/[._-]+/g, " "),
               email: attendeeEmail,
-              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              timeZone: pendingCall.guestTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
             guests: pendingCall.guests.slice(1),
             meetingUrl: pendingCall.meetingUrl,
@@ -2143,6 +2143,7 @@ export function ChatThread({
           durationMinutes: booking.durationMinutes,
           meetingUrl: booking.meetingUrl || pendingCall.meetingUrl || undefined,
           guests: pendingCall.guests,
+          guestTimeZone: pendingCall.guestTimeZone || undefined,
           calBookingUid: booking.uid,
         });
         draftRef.current = body;

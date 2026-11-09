@@ -8,6 +8,7 @@ export type CallInvite = {
   calendarUrl: string;
   meetingUrl: string | null;
   guests: string[];
+  guestTimeZone: string | null;
   calBookingUid: string | null;
 };
 
@@ -17,6 +18,7 @@ type BuildCallInviteInput = {
   durationMinutes: number;
   meetingUrl?: string;
   guests?: string[];
+  guestTimeZone?: string;
   calBookingUid?: string;
 };
 
@@ -39,18 +41,31 @@ function safeMeetingUrl(value: string | undefined): string | null {
   }
 }
 
+function safeTimeZone(value: string | undefined): string | null {
+  const timeZone = value?.trim();
+  if (!timeZone) return null;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format();
+    return timeZone;
+  } catch {
+    return null;
+  }
+}
+
 export function buildCallInvite({
   title,
   startsAt,
   durationMinutes,
   meetingUrl,
   guests = [],
+  guestTimeZone,
   calBookingUid,
 }: BuildCallInviteInput): string {
   const cleanTitle = compactLine(title) || "Call";
   const minutes = Math.max(15, Math.min(240, Math.round(durationMinutes)));
   const endsAt = new Date(startsAt.getTime() + minutes * 60_000);
   const joinUrl = safeMeetingUrl(meetingUrl);
+  const attendeeTimeZone = safeTimeZone(guestTimeZone);
   const guestEmails = [...new Set(guests.map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
   const calendarUrl = new URL(GOOGLE_CALENDAR_BASE);
   calendarUrl.searchParams.set("action", "TEMPLATE");
@@ -79,6 +94,7 @@ export function buildCallInvite({
     calendarUrl.toString(),
     joinUrl ? `Join: ${joinUrl}` : null,
     guestEmails.length ? `Guests: ${guestEmails.join(", ")}` : null,
+    attendeeTimeZone ? `Guest time zone: ${attendeeTimeZone}` : null,
     calBookingUid ? `Cal.com booking: ${compactLine(calBookingUid)}` : null,
   ].filter(Boolean).join("\n");
 }
@@ -110,6 +126,7 @@ export function parseCallInvite(body: string): CallInvite | null {
       ...calendarUrl.searchParams.getAll("add"),
       ...(body.match(/^Guests:\s*(.+)$/im)?.[1]?.split(",") || []),
     ].map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+    const guestTimeZone = safeTimeZone(compactLine(body.match(/^Guest time zone:\s*(.+)$/im)?.[1] || "") || undefined);
     const calBookingUid = compactLine(body.match(/^Cal\.com booking:\s*(.+)$/im)?.[1] || "") || null;
     return {
       title,
@@ -118,6 +135,7 @@ export function parseCallInvite(body: string): CallInvite | null {
       calendarUrl: calendarUrl.toString(),
       meetingUrl,
       guests,
+      guestTimeZone,
       calBookingUid,
     };
   } catch {

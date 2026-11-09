@@ -7,6 +7,19 @@ import { CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
 import { OverlayPortal } from "./OverlayPortal";
 
 const DURATIONS = [15, 30, 45, 60] as const;
+const GUEST_TIME_ZONES = [
+  { value: "Europe/London", label: "United Kingdom (London)" },
+  { value: "America/New_York", label: "Eastern time (New York)" },
+  { value: "America/Toronto", label: "Eastern time (Toronto)" },
+  { value: "America/Chicago", label: "Central time (Chicago)" },
+  { value: "America/Denver", label: "Mountain time (Denver)" },
+  { value: "America/Los_Angeles", label: "Pacific time (Los Angeles)" },
+  { value: "Europe/Paris", label: "Central Europe (Paris)" },
+  { value: "Asia/Dubai", label: "Gulf time (Dubai)" },
+  { value: "Asia/Kolkata", label: "India (Kolkata)" },
+  { value: "Asia/Singapore", label: "Singapore" },
+  { value: "Australia/Sydney", label: "Australia (Sydney)" },
+] as const;
 
 function dateKey(date: Date): string {
   const year = date.getFullYear();
@@ -41,6 +54,56 @@ function upcomingDays(): Date[] {
   });
 }
 
+function zonedDateParts(date: Date, timeZone: string): Record<string, number> {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  return Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, Number(part.value)]));
+}
+
+function zoneOffsetMinutes(date: Date, timeZone: string): number {
+  const parts = zonedDateParts(date, timeZone);
+  return Math.round((Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - date.getTime()) / 60_000);
+}
+
+function timeDifferenceLabel(date: Date, localTimeZone: string, guestTimeZone: string): string {
+  const difference = zoneOffsetMinutes(date, guestTimeZone) - zoneOffsetMinutes(date, localTimeZone);
+  if (difference === 0) return "same time";
+  const absolute = Math.abs(difference);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+  const amount = [hours ? `${hours} hr` : "", minutes ? `${minutes} min` : ""].filter(Boolean).join(" ");
+  return `${amount} ${difference > 0 ? "ahead" : "behind"}`;
+}
+
+function formatZonedTime(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function formatZonedClock(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
 export function CallScheduler({
   contactName,
   contactEmail,
@@ -71,6 +134,8 @@ export function CallScheduler({
       : 30,
   );
   const [meetingUrl, setMeetingUrl] = useState(initialInvite?.meetingUrl || "");
+  const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  const [guestTimeZone, setGuestTimeZone] = useState(initialInvite?.guestTimeZone || "Europe/London");
   const [guests, setGuests] = useState<string[]>(() => {
     if (initialInvite?.guests.length) return initialInvite.guests;
     const email = contactEmail?.trim().toLowerCase() || "";
@@ -128,10 +193,13 @@ export function CallScheduler({
       return;
     }
     const allGuests = [...new Set([...guests, ...pendingGuests])].slice(0, 20);
-    onInsert(buildCallInvite({ title, startsAt, durationMinutes: duration, meetingUrl, guests: allGuests }));
+    onInsert(buildCallInvite({ title, startsAt, durationMinutes: duration, meetingUrl, guests: allGuests, guestTimeZone }));
   }
 
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, " ");
+  const selectedStart = useMemo(() => new Date(`${date}T${time}:00`), [date, time]);
+  const hasValidStart = !Number.isNaN(selectedStart.getTime());
+  const timezone = localTimeZone.replace(/_/g, " ");
+  const guestDifference = hasValidStart ? timeDifferenceLabel(selectedStart, localTimeZone, guestTimeZone) : "";
 
   return (
     <OverlayPortal onClose={onClose}>
@@ -211,6 +279,33 @@ export function CallScheduler({
               </fieldset>
             </div>
 
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-neutral-700 dark:bg-[#1F1F1F]">
+              <label htmlFor="call-guest-timezone" className="flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-slate-600 dark:text-neutral-300">Guest time zone</span>
+                <select
+                  id="call-guest-timezone"
+                  value={guestTimeZone}
+                  onChange={(event) => { setGuestTimeZone(event.target.value); setError(null); }}
+                  className="min-w-0 max-w-64 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-800 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#272727] dark:text-neutral-100"
+                >
+                  {GUEST_TIME_ZONES.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}
+                </select>
+              </label>
+              {hasValidStart && (
+                <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2" role="status" aria-live="polite">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">Your time</p>
+                    <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800 dark:text-neutral-100">{formatZonedTime(selectedStart, localTimeZone)}</p>
+                  </div>
+                  <span aria-hidden="true" className="text-sm text-slate-300 dark:text-neutral-600">→</span>
+                  <div className="min-w-0 text-right">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-accent">Guest · {guestDifference}</p>
+                    <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800 dark:text-neutral-100">{formatZonedTime(selectedStart, guestTimeZone)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div>
               <label htmlFor="call-guests" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300">
                 <MailIcon className="h-3.5 w-3.5" /> Guests <span className="font-normal text-slate-400">optional</span>
@@ -286,6 +381,10 @@ export function CallInviteCard({
   }).format(startsAt);
   const endTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(endsAt);
   const minutes = Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000);
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const guestWhen = invite.guestTimeZone ? formatZonedTime(startsAt, invite.guestTimeZone) : null;
+  const guestEndTime = invite.guestTimeZone ? formatZonedClock(endsAt, invite.guestTimeZone) : null;
+  const guestDifference = invite.guestTimeZone ? timeDifferenceLabel(startsAt, localTimeZone, invite.guestTimeZone) : null;
 
   return (
     <section aria-label={`Call invite: ${invite.title}`} className="w-full min-w-64 max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-neutral-700 dark:bg-[#272727] dark:text-white">
@@ -295,6 +394,7 @@ export function CallInviteCard({
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-accent">Call invite</p>
           <h3 className="mt-0.5 truncate text-sm font-semibold">{invite.title}</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-neutral-400">{when}–{endTime} · {minutes} min</p>
+          {guestWhen && <p className="mt-0.5 text-xs leading-5 text-accent">Guest · {guestWhen}–{guestEndTime} · {guestDifference}</p>}
           {invite.guests.length > 0 && <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{invite.guests.length} {invite.guests.length === 1 ? "guest" : "guests"} · {invite.guests.join(", ")}</p>}
         </div>
       </div>
