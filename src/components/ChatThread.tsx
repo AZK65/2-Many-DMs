@@ -55,6 +55,7 @@ import {
 import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
 import { buildCallInvite, parseCallInvite } from "@/lib/call-invite";
+import { mentionsCallIntent } from "@/lib/call-scheduling";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -534,7 +535,11 @@ export function ChatThread({
     useState<AutoCorrectionNotice | null>(null);
   const [forwardMsg, setForwardMsg] = useState<MessageDTO | null>(null);
   const [callSchedulerOpen, setCallSchedulerOpen] = useState(false);
-  useEffect(() => setCallSchedulerOpen(false), [conversation.id]);
+  const [callPromptDismissed, setCallPromptDismissed] = useState(false);
+  useEffect(() => {
+    setCallSchedulerOpen(false);
+    setCallPromptDismissed(false);
+  }, [conversation.id]);
   const [calcom, setCalcom] = useState<{ enabled: boolean; link: string }>({
     enabled: false,
     link: "",
@@ -975,6 +980,27 @@ export function ChatThread({
     return null;
   }, [messages, calcom]);
   const draftCallInvite = useMemo(() => parseCallInvite(draft), [draft]);
+  const hasCallIntent = useMemo(() => mentionsCallIntent(draft), [draft]);
+  const showCallPrompt = hasCallIntent && !draftCallInvite && !callPromptDismissed && !callSchedulerOpen;
+
+  useEffect(() => {
+    if (!hasCallIntent) setCallPromptDismissed(false);
+  }, [hasCallIntent]);
+
+  useEffect(() => {
+    if (readOnly) return;
+    const openScheduler = (event: KeyboardEvent) => {
+      if (event.repeat || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "m") return;
+      event.preventDefault();
+      setCallSchedulerOpen(true);
+    };
+    window.addEventListener("keydown", openScheduler);
+    return () => window.removeEventListener("keydown", openScheduler);
+  }, [readOnly]);
+
+  function openCallScheduler() {
+    setCallSchedulerOpen(true);
+  }
 
   function insertCalLink() {
     const url = calcomUrl(calcom.link, conversation.contact);
@@ -4063,6 +4089,24 @@ export function ChatThread({
           onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
         />
 
+        <AnimatePresence initial={false}>
+          {showCallPrompt && (
+            <motion.div
+              initial={{ opacity: 0, y: 4, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: "auto" }}
+              exit={{ opacity: 0, y: 4, height: 0 }}
+              className="mx-auto mb-2 flex max-w-3xl items-center gap-2 overflow-hidden rounded-xl border border-accent/20 bg-accent/10 px-2.5 py-2 text-xs text-slate-700 dark:text-neutral-200"
+              role="region"
+              aria-label="Call scheduling suggestion"
+            >
+              <ClockIcon className="h-4 w-4 shrink-0 text-accent" />
+              <span className="min-w-0 flex-1 truncate"><span className="font-semibold">Planning a call?</span> Add the time and invite before sending.</span>
+              <button type="button" onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="shrink-0 rounded-lg bg-accent px-2.5 py-1.5 font-semibold text-accent-fg transition hover:opacity-90 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Schedule</button>
+              <button type="button" onClick={() => setCallPromptDismissed(true)} aria-label="Dismiss call scheduling suggestion" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-black/5 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-white/10 dark:hover:text-white"><CloseIcon className="h-3.5 w-3.5" /></button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {draft.trim() && (
           <div className="mx-auto mb-1 max-w-3xl px-2 text-right text-[11px] font-medium text-slate-400 dark:text-neutral-500">
             {autoCorrecting
@@ -4079,7 +4123,7 @@ export function ChatThread({
                 invite={draftCallInvite}
                 onOpen={(url, label) => setLinkPreview({ url, label })}
                 draftActions={{
-                  onEdit: () => setCallSchedulerOpen(true),
+                  onEdit: openCallScheduler,
                   onRemove: () => {
                     draftRef.current = "";
                     setDraft("");
@@ -4186,7 +4230,7 @@ export function ChatThread({
                       <summary aria-label="Writing tools" title="AI, autocorrect and snippets" className="composer-tool list-none cursor-pointer [&::-webkit-details-marker]:hidden"><SparklesIcon className="h-4 w-4" /></summary>
               <div className="workspace-menu absolute bottom-full left-0 z-40 mb-3 w-64 p-2">
                 <button type="button" data-close-menu onClick={event => { void generateAiDraft(); }} disabled={aiDrafting || loading || messages.length === 0 || (!draft.trim() && conversation.lastDirection !== "in")} className="composer-menu-item disabled:opacity-40"><SparklesIcon /><span>{aiDrafting ? "Writing…" : draft.trim() ? "Polish draft with AI" : "Draft reply with AI"}</span></button>
-                <button type="button" data-close-menu onClick={() => setCallSchedulerOpen(true)} className="composer-menu-item"><ClockIcon /> Schedule a call</button>
+                <button type="button" data-close-menu onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="composer-menu-item"><ClockIcon /><span className="min-w-0 flex-1">Schedule a call</span><kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">⌘⇧M</kbd></button>
                 <button type="button" aria-pressed={autoCorrectEnabled} onClick={() => {
                   const next = !autoCorrectEnabled;
                   setAutoCorrectEnabled(next);

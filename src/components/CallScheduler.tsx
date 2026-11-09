@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { buildCallInvite, type CallInvite } from "@/lib/call-invite";
-import { CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
+import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon, LinkIcon, MailIcon } from "./icons";
 import { OverlayPortal } from "./OverlayPortal";
 
 const DURATIONS = [15, 30, 45, 60] as const;
+const TIME_SLOTS = Array.from({ length: 26 }, (_, index) => 8 * 60 + index * 30);
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const GUEST_TIME_ZONES = [
   { value: "Europe/London", label: "United Kingdom (London)" },
   { value: "America/New_York", label: "Eastern time (New York)" },
@@ -42,6 +44,34 @@ function nextStart(): Date {
 
 function timeKey(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function timeMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function timeFromMinutes(value: number): string {
+  const wrapped = (value + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
+}
+
+function formatClockValue(value: string): string {
+  const minutes = timeMinutes(value);
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(
+    new Date(2026, 0, 1, Math.floor(minutes / 60), minutes % 60),
+  );
+}
+
+function monthGrid(month: Date): Date[] {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1, 12);
+  const start = new Date(first);
+  start.setDate(1 - first.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
+  });
 }
 
 function upcomingDays(): Date[] {
@@ -143,14 +173,20 @@ export function CallScheduler({
   });
   const [guestInput, setGuestInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(initial.getFullYear(), initial.getMonth(), 1, 12));
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      if (calendarOpen) setCalendarOpen(false);
+      else if (timeOpen) setTimeOpen(false);
+      else onClose();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
+  }, [calendarOpen, onClose, timeOpen]);
 
   function addGuestEmails(value: string): boolean {
     const additions = value.split(/[\s,;]+/).map(email => email.trim().toLowerCase()).filter(Boolean);
@@ -200,6 +236,25 @@ export function CallScheduler({
   const hasValidStart = !Number.isNaN(selectedStart.getTime());
   const timezone = localTimeZone.replace(/_/g, " ");
   const guestDifference = hasValidStart ? timeDifferenceLabel(selectedStart, localTimeZone, guestTimeZone) : "";
+  const calendarDays = useMemo(() => monthGrid(calendarMonth), [calendarMonth]);
+  const today = dateKey(new Date());
+  const selectedDate = new Date(`${date}T12:00:00`);
+  const selectedDateLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "long", day: "numeric" }).format(selectedDate);
+  const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(calendarMonth);
+  const previousMonthDisabled = calendarMonth.getFullYear() === new Date().getFullYear() && calendarMonth.getMonth() === new Date().getMonth();
+
+  function chooseDate(day: Date) {
+    setDate(dateKey(day));
+    setCalendarMonth(new Date(day.getFullYear(), day.getMonth(), 1, 12));
+    setCalendarOpen(false);
+    setError(null);
+  }
+
+  function adjustTime(minutes: number) {
+    setTime(current => timeFromMinutes(timeMinutes(current) + minutes));
+    setTimeOpen(false);
+    setError(null);
+  }
 
   return (
     <OverlayPortal onClose={onClose}>
@@ -249,25 +304,108 @@ export function CallScheduler({
                   const key = dateKey(day);
                   const selected = date === key;
                   return (
-                    <button key={key} type="button" onClick={() => { setDate(key); setError(null); }} aria-pressed={selected} className={`rounded-xl px-1 py-2 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${selected ? "bg-accent text-accent-fg shadow-sm" : "bg-slate-50 text-slate-600 hover:bg-slate-100 dark:bg-[#1F1F1F] dark:text-neutral-300 dark:hover:bg-neutral-700"}`}>
+                    <button key={key} type="button" onClick={() => chooseDate(day)} aria-pressed={selected} className={`rounded-xl px-1 py-2 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${selected ? "bg-accent text-accent-fg shadow-sm" : "bg-slate-50 text-slate-600 hover:bg-slate-100 dark:bg-[#1F1F1F] dark:text-neutral-300 dark:hover:bg-neutral-700"}`}>
                       <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70">{new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(day)}</span>
                       <span className="mt-0.5 block text-sm font-semibold">{day.getDate()}</span>
                     </button>
                   );
                 })}
               </div>
-              <label className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-[#1F1F1F]">
-                <span className="text-xs text-slate-500 dark:text-neutral-400">Another date</span>
-                <input type="date" value={date} min={dateKey(new Date())} onChange={(event) => { setDate(event.target.value); setError(null); }} aria-label="Call date" className="min-w-0 bg-transparent text-sm font-medium text-slate-800 outline-none dark:text-neutral-100 [color-scheme:light] dark:[color-scheme:dark]" />
-              </label>
+              <button
+                type="button"
+                onClick={() => { setCalendarOpen(open => !open); setTimeOpen(false); }}
+                aria-expanded={calendarOpen}
+                aria-controls="call-calendar"
+                className="mt-2 flex w-full items-center gap-3 rounded-xl border border-transparent bg-slate-50 px-3 py-2.5 text-left transition hover:border-slate-200 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:bg-[#1F1F1F] dark:hover:border-neutral-700 dark:hover:bg-[#272727]"
+              >
+                <CalendarIcon className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 text-xs text-slate-500 dark:text-neutral-400">Choose another date</span>
+                <span className="truncate text-sm font-semibold text-slate-800 dark:text-neutral-100">{selectedDateLabel}</span>
+              </button>
+              <AnimatePresence initial={false}>
+                {calendarOpen && (
+                  <motion.div
+                    id="call-calendar"
+                    initial={{ opacity: 0, height: 0, y: -4 }}
+                    animate={{ opacity: 1, height: "auto", y: 0 }}
+                    exit={{ opacity: 0, height: 0, y: -4 }}
+                    className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-[#202020]"
+                    role="group"
+                    aria-label="Choose call date"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <button type="button" onClick={() => setCalendarMonth(month => new Date(month.getFullYear(), month.getMonth() - 1, 1, 12))} disabled={previousMonthDisabled} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 disabled:opacity-25 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-300 dark:hover:bg-neutral-700">←</button>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{monthLabel}</p>
+                      <button type="button" onClick={() => setCalendarMonth(month => new Date(month.getFullYear(), month.getMonth() + 1, 1, 12))} aria-label="Next month" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-neutral-300 dark:hover:bg-neutral-700">→</button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-7 gap-1" aria-hidden="true">
+                      {WEEKDAYS.map(day => <span key={day} className="py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">{day.slice(0, 1)}</span>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendarDays.map(day => {
+                        const key = dateKey(day);
+                        const selected = key === date;
+                        const disabled = key < today;
+                        const outsideMonth = day.getMonth() !== calendarMonth.getMonth();
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => chooseDate(day)}
+                            disabled={disabled}
+                            aria-pressed={selected}
+                            aria-label={new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(day)}
+                            className={`grid aspect-square min-h-8 place-items-center rounded-lg text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${selected ? "bg-accent text-accent-fg shadow-sm" : disabled ? "cursor-not-allowed text-slate-200 dark:text-neutral-700" : outsideMonth ? "text-slate-300 hover:bg-slate-50 dark:text-neutral-600 dark:hover:bg-neutral-800" : "text-slate-700 hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-700"}`}
+                          >
+                            {day.getDate()}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button type="button" onClick={() => chooseDate(new Date())} className="mt-2 w-full rounded-lg py-2 text-xs font-semibold text-accent transition hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">Jump to today</button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </fieldset>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <label>
+              <div>
                 <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-neutral-300">Time</span>
-                <input type="time" value={time} onChange={(event) => { setTime(event.target.value); setError(null); }} aria-label="Call time" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-neutral-700 dark:bg-[#1F1F1F] dark:text-white [color-scheme:light] dark:[color-scheme:dark]" />
-                <span className="mt-1 block text-[11px] text-slate-400 dark:text-neutral-500">{timezone}</span>
-              </label>
+                <div className="relative">
+                  <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-neutral-700 dark:bg-[#1F1F1F]">
+                    <button type="button" onClick={() => adjustTime(-15)} aria-label="15 minutes earlier" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-neutral-700 dark:hover:text-white">−</button>
+                    <button
+                      type="button"
+                      onClick={() => { setTimeOpen(open => !open); setCalendarOpen(false); }}
+                      onKeyDown={(event) => {
+                        if (event.key === "ArrowUp") { event.preventDefault(); adjustTime(-15); }
+                        if (event.key === "ArrowDown") { event.preventDefault(); adjustTime(15); }
+                      }}
+                      aria-expanded={timeOpen}
+                      aria-controls="call-time-slots"
+                      aria-label={`Call time, ${formatClockValue(time)}`}
+                      className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-white dark:hover:bg-neutral-800"
+                    >
+                      <ClockIcon className="h-4 w-4 text-accent" /> {formatClockValue(time)}
+                    </button>
+                    <button type="button" onClick={() => adjustTime(15)} aria-label="15 minutes later" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-neutral-700 dark:hover:text-white">+</button>
+                  </div>
+                  <AnimatePresence initial={false}>
+                    {timeOpen && (
+                      <motion.div id="call-time-slots" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 right-0 top-full z-10 mt-2 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-neutral-700 dark:bg-[#202020]" role="group" aria-label="Choose a time">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {TIME_SLOTS.map(minutes => {
+                            const value = timeFromMinutes(minutes);
+                            const selected = value === time;
+                            return <button key={value} type="button" onClick={() => { setTime(value); setTimeOpen(false); setError(null); }} aria-pressed={selected} className={`rounded-lg px-2 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${selected ? "bg-accent text-accent-fg" : "bg-slate-50 text-slate-600 hover:bg-slate-100 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"}`}>{formatClockValue(value)}</button>;
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <span className="mt-1 block text-[11px] text-slate-400 dark:text-neutral-500">{timezone} · 15-minute steps</span>
+              </div>
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-neutral-300">Duration</legend>
                 <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-[#1F1F1F]">
