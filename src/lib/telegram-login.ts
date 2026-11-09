@@ -4,7 +4,7 @@ import { StringSession } from "telegram/sessions";
 import { computeCheck } from "telegram/Password";
 import { Logger } from "telegram/extensions";
 import { LogLevel } from "telegram/extensions/Logger";
-import { telegramSetupError, type SetupError } from "./connection-setup";
+import { telegramSetupError, telegramSetupErrorCode, type SetupError } from "./connection-setup";
 
 type Pending = {
   client: TelegramClient; userId: string; phone: string; phoneCodeHash: string;
@@ -58,8 +58,10 @@ export async function startLogin(userId: string, phone: string, credentials: { a
   } catch (cause) {
     await disconnect(client);
     const error = telegramSetupError(cause);
+    console.warn(`[telegram-login] code request failed (${telegramSetupErrorCode(cause)})`);
     if (error.retryAfter) cooldown.set(userId, Date.now() + error.retryAfter * 1000);
-    return { ...error, retryAfter: error.retryAfter || 60 };
+    else cooldown.delete(userId);
+    return error;
   }
 }
 export type VerifyResult = { status: "ok"; session: string; phone: string }

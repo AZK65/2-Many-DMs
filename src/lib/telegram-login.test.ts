@@ -59,6 +59,23 @@ test("failed Telegram send cleans up the temporary client and preserves provider
     const result = await startLogin("owner-3", "+12025550149", { apiId: 1234, apiHash: "a".repeat(32) });
     assert.ok("error" in result); assert.equal(result.retryAfter, 120); assert.ok(disconnected);
     const retry = await startLogin("owner-3", "+12025550149", { apiId: 1234, apiHash: "a".repeat(32) });
-    assert.ok(retry.retryAfter >= 119);
+    assert.ok("error" in retry); assert.ok((retry.retryAfter ?? 0) >= 119);
+  } finally { mock.restoreAll(); }
+});
+test("non-rate-limited Telegram failures can retry immediately", async () => {
+  let attempts = 0;
+  mock.method(TelegramClient.prototype, "connect", async () => true);
+  mock.method(TelegramClient.prototype, "disconnect", async () => {});
+  mock.method(TelegramClient.prototype, "sendCode", async () => {
+    attempts++;
+    if (attempts === 1) throw new Error("Not connected");
+    return { phoneCodeHash: "fake", isCodeViaApp: true };
+  });
+  try {
+    const first = await startLogin("owner-4", "+12025550150", { apiId: 1234, apiHash: "a".repeat(32) });
+    assert.ok("error" in first); assert.equal(first.retryAfter, undefined);
+    const retry = await startLogin("owner-4", "+12025550150", { apiId: 1234, apiHash: "a".repeat(32) });
+    assert.ok("loginId" in retry);
+    if ("loginId" in retry) await cancelLogin(retry.loginId!, "owner-4");
   } finally { mock.restoreAll(); }
 });

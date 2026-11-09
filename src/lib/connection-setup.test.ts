@@ -32,6 +32,8 @@ test("Telegram errors give recovery actions and honor flood deadlines without le
   assert.equal(telegramSetupError({ errorMessage: "API_ID_INVALID" }).action, "credentials");
   assert.equal(telegramSetupError({ errorMessage: "FLOOD_WAIT_172", seconds: 172 }).retryAfter, 172);
   assert.match(telegramSetupError({ errorMessage: "PASSWORD_HASH_INVALID" }).error, /two-step/);
+  assert.match(telegramSetupError(new Error("Not connected")).error, /Retry now/);
+  assert.equal(telegramSetupError({ errorMessage: "AUTH_KEY_DUPLICATED" }).action, "restart");
   assert.doesNotMatch(telegramSetupError(new Error("internal secret=example-secret")).error, /example-secret/);
 });
 test("encrypted Telegram session payload works without env; legacy sessions still work", () => {
