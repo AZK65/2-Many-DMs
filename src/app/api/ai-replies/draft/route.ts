@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
       conversationId?: unknown;
       history?: unknown;
       seedDraft?: unknown;
+      intent?: unknown;
     };
     const history = Array.isArray(body.history)
       ? body.history
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
         typeof body.conversationId === "string" ? body.conversationId : undefined,
       seedDraft:
         typeof body.seedDraft === "string" ? body.seedDraft.slice(0, 4000) : undefined,
+      intent: body.intent === "polish" ? "polish" : "draft",
       history,
     });
     return NextResponse.json(result);

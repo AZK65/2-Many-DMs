@@ -1523,7 +1523,7 @@ export function ChatThread({
     insertText(s.text, replaceAll);
   }
 
-  async function generateAiDraft() {
+  async function generateAiDraft(intent: "draft" | "polish" = draft.trim() ? "polish" : "draft") {
     if (aiDrafting) return;
     setAiDrafting(true);
     setAiDraftError(null);
@@ -1535,6 +1535,7 @@ export function ChatThread({
         body: JSON.stringify({
           conversationId: conversation.id,
           seedDraft: draft.trim() || undefined,
+          intent,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -1548,7 +1549,9 @@ export function ChatThread({
       }
       setDraft(data.draft);
       setComposerNotice(
-        data.source === "needs_confirmation"
+        intent === "polish"
+          ? "Made your draft clearer. Review before sending."
+          : data.source === "needs_confirmation"
           ? "An unverified fact was held back. Review before sending."
           : data.source === "proven_reply"
           ? "Your proven answer was reused. Review before sending."
@@ -4318,7 +4321,7 @@ export function ChatThread({
             <MenuDetails className="composer-disclosure relative">
                       <summary aria-label="Writing tools" title="AI, autocorrect and snippets" className="composer-tool list-none cursor-pointer [&::-webkit-details-marker]:hidden"><SparklesIcon className="h-4 w-4" /></summary>
               <div className="workspace-menu absolute bottom-full left-0 z-40 mb-3 w-64 p-2">
-                <button type="button" data-close-menu onClick={event => { void generateAiDraft(); }} disabled={aiDrafting || loading || messages.length === 0 || (!draft.trim() && conversation.lastDirection !== "in")} className="composer-menu-item disabled:opacity-40"><SparklesIcon /><span>{aiDrafting ? "Writing…" : draft.trim() ? "Polish draft with AI" : "Draft reply with AI"}</span></button>
+                {!draft.trim() && <button type="button" data-close-menu onClick={() => { void generateAiDraft("draft"); }} disabled={aiDrafting || loading || messages.length === 0 || conversation.lastDirection !== "in"} className="composer-menu-item disabled:opacity-40"><SparklesIcon /><span>{aiDrafting ? "Writing…" : "Draft reply with AI"}</span></button>}
                 <button type="button" data-close-menu onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="composer-menu-item"><ClockIcon /><span className="min-w-0 flex-1">Schedule a meeting</span><kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">⌘⇧M</kbd></button>
                 <button type="button" aria-pressed={autoCorrectEnabled} onClick={() => {
                   const next = !autoCorrectEnabled;
@@ -4342,6 +4345,23 @@ export function ChatThread({
           </div>
           <div className="composer-actions">
           <span className="composer-platform hidden text-xs text-slate-400 dark:text-neutral-500">{platform.label}</span>
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.9 }}
+            onClick={() => void generateAiDraft("polish")}
+            disabled={!draft.trim() || aiDrafting || loading}
+            title={aiDrafting ? "Making it sound better…" : "Make it sound better"}
+            aria-label={aiDrafting ? "Making draft sound better" : "Make draft sound better with AI"}
+            aria-busy={aiDrafting}
+            className="composer-polish grid h-8 w-8 shrink-0 place-items-center rounded-md transition-all duration-200 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed dark:focus-visible:ring-offset-[#1F1F1F]"
+          >
+            <motion.span
+              animate={aiDrafting ? { rotate: 360 } : { rotate: 0 }}
+              transition={aiDrafting ? { duration: 1.2, ease: "linear", repeat: Infinity } : { duration: 0.2 }}
+            >
+              <SparklesIcon className="h-4 w-4" />
+            </motion.span>
+          </motion.button>
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={send}

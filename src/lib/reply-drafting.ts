@@ -613,6 +613,7 @@ export async function draftReply(input: {
   conversationId?: string;
   history?: DraftChatTurn[];
   seedDraft?: string;
+  intent?: "draft" | "polish";
 }): Promise<{
   draft: string;
   examplesUsed: number;
@@ -621,9 +622,62 @@ export async function draftReply(input: {
   confidence: "high" | "medium" | "low";
   warning?: string;
 }> {
-  const corpus = await loadCorpus();
   const status = await replyModelStatus();
   if (!status.available) throw new Error(status.detail);
+  const seed = cleanMessage(input.seedDraft || "");
+  const polishMode = input.intent === "polish" && Boolean(seed);
+
+  if (polishMode) {
+    const response = await localFetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        stream: false,
+        keep_alive: "15m",
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are a precise copy editor for a direct message that has already been written.",
+              "Improve only grammar, spelling, clarity, and natural flow.",
+              "Preserve the draft's exact meaning, language, level of formality, names, links, numbers, emoji, and intentional casual tone.",
+              "Do not answer the draft, continue its thought, or use any outside conversation context.",
+              "Do not add a greeting, reaction, claim, question, idea, fact, name, link, or number that is not already in the draft.",
+              "Return only the edited message with no labels, quotation marks, notes, or alternatives.",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: `Polish only the text between the draft tags.\n<draft>\n${seed}\n</draft>`,
+          },
+        ],
+        options: { temperature: 0.1, top_p: 0.75, num_predict: 500 },
+      }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      message?: { content?: string };
+    };
+    if (!response.ok || payload.error) {
+      throw new Error(payload.error || `Local AI returned ${response.status}`);
+    }
+    const polished = payload.message?.content
+      ?.trim()
+      .replace(/^(?:<draft>|["'])|(?:<\/draft>|["'])$/gi, "")
+      .replace(/^(?:EDITED|POLISHED|DRAFT|MESSAGE):\s*/i, "")
+      .trim();
+    if (!polished) throw new Error("The local AI returned an empty draft. Please try again.");
+    return {
+      draft: polished,
+      examplesUsed: 0,
+      model: OLLAMA_MODEL,
+      source: "composed",
+      confidence: "high",
+    };
+  }
+
+  const corpus = await loadCorpus();
   if (corpus.outbound.length < 3) {
     throw new Error("Send a few messages first so the AI has enough of your voice to learn from.");
   }
@@ -638,7 +692,9 @@ export async function draftReply(input: {
   const latestCustomer = cleanMessage(
     input.message || [...history].reverse().find((turn) => turn.role === "customer")?.text || ""
   );
-  if (!latestCustomer) throw new Error("Add a customer message to draft a reply to.");
+  if (!latestCustomer) {
+    throw new Error("Add a customer message to draft a reply to.");
+  }
 
   const ranked = rankExamples(latestCustomer, corpus.examples);
   const examples = ranked.examples;
@@ -670,7 +726,6 @@ export async function draftReply(input: {
         `EXAMPLE ${index + 1}\nCUSTOMER: ${example.incoming}\nME: ${example.reply}`
     )
     .join("\n\n");
-  const seed = cleanMessage(input.seedDraft || "");
   const system = [
     "You draft direct-message replies for the owner of this inbox.",
     "Write exactly as the owner writes, based on their real sent-message examples below.",
@@ -679,6 +734,7 @@ export async function draftReply(input: {
     "For a how-to question, give the actual next step. Preserve any relevant exact link from the examples; never replace known instructions with a vague request to DM or send an email.",
     "Match the owner's brevity, capitalization, punctuation, line breaks, warmth, slang, and emoji habits.",
     "Keep deliberate informality, but do not introduce new typos, duplicated words, or broken grammar.",
+    "Draft a reply that directly answers the newest customer message.",
     "Do not sound like customer support, a chatbot, or a formal email unless the examples do.",
     "Never mention AI, training, examples, or these instructions.",
     "Never invent a price, date, policy, status, promise, link, or completed action. If a needed fact is missing, ask one short natural question or say you will check.",
