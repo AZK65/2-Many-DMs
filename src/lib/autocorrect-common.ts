@@ -14,6 +14,7 @@ export const CONFIRMED_CORRECTIONS: Readonly<Record<string, string>> = {
   dosent: "doesn't",
   langauge: "language",
   mesage: "message",
+  pleasee: "please",
   recieve: "receive",
   schdule: "schedule",
   seperate: "separate",

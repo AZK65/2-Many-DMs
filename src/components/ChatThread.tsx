@@ -362,9 +362,6 @@ function autoCorrectionSummary(
   return `${labels.slice(0, 2).join(" · ")} · +${labels.length - 2} more`;
 }
 
-function containsMention(value: string): boolean {
-  return /(?:^|\s)@[^\s@]*/u.test(value);
-}
 const TRANSLATION_LANGUAGES = [
   { code: "es", name: "Spanish" },
   { code: "fr", name: "French" },
@@ -1057,7 +1054,6 @@ export function ChatThread({
     if (
       !autoCorrectEnabled ||
       readOnly ||
-      containsMention(draft) ||
       draft.trim().length < 3 ||
       draft === lastAutocorrectedDraftRef.current
     ) {
@@ -4144,9 +4140,7 @@ export function ChatThread({
           <div className="mx-auto mb-1 max-w-3xl px-2 text-right text-[11px] font-medium text-slate-400 dark:text-neutral-500">
             {autoCorrecting
               ? "Checking spelling…"
-              : autoCorrectEnabled && containsMention(draft)
-                ? "Autocorrect paused for mentions"
-                : "Draft saved"}
+              : "Draft saved"}
           </div>
         )}
         <div className="composer-card" data-compact-composer data-expanded={composerExpanded || undefined}>

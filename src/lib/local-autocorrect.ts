@@ -332,7 +332,11 @@ function dictionaryEdits(message: string): ProposedEdit[] {
       }))
       .filter(({ distance }) => distance <= (normalized.length >= 7 ? 2 : 1))
       .sort((left, right) => left.distance - right.distance);
-    if (!ranked.length || (ranked[1] && ranked[1].distance === ranked[0].distance)) continue;
+    if (!ranked.length) continue;
+    // nspell orders equally close suggestions by language frequency. For a
+    // one-keystroke typo, its first result is substantially better than doing
+    // nothing (for example, pleasee → please instead of pleased/pleases).
+    if (ranked[0].distance > 1 && ranked[1]?.distance === ranked[0].distance) continue;
     edits.push({ from: word, to: ranked[0].word, confidence: 0.99 });
   }
   return edits;

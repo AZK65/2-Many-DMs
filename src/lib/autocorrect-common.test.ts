@@ -18,3 +18,7 @@ test("instant autocorrect keeps valid shorthand and is idempotent", () => {
   assert.equal(first.changed, false);
   assert.deepEqual(applyInstantAutocorrect(first.text), first);
 });
+
+test("instant autocorrect fixes an obvious repeated letter while composing", () => {
+  assert.equal(applyInstantAutocorrect("can we pleasee check").text, "can we please check");
+});
