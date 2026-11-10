@@ -202,6 +202,22 @@ test("fresh replies take priority over the old daily audit at the same network p
   assert.ok(adapter.automaticRepairNextAt >= before + 60000);
 });
 
+test("media recovery stays queued until every preview has a local attachment", async () => {
+  const { adapter } = fixture();
+  adapter.busy = false;
+  adapter.automaticRepairQueue.set("general:media", {
+    id: "media", name: "Media", inboxCategory: "general", previewKey: "media-recovery",
+    attempts: 0, mediaRecovery: true, imageRecovery: true, sinceTimestamp: Date.now() - 86400000,
+  });
+  adapter.requestHistory = async () => {};
+  adapter.mediaRecoveryComplete = async () => false;
+  await adapter.processAutomaticRepair();
+  assert.equal(adapter.automaticRepairQueue.has("general:media"), true);
+  adapter.mediaRecoveryComplete = async () => true;
+  await adapter.processAutomaticRepair();
+  assert.equal(adapter.automaticRepairQueue.has("general:media"), false);
+});
+
 for (const fails of [false, true]) {
   test(`a reply arriving during ${fails ? "failed" : "successful"} repair is not dropped`, async () => {
     const { adapter } = fixture();

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { readXAttachmentBytes, readXMessageDom } from './x-message-dom';
 import { mergeXHistory } from './x-history';
-import { parseXMessageInfoDate, xHistoryMatchesPreview } from './x-history';
+import { parseXMessageInfoDate, xHistoryMatchesPreview, xMediaPreviewExpectation } from './x-history';
 import { downloadNativeXVoice, nativeXAudioFormat, nativeXFileFormat, readNativeXMessageTime } from './x-native-media';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
@@ -106,6 +106,13 @@ test('X repair recognizes multi-photo and voice-note inbox previews', () => {
   assert.equal(xHistoryMatchesPreview([{ ...base, attachments: [{ type: 'image', url: '/media/a.jpg' }] }], { preview: 'Sent 4 photos', direction: 'in', timestamp: 1000 }), false);
   assert.equal(xHistoryMatchesPreview([{ ...base, attachments: Array.from({length:4}, (_, i) => ({ type: 'image', url: `/media/${i}.jpg` })) }], { preview: 'Sent 4 photos', direction: 'in', timestamp: 1000 }), true);
   assert.equal(xHistoryMatchesPreview([{ ...base, attachments: [{ type: 'audio', url: '/media/a.m4a' }] }], { preview: 'Sent a voice message', direction: 'in', timestamp: 1000 }), true);
+});
+
+test('X media previews expose an exact attachment type and count for recovery seeding', () => {
+  assert.deepEqual(xMediaPreviewExpectation('Sent 4 photos'), { type: 'image', count: 4 });
+  assert.deepEqual(xMediaPreviewExpectation('Shared a GIF'), { type: 'video', count: 1 });
+  assert.deepEqual(xMediaPreviewExpectation('Sent a recording'), { type: 'audio', count: 1 });
+  assert.equal(xMediaPreviewExpectation('Sent a post'), null);
 });
 
 test('voice format is verified from bytes, not an untrusted filename', () => {

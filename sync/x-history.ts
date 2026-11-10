@@ -95,6 +95,21 @@ export function stableXInboxDate(label: string, parsed: number | null, previous:
 
 export type XLatestPreview = { preview: string; direction: "in" | "out"; timestamp?: number | null; timeLabel?: string };
 
+export type XMediaPreviewExpectation = {
+  type: "image" | "video" | "audio" | "file";
+  count: number;
+};
+
+export function xMediaPreviewExpectation(value: string): XMediaPreviewExpectation | null {
+  const match = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|recording|file|document|attachment)s?$/i.exec(value.trim());
+  if (!match) return null;
+  const kind = match[2].toLowerCase();
+  return {
+    type: /photo|image/.test(kind) ? "image" : /video|gif/.test(kind) ? "video" : /voice|audio|recording/.test(kind) ? "audio" : "file",
+    count: Number(match[1]) || 1,
+  };
+}
+
 // Seeing old history does not prove that the latest encrypted messages loaded.
 // Check the actual latest inbox observation before advancing a repair checkpoint.
 export function xHistoryMatchesPreview(
@@ -111,11 +126,8 @@ export function xHistoryMatchesPreview(
     if (preview.timestamp && (!message.timestamp || Math.abs(message.timestamp - preview.timestamp) > tolerance)) return false;
     if (xPreviewMatchesText(preview.preview, message.text) || xPreviewMatchesText(body, normalize(message.text))) return true;
     if (/^(?:sent|shared) (?:a )?post$/i.test(body) && xPostUrlFromText(message.text)) return true;
-    const mediaPreview = /^(?:sent|shared) (?:(a|an|\d+) )?(photo|image|video|gif|voice message|audio message|voice note|file|document|attachment)s?$/i.exec(body);
-    const kind = mediaPreview?.[2]?.toLowerCase();
-    const expected = Number(mediaPreview?.[1]) || 1;
-    return Boolean(kind && (message.attachments?.filter(media =>
-      /photo|image/.test(kind) ? media.type === "image" : /video|gif/.test(kind) ? media.type === "video" : /voice|audio/.test(kind) ? media.type === "audio" : media.type === "file").length || 0) >= expected);
+    const mediaPreview = xMediaPreviewExpectation(body);
+    return Boolean(mediaPreview && (message.attachments?.filter(media => media.type === mediaPreview.type).length || 0) >= mediaPreview.count);
   });
 }
 

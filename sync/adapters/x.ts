@@ -11,7 +11,7 @@ import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
 import { isLocked, tryUnlock, type UnlockResult } from "../x-passcode";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
-import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview, type XLatestPreview } from "../x-history";
+import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview, xMediaPreviewExpectation, type XLatestPreview } from "../x-history";
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
@@ -97,6 +97,9 @@ interface AutomaticRepair {
   attempts: number;
   live?: boolean;
   activityAt?: number;
+  mediaRecovery?: boolean;
+  imageRecovery?: boolean;
+  sinceTimestamp?: number;
 }
 
 const X_REPAIR_STATE_VERSION = 3;
@@ -273,10 +276,135 @@ export class XAdapter implements Adapter {
       } catch (error) {
         console.warn("[x] saved preview repair deferred; existing messages preserved:", error);
       }
+      await this.enqueueUnresolvedMediaRepairs().catch((error) => {
+        console.warn("[x] media preview repair seed deferred; existing messages preserved:", error);
+      });
     }
     await this.connect().catch((error) => {
       console.error("[x] initial connection failed:", error);
       this.scheduleReconnect();
+    });
+  }
+
+  private async enqueueUnresolvedMediaRepairs(): Promise<void> {
+    if (!this.accountId) return;
+    const previews = await prisma.message.findMany({
+      where: {
+        mediaType: null,
+        externalKey: { startsWith: "x:preview:" },
+        conversation: { accountId: this.accountId, platform: "x", externalId: { not: null } },
+      },
+      select: {
+        body: true,
+        direction: true,
+        createdAt: true,
+        conversationId: true,
+        conversation: {
+          select: {
+            externalId: true,
+            inboxCategory: true,
+            contact: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const candidates = previews.flatMap((preview) => {
+      const expectation = xMediaPreviewExpectation(preview.body);
+      return expectation ? [{ ...preview, expectation }] : [];
+    });
+    if (!candidates.length) return;
+
+    const conversationIds = [...new Set(candidates.map((preview) => preview.conversationId))];
+    const media = await prisma.message.findMany({
+      where: { conversationId: { in: conversationIds }, mediaType: { not: null }, externalKey: { not: null } },
+      select: { conversationId: true, direction: true, mediaType: true, mediaUrl: true, externalKey: true, createdAt: true },
+    });
+    const mediaByConversation = new Map<string, typeof media>();
+    for (const row of media) {
+      const rows = mediaByConversation.get(row.conversationId) || [];
+      rows.push(row);
+      mediaByConversation.set(row.conversationId, rows);
+    }
+    const fileExists = (url: string | null) => Boolean(
+      url?.startsWith("/media/") && fs.existsSync(path.join(process.cwd(), "public", url))
+    );
+    const unresolved = candidates.filter((preview) => {
+      const nearby = (mediaByConversation.get(preview.conversationId) || []).filter((row) =>
+        row.direction === preview.direction &&
+        row.mediaType === preview.expectation.type &&
+        fileExists(row.mediaUrl) &&
+        Math.abs(row.createdAt.getTime() - preview.createdAt.getTime()) <= 2 * 60 * 60_000
+      );
+      const groups = new Map<string, number>();
+      for (const row of nearby) {
+        const key = row.externalKey!.replace(/:attachment:\d+$/, "");
+        groups.set(key, (groups.get(key) || 0) + 1);
+      }
+      return ![...groups.values()].some((count) => count >= preview.expectation.count);
+    });
+    const grouped = new Map<string, typeof unresolved>();
+    for (const preview of unresolved) {
+      const id = preview.conversation.externalId!;
+      const rows = grouped.get(id) || [];
+      rows.push(preview);
+      grouped.set(id, rows);
+    }
+    for (const [id, rows] of grouped) {
+      const newest = rows[0];
+      const key = `${newest.conversation.inboxCategory === "spam" ? "spam" : "general"}:${id}`;
+      const existing = this.automaticRepairQueue.get(key);
+      const sinceTimestamp = Math.max(0, Math.min(...rows.map((row) => row.createdAt.getTime())) - 2 * 60 * 60_000);
+      this.automaticRepairQueue.set(key, {
+        id,
+        name: newest.conversation.contact.name || "X user",
+        inboxCategory: newest.conversation.inboxCategory === "spam" ? "spam" : "general",
+        previewKey: existing?.previewKey || `media-recovery:${newest.direction}:${newest.body}:${newest.createdAt.getTime()}`,
+        attempts: existing?.attempts || 0,
+        live: existing?.live,
+        activityAt: Math.max(existing?.activityAt || 0, ...rows.map((row) => row.createdAt.getTime())),
+        mediaRecovery: true,
+        imageRecovery: rows.some((row) => row.expectation.type === "image"),
+        sinceTimestamp: Math.min(existing?.sinceTimestamp || sinceTimestamp, sinceTimestamp),
+      });
+      this.repairRetryAt.delete(key);
+    }
+    if (grouped.size) {
+      this.persistRepairState();
+      console.log(`[x] prioritized ${grouped.size} chat(s) with ${unresolved.length} unresolved media preview(s)`);
+    }
+  }
+
+  private async mediaRecoveryComplete(chatExternalId: string, sinceTimestamp: number): Promise<boolean> {
+    if (!this.accountId) return false;
+    const conversation = await prisma.conversation.findFirst({
+      where: { accountId: this.accountId, platform: "x", externalId: chatExternalId },
+      select: {
+        messages: {
+          where: { createdAt: { gte: new Date(sinceTimestamp) } },
+          select: { body: true, direction: true, mediaType: true, mediaUrl: true, externalKey: true, createdAt: true },
+        },
+      },
+    });
+    if (!conversation) return false;
+    const previews = conversation.messages.flatMap((message) => {
+      const expectation = !message.mediaType && message.externalKey?.startsWith("x:preview:")
+        ? xMediaPreviewExpectation(message.body) : null;
+      return expectation ? [{ ...message, expectation }] : [];
+    });
+    const media = conversation.messages.filter((message) => message.mediaType && message.externalKey);
+    const fileExists = (url: string | null) => Boolean(
+      url?.startsWith("/media/") && fs.existsSync(path.join(process.cwd(), "public", url))
+    );
+    return previews.every((preview) => {
+      const groups = new Map<string, number>();
+      for (const row of media) {
+        if (row.direction !== preview.direction || row.mediaType !== preview.expectation.type ||
+          !fileExists(row.mediaUrl) || Math.abs(row.createdAt.getTime() - preview.createdAt.getTime()) > 2 * 60 * 60_000) continue;
+        const key = row.externalKey!.replace(/:attachment:\d+$/, "");
+        groups.set(key, (groups.get(key) || 0) + 1);
+      }
+      return [...groups.values()].some((count) => count >= preview.expectation.count);
     });
   }
 
@@ -1335,6 +1463,8 @@ export class XAdapter implements Adapter {
     // New replies must not sit behind hours of daily audit work. Keep the
     // same network pace, but service fresh activity before old backfills.
     const next = [...this.automaticRepairQueue.entries()].filter(([key]) => (this.repairRetryAt.get(key) || 0) <= Date.now()).sort((a, b) =>
+      Number(Boolean(b[1].imageRecovery)) - Number(Boolean(a[1].imageRecovery)) ||
+      Number(Boolean(b[1].mediaRecovery)) - Number(Boolean(a[1].mediaRecovery)) ||
       Number(Boolean(b[1].live)) - Number(Boolean(a[1].live)) ||
       (a[1].live && b[1].live ? (b[1].activityAt || 0) - (a[1].activityAt || 0) : 0)
     )[0];
@@ -1348,12 +1478,15 @@ export class XAdapter implements Adapter {
     try {
       await this.requestHistory(repair.id, "", 0, 100, {
         inboxCategory: repair.inboxCategory,
-        sinceTimestamp: Math.min(this.lastRepairAt.get(key) || Date.now() - 72 * 60 * 60 * 1000, Date.now() - 24 * 60 * 60 * 1000),
+        sinceTimestamp: repair.sinceTimestamp ?? Math.min(this.lastRepairAt.get(key) || Date.now() - 72 * 60 * 60 * 1000, Date.now() - 24 * 60 * 60 * 1000),
       });
+      if (repair.mediaRecovery && !await this.mediaRecoveryComplete(repair.id, repair.sinceTimestamp || 0)) {
+        throw new Error("X reached the requested history, but has not exposed every media attachment yet");
+      }
       // A live read may enqueue a newer reply while this history request is
       // running. Complete only the snapshot we actually processed.
       if (this.automaticRepairQueue.get(key) === repair) this.automaticRepairQueue.delete(key);
-      this.repairedPreviews.set(key, repair.previewKey);
+      if (!repair.mediaRecovery) this.repairedPreviews.set(key, repair.previewKey);
       this.lastRepairAt.set(key, Date.now());
       this.repairRetryAt.delete(key);
       this.persistRepairState();

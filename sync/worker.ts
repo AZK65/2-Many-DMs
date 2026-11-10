@@ -1243,7 +1243,7 @@ async function main() {
     }, 2000);
     avatarTimer.unref?.();
     await retention.replay(new Set(adapters.keys()), persistInbound).catch(error => console.error("[retention] initial message retry deferred:", error));
-    await seedRecentMedia().catch(error => console.error("[retention] recent media seed deferred:", error));
+    await seedMissingMedia().catch(error => console.error("[retention] media seed deferred:", error));
     retentionTimer = setInterval(() => {
       if (shuttingDown) return;
       void retention.replay(new Set(adapters.keys()), persistInbound).catch(error => console.error("[retention] message retry deferred:", error));
@@ -1259,7 +1259,7 @@ async function main() {
           await adapter.recoverMedia!(job.chatId, job.messageId, { automatic: true });
           const updated = await prisma.message.findUnique({ where: { externalKey: job.messageId }, select: { mediaUrl: true } });
           return exists(updated?.mediaUrl || null);
-        }, adapter.platform === "x" ? 120_000 : 15_000).catch(error => console.error("[retention] queue failed:", error));
+        }, adapter.platform === "x" ? 60_000 : 15_000).catch(error => console.error("[retention] queue failed:", error));
       }
     }, 15_000);
     retentionTimer.unref?.();
@@ -1271,20 +1271,28 @@ async function main() {
 
 let shuttingDown = false;
 
-async function seedRecentMedia() {
-  // Repair the recent gap, not an unbounded download of years of history.
-  // Every newly ingested message is queued independently regardless of age.
+async function seedMissingMedia() {
+  // A resync can rediscover old attachment metadata after its local file was
+  // removed. Seed all unresolved X rows; other connectors retain their recent
+  // window so this repair cannot create unnecessary traffic on those accounts.
   const rows = await prisma.message.findMany({ where: {
-    mediaType: { not: null }, OR: [{ mediaUrl: null }, { mediaUrl: { startsWith: "https://" } }], externalKey: { not: null },
-    createdAt: { gte: new Date(Date.now() - 72 * 60 * 60_000) },
+    mediaType: { not: null }, externalKey: { not: null },
     conversation: { accountId: { in: [...adapters.keys()] } },
-  }, orderBy: { createdAt: "desc" }, take: 1000, include: { conversation: true } });
-  for (const row of rows) retention.enqueueMedia({
+  }, orderBy: { createdAt: "desc" }, include: { conversation: true } });
+  let queued = 0;
+  for (const row of rows) {
+    if (row.conversation.platform !== "x" && row.createdAt.getTime() < Date.now() - 72 * 60 * 60_000) continue;
+    const local = row.mediaUrl?.startsWith("/media/") && fs.existsSync(path.join(process.cwd(), "public", row.mediaUrl));
+    if (local) continue;
+    retention.enqueueMedia({
     accountId: row.conversation.accountId!, platform: row.conversation.platform as InboundMessage["platform"],
     chatExternalId: row.conversation.externalId!, messageExternalId: row.externalKey!, timestamp: row.createdAt,
     media: { type: row.mediaType as NonNullable<InboundMessage["media"]>["type"], url: null },
     direction: row.direction as "in" | "out", body: "", contact: { externalKey: "", name: "", handle: "" },
-  });
+    });
+    queued++;
+  }
+  if (queued) console.log(`[retention] seeded ${queued} missing attachment(s) across saved history`);
 }
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
