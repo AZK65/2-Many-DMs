@@ -7,6 +7,9 @@ const OLLAMA_MODEL =
   process.env.OLLAMA_REPLY_MODEL ||
   process.env.OLLAMA_TRANSLATION_MODEL ||
   "translategemma:4b";
+const OLLAMA_POLISH_MODEL =
+  process.env.OLLAMA_AUTOCORRECT_MODEL ||
+  "qwen3.5:4b";
 
 type TrainingMessage = {
   id: string;
@@ -91,7 +94,7 @@ async function localFetch(
   }
 }
 
-export async function replyModelStatus(): Promise<{
+export async function replyModelStatus(model = OLLAMA_MODEL): Promise<{
   available: boolean;
   model: string;
   detail: string;
@@ -101,19 +104,19 @@ export async function replyModelStatus(): Promise<{
     if (!response.ok) throw new Error("Ollama is unavailable");
     const payload = (await response.json()) as { models?: Array<{ name?: string }> };
     const installed = (payload.models || []).some(({ name = "" }) =>
-      name === OLLAMA_MODEL || name === `${OLLAMA_MODEL}:latest`
+      name === model || name === `${model}:latest`
     );
     return installed
-      ? { available: true, model: OLLAMA_MODEL, detail: "Private on this Mac" }
+      ? { available: true, model, detail: "Private on this Mac" }
       : {
           available: false,
-          model: OLLAMA_MODEL,
-          detail: `Install ${OLLAMA_MODEL} in Ollama to draft replies`,
+          model,
+          detail: `Install ${model} in Ollama to draft replies`,
         };
   } catch (error) {
     return {
       available: false,
-      model: OLLAMA_MODEL,
+      model,
       detail:
         error instanceof Error && /address on this machine/i.test(error.message)
           ? error.message
@@ -622,30 +625,43 @@ export async function draftReply(input: {
   confidence: "high" | "medium" | "low";
   warning?: string;
 }> {
-  const status = await replyModelStatus();
-  if (!status.available) throw new Error(status.detail);
   const seed = cleanMessage(input.seedDraft || "");
   const polishMode = input.intent === "polish" && Boolean(seed);
+  const selectedModel = polishMode ? OLLAMA_POLISH_MODEL : OLLAMA_MODEL;
+  const status = await replyModelStatus(selectedModel);
+  if (!status.available) throw new Error(status.detail);
 
   if (polishMode) {
     const response = await localFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: selectedModel,
         stream: false,
+        think: false,
         keep_alive: "15m",
         messages: [
           {
             role: "system",
             content: [
-              "You are a precise copy editor for a direct message that has already been written.",
-              "Improve only grammar, spelling, clarity, and natural flow.",
-              "Preserve the draft's exact meaning, language, level of formality, names, links, numbers, emoji, and intentional casual tone.",
+              "You are an expert copy editor for a direct message that has already been written.",
+              "Rewrite as much as needed to make it concise, grammatically complete, natural, and immediately clear.",
+              "Preserve the draft's exact meaning, language, singular/plural distinctions, level of formality, names, links, numbers, emoji, and intentional casual tone.",
+              "Fix run-on sentences, repeated wording, awkward structure, and ambiguous references. When several people or objects appear, name the subject of the final question explicitly instead of using an unclear pronoun.",
+              "Keep every logical relationship exact: who performed each action, who owns what, and who can see what.",
+              "Natural lead-ins such as 'Quick question:' may replace awkward labels such as 'Question,' when appropriate.",
               "Do not answer the draft, continue its thought, or use any outside conversation context.",
-              "Do not add a greeting, reaction, claim, question, idea, fact, name, link, or number that is not already in the draft.",
-              "Return only the edited message with no labels, quotation marks, notes, or alternatives.",
+              "Do not add a greeting, reaction, claim, idea, fact, person, role, name, link, or number that is not already in the draft.",
+              "Return only the rewritten message with no labels, quotation marks, notes, or alternatives.",
             ].join("\n"),
+          },
+          {
+            role: "user",
+            content: "Polish only the text between the draft tags.\n<draft>\nQuestion , when someone adds a new entity from a existing account but that account has other owner/admins , do they see the other entities account as well if they are not shown as owners?\n</draft>",
+          },
+          {
+            role: "assistant",
+            content: "Quick question: If someone adds a new entity through an existing account, can the other owners or admins on the original account automatically see the new entity's account, even if they aren't listed as owners of that entity?",
           },
           {
             role: "user",
@@ -671,7 +687,7 @@ export async function draftReply(input: {
     return {
       draft: polished,
       examplesUsed: 0,
-      model: OLLAMA_MODEL,
+      model: selectedModel,
       source: "composed",
       confidence: "high",
     };
