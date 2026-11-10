@@ -45,7 +45,11 @@ import {
   mimeToMediaType,
 } from "@/lib/platforms";
 import { clockTime, dayLabel, sameDay } from "@/lib/time";
-import { loadSettings } from "@/lib/settings";
+import {
+  loadSettings,
+  saveSettings,
+  type AutocorrectSettings,
+} from "@/lib/settings";
 import { emailsIn } from "@/lib/email";
 import { MESSAGE_PIN_CHANGED_EVENT } from "@/lib/shared-content";
 import {
@@ -63,6 +67,44 @@ const DATE_RE =
   /\b(today|tonight|tomorrow|tmrw|mon(day)?|tues?(day)?|wed(nesday)?|thur?s?(day)?|fri(day)?|sat(urday)?|sun(day)?|jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?|next week|this week|next month)\b|\b\d{1,2}\s?(am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\/\d{1,2}\b/i;
 function mentionsDate(text: string): boolean {
   return !!text && DATE_RE.test(text);
+}
+
+type AutocorrectResponse = {
+  text: string;
+  changed: boolean;
+  corrections: Array<{ from: string; to: string }>;
+};
+
+async function correctTextLocally(
+  text: string,
+  settings: AutocorrectSettings,
+  signal?: AbortSignal
+): Promise<AutocorrectResponse> {
+  const instant = applyInstantAutocorrect(text, {
+    fixPunctuation: settings.fixPunctuation,
+  });
+  if (settings.strength === "light") return instant;
+  const checkableText = instant.text;
+
+  const response = await fetch("/api/ai-replies/autocorrect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: checkableText,
+      fast: true,
+      strength: settings.strength,
+      preserveCasual: settings.preserveCasual,
+      fixPunctuation: settings.fixPunctuation,
+    }),
+    signal,
+  });
+  const result = (await response.json().catch(() => ({}))) as Partial<AutocorrectResponse> & { error?: string };
+  if (!response.ok) throw new Error(result.error || "Autocorrect unavailable");
+  return {
+    text: typeof result.text === "string" ? result.text : checkableText,
+    changed: instant.changed || result.changed === true,
+    corrections: [...instant.corrections, ...(result.corrections || [])],
+  };
 }
 
 function compactUrlLabel(rawUrl: string): string {
@@ -323,7 +365,6 @@ const BACKFILL_OPTIONS = [
   { hours: 30 * 24, label: "Last 30 days", detail: "Up to 500 available messages" },
   { hours: 0, label: "Earlier messages", detail: "Fetch the next older batch" },
 ] as const;
-const AUTOCORRECT_STORAGE_KEY = "omnicrm-autocorrect-enabled-v1";
 const MESSAGE_RUN_GAP_MS = 5 * 60 * 1000;
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"] as const;
 const THREAD_PAGE_SIZE = 50;
@@ -527,7 +568,10 @@ export function ChatThread({
   const [retryMessageId, setRetryMessageId] = useState<string | null>(null);
   const [aiDrafting, setAiDrafting] = useState(false);
   const [aiDraftError, setAiDraftError] = useState<string | null>(null);
-  const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(true);
+  const [autocorrectSettings, setAutocorrectSettings] = useState<AutocorrectSettings>(
+    () => loadSettings().autocorrect
+  );
+  const autoCorrectEnabled = autocorrectSettings.enabled;
   const [autoCorrecting, setAutoCorrecting] = useState(false);
   const [autoCorrectionNotice, setAutoCorrectionNotice] =
     useState<AutoCorrectionNotice | null>(null);
@@ -643,11 +687,6 @@ export function ChatThread({
   useEffect(() => {
     if (retryMessageId && !draft.trim()) setRetryMessageId(null);
   }, [draft, retryMessageId]);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem(AUTOCORRECT_STORAGE_KEY);
-    if (saved !== null) setAutoCorrectEnabled(saved !== "false");
-  }, []);
 
   const pendingDraftRef = useRef({ id: conversation.id, text: draft });
   useEffect(() => {
@@ -963,7 +1002,11 @@ export function ChatThread({
   ]);
 
   useEffect(() => {
-    const read = () => setCalcom(loadSettings().plugins.calcom);
+    const read = () => {
+      const settings = loadSettings();
+      setCalcom(settings.plugins.calcom);
+      setAutocorrectSettings(settings.autocorrect);
+    };
     read();
     window.addEventListener("tmd-settings", read);
     return () => window.removeEventListener("tmd-settings", read);
@@ -1053,6 +1096,7 @@ export function ChatThread({
   useEffect(() => {
     if (
       !autoCorrectEnabled ||
+      autocorrectSettings.trigger === "send" ||
       readOnly ||
       draft.trim().length < 3 ||
       draft === lastAutocorrectedDraftRef.current
@@ -1067,7 +1111,7 @@ export function ChatThread({
       const selectionStart = textareaRef.current?.selectionStart ?? requestedDraft.length;
       const selectionEnd = textareaRef.current?.selectionEnd ?? selectionStart;
       const hadFocus = document.activeElement === textareaRef.current;
-      const scope = hadFocus
+      const scope = autocorrectSettings.trigger === "word" && hadFocus
         ? autocorrectScopeAtCaret(requestedDraft, selectionStart, selectionEnd)
         : { checkableText: requestedDraft, preservedSuffix: "" };
       if (!scope.checkableText.trim()) return;
@@ -1091,11 +1135,15 @@ export function ChatThread({
         draftRef.current = correctedDraft;
         setDraft(correctedDraft);
         setComposerNotice(null);
-        setAutoCorrectionNotice({
-          before: requestedDraft,
-          after: correctedDraft,
-          corrections: result.corrections || [],
-        });
+        setAutoCorrectionNotice(
+          autocorrectSettings.showUndo
+            ? {
+                before: requestedDraft,
+                after: correctedDraft,
+                corrections: result.corrections || [],
+              }
+            : null
+        );
         if (hadFocus) {
           const nextCursor = Math.max(
             0,
@@ -1112,28 +1160,14 @@ export function ChatThread({
         return true;
       };
 
-      const instant = applyInstantAutocorrect(scope.checkableText);
-      if (applyCorrection(instant)) {
-        setAutoCorrecting(false);
-        return;
-      }
-
       autocorrectAbortRef.current = controller;
       setAutoCorrecting(true);
       try {
-        const response = await fetch("/api/ai-replies/autocorrect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: scope.checkableText, fast: true }),
-          signal: controller.signal,
-        });
-        const result = (await response.json().catch(() => ({}))) as {
-          text?: string;
-          changed?: boolean;
-          corrections?: Array<{ from: string; to: string }>;
-          error?: string;
-        };
-        if (!response.ok) throw new Error(result.error || "Autocorrect unavailable");
+        const result = await correctTextLocally(
+          scope.checkableText,
+          autocorrectSettings,
+          controller.signal
+        );
         applyCorrection(result);
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -1144,13 +1178,13 @@ export function ChatThread({
           setAutoCorrecting(false);
         }
       }
-    }, 120);
+    }, autocorrectSettings.delayMs);
 
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [autoCorrectEnabled, conversation.id, draft, readOnly]);
+  }, [autocorrectSettings, autoCorrectEnabled, conversation.id, draft, readOnly]);
 
   useEffect(
     () => () => {
@@ -2146,7 +2180,25 @@ export function ChatThread({
     if (!body && !attachment) return;
     if (sendInFlightRef.current) return;
     sendInFlightRef.current = true;
-    const pendingCall = parseCallInvite(body);
+    let pendingCall = parseCallInvite(body);
+    if (
+      body &&
+      !pendingCall &&
+      autocorrectSettings.enabled &&
+      autocorrectSettings.trigger === "send"
+    ) {
+      try {
+        const corrected = await correctTextLocally(body, autocorrectSettings);
+        if (corrected.changed) {
+          body = corrected.text;
+          draftRef.current = body;
+          setDraft(body);
+        }
+      } catch {
+        // Sending should never be blocked when the local writing helper is unavailable.
+      }
+      pendingCall = parseCallInvite(body);
+    }
     if (pendingCall && !pendingCall.calBookingUid) {
       if (!pendingCall.guests.length) {
         setAttachError("Add at least one guest email before booking the meeting.");
@@ -4251,8 +4303,8 @@ export function ChatThread({
                 ? `Write in English to send in ${translationConfig.languageName}`
                 : `Message on ${platform.label}`
             }
-            spellCheck
-            autoCorrect="on"
+            spellCheck={autocorrectSettings.browserSpellcheck}
+            autoCorrect={autocorrectSettings.browserSpellcheck ? "on" : "off"}
             autoCapitalize="sentences"
             className="resize-none bg-transparent px-2 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
           />
@@ -4270,8 +4322,11 @@ export function ChatThread({
                 <button type="button" data-close-menu onClick={openCallScheduler} aria-keyshortcuts="Meta+Shift+M Control+Shift+M" className="composer-menu-item"><ClockIcon /><span className="min-w-0 flex-1">Schedule a meeting</span><kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">⌘⇧M</kbd></button>
                 <button type="button" aria-pressed={autoCorrectEnabled} onClick={() => {
                   const next = !autoCorrectEnabled;
-                  setAutoCorrectEnabled(next);
-                  window.localStorage.setItem(AUTOCORRECT_STORAGE_KEY, String(next));
+                  const settings = loadSettings();
+                  saveSettings({
+                    ...settings,
+                    autocorrect: { ...settings.autocorrect, enabled: next },
+                  });
                   setComposerNotice(next ? "Local autocorrect on" : "Local autocorrect off");
                 }} className="composer-menu-item"><span>Local autocorrect</span><span className="text-xs text-accent">{autoCorrecting ? "Checking…" : autoCorrectEnabled ? "On" : "Off"}</span></button>
                 <button type="button" data-close-menu onClick={event => { onManageSnippets(); }} className="composer-menu-item"><ZapIcon /> Snippets</button>

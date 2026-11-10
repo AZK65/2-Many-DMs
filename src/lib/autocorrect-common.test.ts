@@ -21,6 +21,13 @@ test("instant autocorrect keeps valid shorthand and is idempotent", () => {
 
 test("instant autocorrect fixes an obvious repeated letter while composing", () => {
   assert.equal(applyInstantAutocorrect("can we pleasee check").text, "can we please check");
+  assert.equal(applyInstantAutocorrect("can we chek this").text, "can we check this");
+});
+
+test("punctuation cleanup can be disabled without disabling spelling fixes", () => {
+  const result = applyInstantAutocorrect("teh message ,", { fixPunctuation: false });
+  assert.equal(result.text, "the message ,");
+  assert.deepEqual(result.corrections, [{ from: "teh", to: "the" }]);
 });
 
 test("autocorrect waits for the active word and checks completed words", () => {

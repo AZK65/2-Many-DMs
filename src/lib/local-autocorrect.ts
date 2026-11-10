@@ -74,6 +74,13 @@ export type AutocorrectResult = {
   safeFallback: boolean;
 };
 
+export type AutocorrectOptions = {
+  fastOnly?: boolean;
+  strength?: "light" | "balanced" | "maximum";
+  preserveCasual?: boolean;
+  fixPunctuation?: boolean;
+};
+
 function ollamaUrl(): string {
   const configured = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
   const url = new URL(configured);
@@ -188,10 +195,11 @@ function languageEvidence(value: string, excludedWord: string): {
 function verifiedCorrection(
   from: string,
   proposed: string,
-  message: string
+  message: string,
+  preserveCasual: boolean
 ): string | null {
   const normalizedFrom = from.toLocaleLowerCase();
-  if (PRESERVED_TERMS.has(normalizedFrom)) return null;
+  if (preserveCasual && PRESERVED_TERMS.has(normalizedFrom)) return null;
   if (CONFIRMED_CORRECTIONS[normalizedFrom]) {
     const confirmed = CONFIRMED_CORRECTIONS[normalizedFrom];
     if (knownWord(from)) {
@@ -250,9 +258,12 @@ function verifiedCorrection(
 
 function applySafeEdits(
   original: string,
-  edits: ProposedEdit[]
+  edits: ProposedEdit[],
+  options: AutocorrectOptions = {}
 ): { text: string; corrections: Array<{ from: string; to: string }> } {
-  let corrected = original.replace(/[ \t]+([,;:!?])/g, "$1");
+  let corrected = options.fixPunctuation === false
+    ? original
+    : original.replace(/[ \t]+([,;:!?])/g, "$1");
   const corrections: Array<{ from: string; to: string }> = [];
   if (corrected !== original) {
     corrections.push({ from: "punctuation spacing", to: "fixed" });
@@ -267,7 +278,12 @@ function applySafeEdits(
     }
     if (from.toLocaleLowerCase() === to.toLocaleLowerCase()) continue;
     if (from[0].toLocaleLowerCase() !== to[0].toLocaleLowerCase()) continue;
-    const verified = verifiedCorrection(from, to, original);
+    const verified = verifiedCorrection(
+      from,
+      to,
+      original,
+      options.preserveCasual !== false
+    );
     if (!verified) continue;
     const distance = levenshteinDistance(
       from.toLocaleLowerCase(),
@@ -293,7 +309,10 @@ function applySafeEdits(
   return { text: corrected, corrections };
 }
 
-function dictionaryEdits(message: string): ProposedEdit[] {
+function dictionaryEdits(
+  message: string,
+  options: AutocorrectOptions = {}
+): ProposedEdit[] {
   const protectedWords = new Set(
     protectedParts(message).flatMap((part) =>
       wordParts(part).map((word) => word.toLocaleLowerCase())
@@ -304,10 +323,10 @@ function dictionaryEdits(message: string): ProposedEdit[] {
   for (const word of wordParts(message)) {
     const normalized = word.toLocaleLowerCase().replace(/’/g, "'");
     if (
-      edits.length >= 8 ||
+      edits.length >= (options.strength === "maximum" ? 12 : 8) ||
       seen.has(normalized) ||
       protectedWords.has(normalized) ||
-      PRESERVED_TERMS.has(normalized) ||
+      (options.preserveCasual !== false && PRESERVED_TERMS.has(normalized)) ||
       normalized.length < 4 ||
       /\d/.test(normalized) ||
       /[A-Z].*[A-Z]/.test(word) ||
@@ -330,13 +349,16 @@ function dictionaryEdits(message: string): ProposedEdit[] {
         word: candidate,
         distance: levenshteinDistance(normalized, candidate.toLocaleLowerCase()),
       }))
-      .filter(({ distance }) => distance <= (normalized.length >= 7 ? 2 : 1))
+      .filter(({ distance }) => distance <= (
+        options.strength === "maximum"
+          ? Math.max(2, Math.ceil(normalized.length * 0.3))
+          : normalized.length >= 7 ? 2 : 1
+      ))
       .sort((left, right) => left.distance - right.distance);
     if (!ranked.length) continue;
-    // nspell orders equally close suggestions by language frequency. For a
-    // one-keystroke typo, its first result is substantially better than doing
-    // nothing (for example, pleasee → please instead of pleased/pleases).
-    if (ranked[0].distance > 1 && ranked[1]?.distance === ranked[0].distance) continue;
+    // Equal-distance suggestions are ambiguous. Maximum mode widens the safe
+    // distance, but it still never guesses between equally plausible words.
+    if (ranked[1]?.distance === ranked[0].distance) continue;
     edits.push({ from: word, to: ranked[0].word, confidence: 0.99 });
   }
   return edits;
@@ -345,7 +367,7 @@ function dictionaryEdits(message: string): ProposedEdit[] {
 export async function autocorrectLocally(
   value: string,
   requestSignal?: AbortSignal,
-  options: { fastOnly?: boolean } = {}
+  options: AutocorrectOptions = {}
 ): Promise<AutocorrectResult> {
   const original = cleanInput(value);
   if (!original.trim()) {
@@ -358,7 +380,9 @@ export async function autocorrectLocally(
     };
   }
 
-  const instant = applyInstantAutocorrect(original);
+  const instant = applyInstantAutocorrect(original, {
+    fixPunctuation: options.fixPunctuation,
+  });
   if (instant.changed) {
     return {
       text: instant.text,
@@ -369,7 +393,21 @@ export async function autocorrectLocally(
     };
   }
 
-  const dictionary = applySafeEdits(original, dictionaryEdits(original));
+  if (options.strength === "light") {
+    return {
+      text: original,
+      changed: false,
+      corrections: [],
+      model: "local-instant",
+      safeFallback: false,
+    };
+  }
+
+  const dictionary = applySafeEdits(
+    original,
+    dictionaryEdits(original, options),
+    options
+  );
   if (dictionary.text !== original && safeCorrection(original, dictionary.text)) {
     return {
       text: dictionary.text,
@@ -439,7 +477,7 @@ export async function autocorrectLocally(
     }
     const payload = (await response.json()) as OllamaChatResponse;
     const edits = readEdits(payload.message?.content || "");
-    const candidate = applySafeEdits(original, edits);
+    const candidate = applySafeEdits(original, edits, options);
     if (!safeCorrection(original, candidate.text)) {
       return {
         text: original,

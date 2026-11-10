@@ -78,6 +78,7 @@ const DRIVER_LABEL: Record<string, string> = {
 type SettingsPage =
   | "ai"
   | "general"
+  | "writing"
   | "organization"
   | "workflow"
   | "groups"
@@ -90,6 +91,7 @@ const SETTINGS_PAGES: Array<{
   description: string;
 }> = [
   { id: "general", label: "General", description: "Appearance and inbox behavior" },
+  { id: "writing", label: "Writing", description: "Autocorrect strength and timing" },
   { id: "organization", label: "Organization", description: "Tabs and conversation tags" },
   { id: "workflow", label: "Workflow", description: "Board stages and ordering" },
   { id: "groups", label: "Groups", description: "Macros and reusable templates" },
@@ -309,6 +311,10 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
     saveSettings(next);
   }
 
+  function updateAutocorrect(patch: Partial<Settings["autocorrect"]>) {
+    update({ autocorrect: { ...s.autocorrect, ...patch } });
+  }
+
   const activePage = SETTINGS_PAGES.find((item) => item.id === page)!;
   const connectedAccounts = accounts.filter((account) =>
     accountStatusView(account, liveAccounts[account.id]).connected
@@ -480,6 +486,48 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
                         <span className="text-sm text-slate-500 dark:text-neutral-400">days</span>
                       </label>
                     </SettingsRow>
+                  </SettingsPanel>
+                </div>
+              )}
+
+              {page === "writing" && (
+                <div className="space-y-5">
+                  <SettingsPanel title="Autocorrect" description="Choose how strongly 2manydms corrects drafts and exactly when it is allowed to act.">
+                    <SettingsRow label="Local autocorrect" hint="Runs privately on this Mac. Links, emails, @handles, and #hashtags are always protected.">
+                      <Toggle on={s.autocorrect.enabled} onChange={(enabled) => updateAutocorrect({ enabled })} label="Local autocorrect" />
+                    </SettingsRow>
+                    <SettingsRow label="Correction strength" hint={s.autocorrect.strength === "light" ? "Fixes only common, confirmed mistakes." : s.autocorrect.strength === "maximum" ? "Uses the widest safe dictionary match for the most corrections." : "Fixes common mistakes plus clear dictionary typos."}>
+                      <Segmented value={s.autocorrect.strength} onChange={(strength) => updateAutocorrect({ strength })} options={[["light", "Light"], ["balanced", "Balanced"], ["maximum", "Maximum"]]} />
+                    </SettingsRow>
+                    <SettingsRow label="When to correct" hint="After word never changes the word you are still typing.">
+                      <Segmented value={s.autocorrect.trigger} onChange={(trigger) => updateAutocorrect({ trigger })} options={[["word", "After word"], ["pause", "After pause"], ["send", "Before send"]]} />
+                    </SettingsRow>
+                    {s.autocorrect.trigger !== "send" && (
+                      <SettingsRow label="Correction speed" hint="Lower is faster. Increase it if corrections interrupt your typing rhythm.">
+                        <label className="flex min-w-56 items-center gap-3">
+                          <input type="range" min={80} max={1200} step={20} value={s.autocorrect.delayMs} onChange={(event) => updateAutocorrect({ delayMs: Number(event.target.value) })} aria-label="Autocorrect delay" className="min-w-0 flex-1 accent-accent" />
+                          <output className="w-16 text-right text-xs font-semibold tabular-nums text-slate-600 dark:text-neutral-300">{s.autocorrect.delayMs} ms</output>
+                        </label>
+                      </SettingsRow>
+                    )}
+                  </SettingsPanel>
+
+                  <SettingsPanel title="Protection and feedback" description="Fine-tune what autocorrect may change and what you see while it works.">
+                    <SettingsRow label="Preserve casual wording" hint="Keep shorthand and slang such as rn, lmk, pls, ecom, and dms.">
+                      <Toggle on={s.autocorrect.preserveCasual} onChange={(preserveCasual) => updateAutocorrect({ preserveCasual })} label="Preserve casual wording" />
+                    </SettingsRow>
+                    <SettingsRow label="Fix punctuation spacing" hint="Remove accidental spaces before commas, periods, and question marks.">
+                      <Toggle on={s.autocorrect.fixPunctuation} onChange={(fixPunctuation) => updateAutocorrect({ fixPunctuation })} label="Fix punctuation spacing" />
+                    </SettingsRow>
+                    <SettingsRow label="Spellcheck underlines" hint="Show your browser's red spelling underlines in the composer.">
+                      <Toggle on={s.autocorrect.browserSpellcheck} onChange={(browserSpellcheck) => updateAutocorrect({ browserSpellcheck })} label="Spellcheck underlines" />
+                    </SettingsRow>
+                    <SettingsRow label="Show Undo" hint="Show a one-click way to restore the draft after an automatic correction.">
+                      <Toggle on={s.autocorrect.showUndo} onChange={(showUndo) => updateAutocorrect({ showUndo })} label="Show Undo after correction" />
+                    </SettingsRow>
+                    <button type="button" onClick={() => update({ autocorrect: { ...DEFAULT_SETTINGS.autocorrect } })} className="text-sm font-semibold text-accent transition-colors duration-200 hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                      Restore writing defaults
+                    </button>
                   </SettingsPanel>
                 </div>
               )}
@@ -814,6 +862,7 @@ function SettingsPageIcon({ page }: { page: SettingsPage }) {
   const className = "h-4 w-4 shrink-0";
   if (page === "ai") return <SparklesIcon className={className} />;
   if (page === "general") return <SunIcon className={className} />;
+  if (page === "writing") return <SparklesIcon className={className} />;
   if (page === "organization") return <FolderIcon className={className} />;
   if (page === "workflow") return <ZapIcon className={className} />;
   if (page === "groups") return <UserIcon className={className} />;

@@ -5,6 +5,19 @@
 import { PIPELINE, type Stage } from "./pipeline";
 
 export type ScrollbarPref = "thin" | "default" | "hidden";
+export type AutocorrectStrength = "light" | "balanced" | "maximum";
+export type AutocorrectTrigger = "word" | "pause" | "send";
+
+export interface AutocorrectSettings {
+  enabled: boolean;
+  strength: AutocorrectStrength;
+  trigger: AutocorrectTrigger;
+  delayMs: number;
+  preserveCasual: boolean;
+  fixPunctuation: boolean;
+  browserSpellcheck: boolean;
+  showUndo: boolean;
+}
 
 export interface Settings {
   scrollbar: ScrollbarPref;
@@ -17,6 +30,7 @@ export interface Settings {
   plugins: PluginSettings;
   macros: GroupMacro[]; // saved "create group" macros (Cmd+G)
   templates: GroupTemplate[]; // reusable "what the group is for" presets
+  autocorrect: AutocorrectSettings;
 }
 
 // A reusable "create a group" preset: members + a first message.
@@ -55,6 +69,16 @@ export const DEFAULT_SETTINGS: Settings = {
   plugins: { calcom: { enabled: false, link: "" } },
   macros: [],
   templates: [],
+  autocorrect: {
+    enabled: true,
+    strength: "balanced",
+    trigger: "word",
+    delayMs: 180,
+    preserveCasual: true,
+    fixPunctuation: true,
+    browserSpellcheck: true,
+    showUndo: true,
+  },
 };
 
 // Build a Cal.com booking URL with the contact pre-filled as a guest.
@@ -91,13 +115,26 @@ export function loadSettings(): Settings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
     const parsed = JSON.parse(localStorage.getItem(KEY) || "{}") as Partial<Settings>;
-    return {
+    const loaded = {
       ...DEFAULT_SETTINGS,
       ...parsed,
       plugins: {
         calcom: { ...DEFAULT_SETTINGS.plugins.calcom, ...parsed.plugins?.calcom },
       },
-    };
+      autocorrect: {
+        ...DEFAULT_SETTINGS.autocorrect,
+        ...(parsed.autocorrect || {}),
+      },
+    } as Settings;
+    if (!parsed.autocorrect) {
+      const legacyEnabled = localStorage.getItem("omnicrm-autocorrect-enabled-v1");
+      if (legacyEnabled !== null) loaded.autocorrect.enabled = legacyEnabled !== "false";
+    }
+    loaded.autocorrect.delayMs = Math.max(
+      80,
+      Math.min(1200, Number(loaded.autocorrect.delayMs) || DEFAULT_SETTINGS.autocorrect.delayMs)
+    );
+    return loaded;
   } catch {
     return DEFAULT_SETTINGS;
   }

@@ -8,6 +8,7 @@ export const CONFIRMED_CORRECTIONS: Readonly<Record<string, string>> = {
   bnned: "banned",
   buisness: "business",
   calender: "calendar",
+  chek: "check",
   clsoed: "closed",
   definately: "definitely",
   doesnt: "doesn't",
@@ -73,7 +74,10 @@ function matchCase(source: string, replacement: string): string {
   return replacement;
 }
 
-export function applyInstantAutocorrect(value: string): InstantAutocorrectResult {
+export function applyInstantAutocorrect(
+  value: string,
+  options: { fixPunctuation?: boolean } = {}
+): InstantAutocorrectResult {
   const protectedValues: string[] = [];
   let text = value.replace(
     /https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|@[A-Za-z0-9_.]+|#[A-Za-z0-9_]+/g,
@@ -83,7 +87,9 @@ export function applyInstantAutocorrect(value: string): InstantAutocorrectResult
     }
   );
   const originalProtected = text;
-  text = text.replace(/[ \t]+([,;:!?])/g, "$1");
+  if (options.fixPunctuation !== false) {
+    text = text.replace(/[ \t]+([,;:!?])/g, "$1");
+  }
   const corrections: InstantAutocorrectResult["corrections"] = [];
   if (text !== originalProtected) corrections.push({ from: "punctuation spacing", to: "fixed" });
 
