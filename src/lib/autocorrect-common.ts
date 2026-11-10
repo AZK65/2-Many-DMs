@@ -30,6 +30,37 @@ export type InstantAutocorrectResult = {
   corrections: Array<{ from: string; to: string }>;
 };
 
+export type AutocorrectScope = {
+  checkableText: string;
+  preservedSuffix: string;
+};
+
+const WORD_CHARACTER = /[\p{L}\p{N}'’-]/u;
+
+export function autocorrectScopeAtCaret(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number = selectionStart,
+): AutocorrectScope {
+  const start = Math.max(0, Math.min(value.length, selectionStart));
+  const end = Math.max(start, Math.min(value.length, selectionEnd));
+  if (start !== end) return { checkableText: "", preservedSuffix: value };
+
+  const isInsideUnfinishedToken =
+    WORD_CHARACTER.test(value[start - 1] || "") ||
+    WORD_CHARACTER.test(value[start] || "");
+  if (!isInsideUnfinishedToken) {
+    return { checkableText: value, preservedSuffix: "" };
+  }
+
+  let tokenStart = start;
+  while (tokenStart > 0 && !/\s/u.test(value[tokenStart - 1])) tokenStart -= 1;
+  return {
+    checkableText: value.slice(0, tokenStart),
+    preservedSuffix: value.slice(tokenStart),
+  };
+}
+
 function escapedRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -56,7 +56,7 @@ import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
 import { buildCallInvite, parseCallInvite } from "@/lib/call-invite";
 import { mentionsCallIntent } from "@/lib/call-scheduling";
-import { applyInstantAutocorrect } from "@/lib/autocorrect-common";
+import { applyInstantAutocorrect, autocorrectScopeAtCaret } from "@/lib/autocorrect-common";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -1064,6 +1064,14 @@ export function ChatThread({
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       autocorrectAbortRef.current?.abort();
+      const selectionStart = textareaRef.current?.selectionStart ?? requestedDraft.length;
+      const selectionEnd = textareaRef.current?.selectionEnd ?? selectionStart;
+      const hadFocus = document.activeElement === textareaRef.current;
+      const scope = hadFocus
+        ? autocorrectScopeAtCaret(requestedDraft, selectionStart, selectionEnd)
+        : { checkableText: requestedDraft, preservedSuffix: "" };
+      if (!scope.checkableText.trim()) return;
+
       const applyCorrection = (result: {
         text?: string;
         changed?: boolean;
@@ -1074,12 +1082,11 @@ export function ChatThread({
           draftRef.current !== requestedDraft ||
           !result.changed ||
           typeof result.text !== "string" ||
-          result.text === requestedDraft
+          result.text === scope.checkableText
         ) return false;
 
-        const selectionStart = textareaRef.current?.selectionStart ?? requestedDraft.length;
-        const hadFocus = document.activeElement === textareaRef.current;
-        const correctedDraft = result.text;
+        const correctedDraft = result.text + scope.preservedSuffix;
+        if (correctedDraft === requestedDraft) return false;
         lastAutocorrectedDraftRef.current = correctedDraft;
         draftRef.current = correctedDraft;
         setDraft(correctedDraft);
@@ -1105,7 +1112,7 @@ export function ChatThread({
         return true;
       };
 
-      const instant = applyInstantAutocorrect(requestedDraft);
+      const instant = applyInstantAutocorrect(scope.checkableText);
       if (applyCorrection(instant)) {
         setAutoCorrecting(false);
         return;
@@ -1117,7 +1124,7 @@ export function ChatThread({
         const response = await fetch("/api/ai-replies/autocorrect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: requestedDraft, fast: true }),
+          body: JSON.stringify({ text: scope.checkableText, fast: true }),
           signal: controller.signal,
         });
         const result = (await response.json().catch(() => ({}))) as {

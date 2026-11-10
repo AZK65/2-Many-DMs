@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyInstantAutocorrect } from "./autocorrect-common";
+import { applyInstantAutocorrect, autocorrectScopeAtCaret } from "./autocorrect-common";
 
 test("common message typos correct immediately without changing casing or protected text", () => {
   const result = applyInstantAutocorrect("Teh adress is wierd , email teh@example.com");
@@ -21,4 +21,19 @@ test("instant autocorrect keeps valid shorthand and is idempotent", () => {
 
 test("instant autocorrect fixes an obvious repeated letter while composing", () => {
   assert.equal(applyInstantAutocorrect("can we pleasee check").text, "can we please check");
+});
+
+test("autocorrect waits for the active word and checks completed words", () => {
+  assert.deepEqual(autocorrectScopeAtCaret("pleasee", 7), {
+    checkableText: "",
+    preservedSuffix: "pleasee",
+  });
+  assert.deepEqual(autocorrectScopeAtCaret("can we pleasee check", 20), {
+    checkableText: "can we pleasee ",
+    preservedSuffix: "check",
+  });
+  assert.deepEqual(autocorrectScopeAtCaret("pleasee ", 8), {
+    checkableText: "pleasee ",
+    preservedSuffix: "",
+  });
 });
