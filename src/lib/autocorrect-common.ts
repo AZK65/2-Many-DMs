@@ -36,6 +36,25 @@ export type AutocorrectScope = {
   preservedSuffix: string;
 };
 
+export type UndoneAutocorrection = {
+  before: string;
+  after: string;
+};
+
+/** Keep an explicitly undone correction intact while allowing later text to be checked. */
+export function preserveUndoneAutocorrection(
+  requestedText: string,
+  correctedText: string,
+  undone: UndoneAutocorrection | null,
+): string {
+  if (!undone || undone.before === undone.after) return correctedText;
+  const start = requestedText.indexOf(undone.before);
+  if (start < 0) return correctedText;
+  if (correctedText.slice(0, start) !== requestedText.slice(0, start)) return correctedText;
+  if (!correctedText.startsWith(undone.after, start)) return correctedText;
+  return `${correctedText.slice(0, start)}${undone.before}${correctedText.slice(start + undone.after.length)}`;
+}
+
 const WORD_CHARACTER = /[\p{L}\p{N}'’-]/u;
 
 export function autocorrectScopeAtCaret(

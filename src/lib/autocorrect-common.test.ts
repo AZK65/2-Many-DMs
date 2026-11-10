@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyInstantAutocorrect, autocorrectScopeAtCaret } from "./autocorrect-common";
+import {
+  applyInstantAutocorrect,
+  autocorrectScopeAtCaret,
+  preserveUndoneAutocorrection,
+} from "./autocorrect-common";
 
 test("common message typos correct immediately without changing casing or protected text", () => {
   const result = applyInstantAutocorrect("Teh adress is wierd , email teh@example.com");
@@ -43,4 +47,27 @@ test("autocorrect waits for the active word and checks completed words", () => {
     checkableText: "pleasee ",
     preservedSuffix: "",
   });
+});
+
+test("undo remains respected while the user continues typing", () => {
+  const undone = { before: "send teh", after: "send the" };
+  assert.equal(
+    preserveUndoneAutocorrection("send teh please", "send the please", undone),
+    "send teh please",
+  );
+  assert.equal(
+    preserveUndoneAutocorrection("send teh pleasee ", "send the please ", undone),
+    "send teh please ",
+  );
+});
+
+test("an edited phrase is no longer protected by the old undo", () => {
+  assert.equal(
+    preserveUndoneAutocorrection(
+      "send that please",
+      "send that please",
+      { before: "send teh", after: "send the" },
+    ),
+    "send that please",
+  );
 });

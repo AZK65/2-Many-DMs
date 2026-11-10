@@ -60,7 +60,11 @@ import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
 import { buildCallInvite, parseCallInvite } from "@/lib/call-invite";
 import { mentionsCallIntent } from "@/lib/call-scheduling";
-import { applyInstantAutocorrect, autocorrectScopeAtCaret } from "@/lib/autocorrect-common";
+import {
+  applyInstantAutocorrect,
+  autocorrectScopeAtCaret,
+  preserveUndoneAutocorrection,
+} from "@/lib/autocorrect-common";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -390,6 +394,8 @@ type AutoCorrectionNotice = {
   before: string;
   after: string;
   corrections: Array<{ from: string; to: string }>;
+  selectionStart: number;
+  selectionEnd: number;
 };
 
 function autoCorrectionSummary(
@@ -1067,6 +1073,7 @@ export function ChatThread({
   const draftRef = useRef(draft);
   const autocorrectAbortRef = useRef<AbortController | null>(null);
   const lastAutocorrectedDraftRef = useRef<string | null>(null);
+  const undoneAutoCorrectionRef = useRef<AutoCorrectionNotice | null>(null);
 
   useEffect(() => {
     if (!autoCorrectEnabled || readOnly) return;
@@ -1083,6 +1090,7 @@ export function ChatThread({
     autocorrectAbortRef.current?.abort();
     autocorrectAbortRef.current = null;
     lastAutocorrectedDraftRef.current = null;
+    undoneAutoCorrectionRef.current = null;
     setAutoCorrecting(false);
   }, [conversation.id]);
 
@@ -1129,8 +1137,18 @@ export function ChatThread({
           result.text === scope.checkableText
         ) return false;
 
-        const correctedDraft = result.text + scope.preservedSuffix;
+        const undoneCorrection = undoneAutoCorrectionRef.current;
+        const correctedDraft = preserveUndoneAutocorrection(
+          requestedDraft,
+          result.text + scope.preservedSuffix,
+          undoneCorrection,
+        );
         if (correctedDraft === requestedDraft) return false;
+        const appliedCorrections = (result.corrections || []).filter(
+          (correction) => !undoneCorrection?.corrections.some(
+            (undone) => undone.from === correction.from && undone.to === correction.to,
+          ),
+        );
         lastAutocorrectedDraftRef.current = correctedDraft;
         draftRef.current = correctedDraft;
         setDraft(correctedDraft);
@@ -1140,7 +1158,9 @@ export function ChatThread({
             ? {
                 before: requestedDraft,
                 after: correctedDraft,
-                corrections: result.corrections || [],
+                corrections: appliedCorrections,
+                selectionStart,
+                selectionEnd,
               }
             : null
         );
@@ -1192,6 +1212,28 @@ export function ChatThread({
     },
     []
   );
+
+  function undoAutoCorrection(): boolean {
+    if (!autoCorrectionNotice) return false;
+    const previousDraft = autoCorrectionNotice.before;
+    autocorrectAbortRef.current?.abort();
+    autocorrectAbortRef.current = null;
+    undoneAutoCorrectionRef.current = autoCorrectionNotice;
+    lastAutocorrectedDraftRef.current = previousDraft;
+    draftRef.current = previousDraft;
+    setAutoCorrecting(false);
+    setDraft(previousDraft);
+    setAutoCorrectionNotice(null);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const start = Math.min(previousDraft.length, autoCorrectionNotice.selectionStart);
+      const end = Math.min(previousDraft.length, autoCorrectionNotice.selectionEnd);
+      textarea.setSelectionRange(start, end);
+    });
+    return true;
+  }
 
   function scrollToLatest() {
     setReplyFocus(null);
@@ -4151,20 +4193,10 @@ export function ChatThread({
             </span>
             <button
               type="button"
-              onClick={() => {
-                const previousDraft = autoCorrectionNotice.before;
-                lastAutocorrectedDraftRef.current = previousDraft;
-                draftRef.current = previousDraft;
-                setDraft(previousDraft);
-                setAutoCorrectionNotice(null);
-                requestAnimationFrame(() => {
-                  textareaRef.current?.focus();
-                  textareaRef.current?.setSelectionRange(
-                    previousDraft.length,
-                    previousDraft.length
-                  );
-                });
-              }}
+              onClick={undoAutoCorrection}
+              aria-label="Undo autocorrect"
+              aria-keyshortcuts="Meta+Z Control+Z"
+              title="Undo autocorrect"
               className="shrink-0 rounded-md px-2 py-1 font-semibold text-accent transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-accent/10 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               Undo
@@ -4232,6 +4264,12 @@ export function ChatThread({
             value={draft}
             onChange={(e) => {
               const nextDraft = e.target.value;
+              if (
+                undoneAutoCorrectionRef.current &&
+                !nextDraft.includes(undoneAutoCorrectionRef.current.before)
+              ) {
+                undoneAutoCorrectionRef.current = null;
+              }
               draftRef.current = nextDraft;
               setDraft(nextDraft);
               if (conversation.platform === "whatsapp") {
@@ -4247,6 +4285,17 @@ export function ChatThread({
             }}
             onPaste={handlePaste}
             onKeyDown={(e) => {
+              if (
+                autoCorrectionNotice &&
+                (e.metaKey || e.ctrlKey) &&
+                !e.shiftKey &&
+                !e.altKey &&
+                e.key.toLowerCase() === "z"
+              ) {
+                e.preventDefault();
+                undoAutoCorrection();
+                return;
+              }
               // Cmd/Ctrl + <key> inserts the matching snippet.
               if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.length === 1) {
                 const s = snippets.find(
