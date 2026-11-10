@@ -3,13 +3,20 @@ import { autocorrectLocally } from "@/lib/local-autocorrect";
 
 export const runtime = "nodejs";
 
+export async function GET() {
+  // Loading this route warms the local dictionaries before the first keystroke.
+  return NextResponse.json({ ready: true });
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as { text?: unknown };
+    const body = (await req.json()) as { text?: unknown; fast?: unknown };
     if (typeof body.text !== "string" || !body.text.trim()) {
       return NextResponse.json({ error: "Message text is required." }, { status: 400 });
     }
-    return NextResponse.json(await autocorrectLocally(body.text, req.signal));
+    return NextResponse.json(
+      await autocorrectLocally(body.text, req.signal, { fastOnly: body.fast === true })
+    );
   } catch (error) {
     return NextResponse.json(
       {

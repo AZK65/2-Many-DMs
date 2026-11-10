@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { applyInstantAutocorrect } from "./autocorrect-common";
+
+test("common message typos correct immediately without changing casing or protected text", () => {
+  const result = applyInstantAutocorrect("Teh adress is wierd , email teh@example.com");
+  assert.equal(result.text, "The address is weird, email teh@example.com");
+  assert.deepEqual(result.corrections, [
+    { from: "punctuation spacing", to: "fixed" },
+    { from: "adress", to: "address" },
+    { from: "Teh", to: "The" },
+    { from: "wierd", to: "weird" },
+  ]);
+});
+
+test("instant autocorrect keeps valid shorthand and is idempotent", () => {
+  const first = applyInstantAutocorrect("idk rn, the calendar is fine");
+  assert.equal(first.changed, false);
+  assert.deepEqual(applyInstantAutocorrect(first.text), first);
+});

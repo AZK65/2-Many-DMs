@@ -56,6 +56,7 @@ import { messageLinks } from "@/lib/message-links";
 import { isSharedXPostMessage, xPostUrlFromText } from "@/lib/x-post-preview";
 import { buildCallInvite, parseCallInvite } from "@/lib/call-invite";
 import { mentionsCallIntent } from "@/lib/call-scheduling";
+import { applyInstantAutocorrect } from "@/lib/autocorrect-common";
 
 // Heuristic: does the text mention a date/time worth offering to book around?
 const DATE_RE =
@@ -1028,6 +1029,17 @@ export function ChatThread({
   const lastAutocorrectedDraftRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!autoCorrectEnabled || readOnly) return;
+    const controller = new AbortController();
+    void fetch("/api/ai-replies/autocorrect", {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [autoCorrectEnabled, readOnly]);
+
+  useEffect(() => {
     autocorrectAbortRef.current?.abort();
     autocorrectAbortRef.current = null;
     lastAutocorrectedDraftRef.current = null;
@@ -1056,31 +1068,18 @@ export function ChatThread({
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       autocorrectAbortRef.current?.abort();
-      autocorrectAbortRef.current = controller;
-      setAutoCorrecting(true);
-      try {
-        const response = await fetch("/api/ai-replies/autocorrect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: requestedDraft }),
-          signal: controller.signal,
-        });
-        const result = (await response.json().catch(() => ({}))) as {
-          text?: string;
-          changed?: boolean;
-          corrections?: Array<{ from: string; to: string }>;
-          error?: string;
-        };
-        if (!response.ok) throw new Error(result.error || "Autocorrect unavailable");
+      const applyCorrection = (result: {
+        text?: string;
+        changed?: boolean;
+        corrections?: Array<{ from: string; to: string }>;
+      }) => {
         if (
           controller.signal.aborted ||
           draftRef.current !== requestedDraft ||
           !result.changed ||
           typeof result.text !== "string" ||
           result.text === requestedDraft
-        ) {
-          return;
-        }
+        ) return false;
 
         const selectionStart = textareaRef.current?.selectionStart ?? requestedDraft.length;
         const hadFocus = document.activeElement === textareaRef.current;
@@ -1107,6 +1106,32 @@ export function ChatThread({
             textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
           });
         }
+        return true;
+      };
+
+      const instant = applyInstantAutocorrect(requestedDraft);
+      if (applyCorrection(instant)) {
+        setAutoCorrecting(false);
+        return;
+      }
+
+      autocorrectAbortRef.current = controller;
+      setAutoCorrecting(true);
+      try {
+        const response = await fetch("/api/ai-replies/autocorrect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: requestedDraft, fast: true }),
+          signal: controller.signal,
+        });
+        const result = (await response.json().catch(() => ({}))) as {
+          text?: string;
+          changed?: boolean;
+          corrections?: Array<{ from: string; to: string }>;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(result.error || "Autocorrect unavailable");
+        applyCorrection(result);
       } catch (error) {
         if (controller.signal.aborted) return;
         setComposerNotice("Local autocorrect is unavailable · your draft was not changed");
@@ -1116,7 +1141,7 @@ export function ChatThread({
           setAutoCorrecting(false);
         }
       }
-    }, 800);
+    }, 120);
 
     return () => {
       window.clearTimeout(timer);
@@ -4225,6 +4250,9 @@ export function ChatThread({
                 ? `Write in English to send in ${translationConfig.languageName}`
                 : `Message on ${platform.label}`
             }
+            spellCheck
+            autoCorrect="on"
+            autoCapitalize="sentences"
             className="resize-none bg-transparent px-2 py-2 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
           />
           )}

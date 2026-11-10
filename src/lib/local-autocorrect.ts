@@ -1,11 +1,15 @@
 import nspell from "nspell";
 import englishDictionary from "dictionary-en";
 import frenchDictionary from "dictionary-fr";
+import {
+  applyInstantAutocorrect,
+  CONFIRMED_CORRECTIONS,
+} from "./autocorrect-common";
 
 const AUTOCORRECT_MODEL =
   process.env.OLLAMA_AUTOCORRECT_MODEL || "qwen3.5:4b";
 const AUTOCORRECT_TIMEOUT_MS = Number(
-  process.env.OLLAMA_AUTOCORRECT_TIMEOUT_MS || 45_000
+  process.env.OLLAMA_AUTOCORRECT_TIMEOUT_MS || 3_000
 );
 
 type OllamaChatResponse = {
@@ -62,17 +66,6 @@ const PRESERVED_TERMS = new Set([
   "ur",
   "wanna",
 ]);
-const CONFIRMED_CORRECTIONS: Record<string, string> = {
-  baclfill: "backfill",
-  baned: "banned",
-  bnned: "banned",
-  clsoed: "closed",
-  doesnt: "doesn't",
-  dosent: "doesn't",
-  teh: "the",
-  telegrm: "telegram",
-};
-
 export type AutocorrectResult = {
   text: string;
   changed: boolean;
@@ -300,19 +293,55 @@ function applySafeEdits(
   return { text: corrected, corrections };
 }
 
-function confirmedEdits(message: string): ProposedEdit[] {
-  return wordParts(message)
-    .filter((word) => CONFIRMED_CORRECTIONS[word.toLocaleLowerCase()])
-    .map((word) => ({
-      from: word,
-      to: CONFIRMED_CORRECTIONS[word.toLocaleLowerCase()],
-      confidence: 1,
-    }));
+function dictionaryEdits(message: string): ProposedEdit[] {
+  const protectedWords = new Set(
+    protectedParts(message).flatMap((part) =>
+      wordParts(part).map((word) => word.toLocaleLowerCase())
+    )
+  );
+  const edits: ProposedEdit[] = [];
+  const seen = new Set<string>();
+  for (const word of wordParts(message)) {
+    const normalized = word.toLocaleLowerCase().replace(/’/g, "'");
+    if (
+      edits.length >= 8 ||
+      seen.has(normalized) ||
+      protectedWords.has(normalized) ||
+      PRESERVED_TERMS.has(normalized) ||
+      normalized.length < 4 ||
+      /\d/.test(normalized) ||
+      /[A-Z].*[A-Z]/.test(word) ||
+      knownWord(normalized)
+    ) continue;
+    seen.add(normalized);
+
+    const evidence = languageEvidence(message, normalized);
+    const preferred = evidence.french >= evidence.english + 2
+      ? frenchSpeller.suggest(normalized)
+      : evidence.english >= evidence.french + 2
+        ? englishSpeller.suggest(normalized)
+        : [...englishSpeller.suggest(normalized), ...frenchSpeller.suggest(normalized)];
+    const ranked = Array.from(new Set(preferred))
+      .filter((candidate) =>
+        knownWord(candidate) &&
+        candidate[0]?.toLocaleLowerCase() === normalized[0]
+      )
+      .map((candidate) => ({
+        word: candidate,
+        distance: levenshteinDistance(normalized, candidate.toLocaleLowerCase()),
+      }))
+      .filter(({ distance }) => distance <= (normalized.length >= 7 ? 2 : 1))
+      .sort((left, right) => left.distance - right.distance);
+    if (!ranked.length || (ranked[1] && ranked[1].distance === ranked[0].distance)) continue;
+    edits.push({ from: word, to: ranked[0].word, confidence: 0.99 });
+  }
+  return edits;
 }
 
 export async function autocorrectLocally(
   value: string,
-  requestSignal?: AbortSignal
+  requestSignal?: AbortSignal,
+  options: { fastOnly?: boolean } = {}
 ): Promise<AutocorrectResult> {
   const original = cleanInput(value);
   if (!original.trim()) {
@@ -325,13 +354,33 @@ export async function autocorrectLocally(
     };
   }
 
-  const immediate = applySafeEdits(original, confirmedEdits(original));
-  if (immediate.text !== original && safeCorrection(original, immediate.text)) {
+  const instant = applyInstantAutocorrect(original);
+  if (instant.changed) {
     return {
-      text: immediate.text,
+      text: instant.text,
       changed: true,
-      corrections: immediate.corrections,
-      model: AUTOCORRECT_MODEL,
+      corrections: instant.corrections,
+      model: "local-instant",
+      safeFallback: false,
+    };
+  }
+
+  const dictionary = applySafeEdits(original, dictionaryEdits(original));
+  if (dictionary.text !== original && safeCorrection(original, dictionary.text)) {
+    return {
+      text: dictionary.text,
+      changed: true,
+      corrections: dictionary.corrections,
+      model: "local-dictionary",
+      safeFallback: false,
+    };
+  }
+  if (options.fastOnly) {
+    return {
+      text: original,
+      changed: false,
+      corrections: [],
+      model: "local-dictionary",
       safeFallback: false,
     };
   }
