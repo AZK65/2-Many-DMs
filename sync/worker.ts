@@ -517,6 +517,31 @@ function resolveAdapter(body: {
 function startControlServer(): Promise<void> {
   const port = Number(process.env.SYNC_CONTROL_PORT || 4001);
   controlServer = http.createServer(async (req, res) => {
+      if (req.method === "POST" && req.url === "/x/unlock") {
+        res.setHeader("Content-Type", "application/json");
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {
+          res.writeHead(403); return res.end(JSON.stringify({ error: "Local workspace requests only." }));
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 1024) { res.writeHead(413); return res.end(JSON.stringify({ error: "Unlock request is too large." })); }
+          }
+          const { accountId, passcode } = JSON.parse(body);
+          if (typeof accountId !== "string" || typeof passcode !== "string" || !/^\d{4,32}$/.test(passcode)) {
+            res.writeHead(400); return res.end(JSON.stringify({ error: "Enter your numeric X Chat passcode." }));
+          }
+          const adapter = adapters.get(accountId);
+          if (!(adapter instanceof XAdapter)) { res.writeHead(404); return res.end(JSON.stringify({ error: "This X browser connection is not running." })); }
+          if (!connectorOperations.canRecover(adapter)) { res.writeHead(409); return res.end(JSON.stringify({ error: "X is busy. Wait for the current operation to finish." })); }
+          let unlock;
+          await connectorOperations.runLifecycle(adapter, "recover", async () => { unlock = await adapter.unlockChat(passcode); });
+          return res.end(JSON.stringify({ unlock }));
+        } catch {
+          res.writeHead(409); return res.end(JSON.stringify({ error: "X could not check the code yet. Wait for any active sync or rate limit to finish; no automatic retry was requested." }));
+        }
+      }
       if (req.method === "POST" && req.url === "/messages/mutate") {
         res.setHeader("Content-Type", "application/json");
         if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {

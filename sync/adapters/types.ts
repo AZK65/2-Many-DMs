@@ -131,6 +131,7 @@ export type AdapterState =
   | "disabled";
 
 export interface AdapterStatus {
+  unlock?: import("../../src/lib/x-unlock-state").XUnlockState;
   platform: Platform;
   state: AdapterState;
   qr?: string | null; // PNG data URL when state === 'qr'

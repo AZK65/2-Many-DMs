@@ -12,6 +12,7 @@ import { XConnect } from "./XConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
 import { SavedConnection } from "./ConnectSetup";
 import { fetchJson } from "@/lib/fetch-json";
+import { xNeedsUnlock, type XUnlockState } from "@/lib/x-unlock-state";
 
 export type ConnState =
   | "starting"
@@ -21,6 +22,7 @@ export type ConnState =
   | "disabled";
 
 export interface ConnStatus {
+  unlock?: XUnlockState;
   platform: Platform;
   state: ConnState;
   qr?: string | null;
@@ -306,7 +308,7 @@ export function ConnectionsModal({
                             style={{ backgroundColor: meta.color }}
                           />
                           <button type="button" onClick={() => setSelectedAccount(a)} aria-label={`Open ${a.label || PLATFORMS[p].label} setup`} className="max-w-[12rem] truncate rounded px-1 py-1 text-left transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-white">
-                            {a.label || PLATFORMS[p].label} · {meta.label}
+                            {a.label || PLATFORMS[p].label} · {p === "x" && xNeedsUnlock(l) ? "Unlock chats" : meta.label}
                           </button>
                           <button
                             onClick={() => removeAccount(a.id)}
@@ -461,10 +463,10 @@ export function ConnectionsModal({
                   {p === "x" && (
                     <button onClick={() => {
                       const existing = accounts.find(a => a.platform === "x");
-                      if (existing && /lock|passcode/i.test(status?.detail || "")) setSelectedAccount(existing);
+                      if (existing) setSelectedAccount(existing);
                       else setConnectorPlatform("x");
                     }} className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-fg focus-visible:ring-2 focus-visible:ring-accent">
-                      {/lock|passcode/i.test(status?.detail || "") ? "Unlock chats" : "Connect X"}
+                      {xNeedsUnlock(status) ? "Unlock chats" : accounts.some(a => a.platform === "x") ? "Check connection" : "Connect X"}
                     </button>
                   )}
                   {p === "discord" && (

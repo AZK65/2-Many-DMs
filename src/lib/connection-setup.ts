@@ -41,7 +41,7 @@ export function validXSession(authToken: unknown, ct0: unknown): boolean {
   return [authToken, ct0].every(value => typeof value === "string" && /^[a-zA-Z0-9_%=-]{20,1024}$/.test(value));
 }
 export type SetupAccount = { id: string; platform: string; label: string | null; status: string; driver?: string | null };
-export type SetupLiveAccount = { accountId: string; state: "ready" | "qr" | "starting" | "disabled" | "disconnected"; qr?: string; detail?: string };
+export type SetupLiveAccount = { accountId: string; state: "ready" | "qr" | "starting" | "disabled" | "disconnected"; qr?: string; detail?: string; unlock?: import("./x-unlock-state").XUnlockState; sync?: import("./sync-health").SyncHealth };
 export type SetupConnections = { workerRunning: boolean; platforms: { accounts?: SetupLiveAccount[] } };
 export function setupAccountLabel(account: SetupAccount, connections: SetupConnections | null): string {
   if (!connections) return "Checking connection";

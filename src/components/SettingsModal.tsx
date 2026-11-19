@@ -25,6 +25,7 @@ import { XConnect } from "./XConnect";
 import { WhatsAppConnect } from "./WhatsAppConnect";
 import { SavedConnection } from "./ConnectSetup";
 import { accountStatusView } from "@/lib/connection-status";
+import { xNeedsUnlock, type XUnlockState } from "@/lib/x-unlock-state";
 import {
   CheckCircleIcon,
   ClockIcon,
@@ -49,6 +50,7 @@ type Acct = {
 };
 
 type LiveAcct = {
+  unlock?: XUnlockState;
   accountId: string;
   state: "starting" | "qr" | "ready" | "disconnected" | "disabled";
   qr?: string | null;
@@ -821,7 +823,7 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
                                     <div className="truncate text-sm font-semibold text-slate-900 dark:text-neutral-100">{account.label || PLATFORMS[platform].label}</div>
                                     <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-neutral-500">{account.driver ? DRIVER_LABEL[account.driver] || account.driver : "Standard connection"}{detail ? ` · ${detail}` : ""}</div>
                                   </div>
-                                  {["telegram", "whatsapp", "x"].includes(platform) ? <button type="button" aria-label={`Open ${account.label || PLATFORMS[platform].label} setup`} onClick={() => setSetupAccount(account)} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${statusClass}`}>{status.label} ›</button> : <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${statusClass}`}>{status.label}</span>}
+                                  {["telegram", "whatsapp", "x"].includes(platform) ? <button type="button" aria-label={`Open ${account.label || PLATFORMS[platform].label} setup`} onClick={() => setSetupAccount(account)} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${statusClass}`}>{platform === "x" && xNeedsUnlock(live) ? "Unlock chats" : status.label} ›</button> : <span className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${statusClass}`}>{status.label}</span>}
                                 </div>
                                 {needsWhatsAppQr && (
                                   <WhatsAppLinkCode

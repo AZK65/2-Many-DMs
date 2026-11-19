@@ -7,6 +7,7 @@ import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { fetchJson } from "@/lib/fetch-json";
 import type { SetupConnections } from "@/lib/connection-setup";
 import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
+import { xInboxVerified, xNeedsUnlock, type XUnlockState } from "@/lib/x-unlock-state";
 
 export const setupButton = "rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-offset-neutral-900";
 export const setupSecondary = "rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors duration-200 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800";
@@ -71,10 +72,17 @@ export function useSetupConnections() {
 export function ConnectionProgress({ accountId, platform, onReady }: { accountId: string; platform: Platform; onReady?: () => void }) {
   const { connections, error } = useSetupConnections();
   const live = connections?.platforms.accounts?.find(a => a.accountId === accountId);
-  const ready = connections?.workerRunning && live?.state === "ready";
+  const ready = connections?.workerRunning && (platform === "x" ? xInboxVerified(live) : live?.state === "ready");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [unlockResult, setUnlockResult] = useState<XUnlockState | null>(null);
+  const [unlockError, setUnlockError] = useState("");
+  const [showCode, setShowCode] = useState(false);
+  const unlockRequest = useRef(false);
+  const checkingCode = unlockRequest.current || live?.unlock?.state === "verifying";
+  const needsCode = platform === "x" && xNeedsUnlock(live);
+  const feedback = unlockResult || live?.unlock;
   const notified = useRef(false);
   const callback = useRef(onReady); callback.current = onReady;
   useEffect(() => { if (ready && !notified.current) { notified.current = true; callback.current?.(); } }, [ready]);
@@ -88,23 +96,32 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
     finally { setBusy(false); }
   }
   async function unlock(e: React.FormEvent) {
-    e.preventDefault(); if (busy) return; setBusy(true); setMessage("");
+    e.preventDefault(); if (busy || checkingCode || unlockRequest.current || !/^\d{4,32}$/.test(passcode)) return;
+    unlockRequest.current = true; setBusy(true); setMessage(""); setUnlockError(""); setUnlockResult(null);
+    const code = passcode; setPasscode(""); setShowCode(false);
     try {
-      await fetchJson("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode }), signal: AbortSignal.timeout(10_000) }, "X Chat unlock");
-      setPasscode(""); setMessage("Passcode saved securely. Waiting for X to confirm the unlock. A rejected code is not retried automatically.");
-    } catch (cause) { setMessage((cause as Error).message); }
-    finally { setBusy(false); }
+      const result = await fetchJson<{ unlock: XUnlockState }>("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode: code }), signal: AbortSignal.timeout(95_000) }, "X Chat unlock");
+      setUnlockResult(result.unlock);
+    } catch (cause) { setUnlockError((cause as Error).message); }
+    finally { unlockRequest.current = false; setBusy(false); }
   }
   return <div className="space-y-4">
     <div role="status" className={`rounded-xl p-4 ${ready ? "bg-accent/10" : "bg-slate-50 dark:bg-neutral-800"}`}>
-      <p className="text-sm font-semibold">{ready ? "Connected and ready" : !connections ? "Checking your connection" : !connections.workerRunning ? "Account saved. Start sync to continue" : live?.state === "disconnected" || live?.state === "disabled" ? "Connection needs attention" : "Account saved. Connecting…"}</p>
+      <p className="text-sm font-semibold">{checkingCode ? "Checking with X…" : ready ? "Connected and ready" : needsCode ? "Unlock your X chats" : !connections ? "Checking your connection" : !connections.workerRunning ? "Account saved. Start sync to continue" : live?.state === "disconnected" || live?.state === "disabled" ? "Connection needs attention" : "Account saved. Connecting…"}</p>
       <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">{ready ? "Your inbox is available. Older chats may continue importing in the background; connection does not mean all history is loaded." : live?.detail || (platform === "whatsapp" ? "Your account slot is saved. Link your phone when the QR appears. You can reopen setup to finish later." : "Your login is saved on this server. You can close setup without losing it.")}</p>
     </div>
     {connections && !connections.workerRunning && <button type="button" disabled={busy} onClick={start} className={setupButton}>{busy ? "Starting sync…" : "Start sync"}</button>}
-    {platform === "x" && /lock|passcode/i.test(live?.detail || "") && <form onSubmit={unlock} className="space-y-3">
-      <SetupField label="X Chat passcode" type="password" inputMode="numeric" autoComplete="off" value={passcode} onChange={e => setPasscode(e.target.value.replace(/\D/g, ""))} maxLength={32} disabled={busy} hint="Use the passcode you already use in X Chat, not your X account password. It is stored encrypted on your server. If you forgot it, recover access in X first." />
-      <button disabled={busy || passcode.length < 4} className={setupButton}>{busy ? "Saving…" : "Unlock encrypted chats"}</button>
+    {needsCode && <form onSubmit={unlock} className="space-y-3" aria-busy={checkingCode}>
+      <SetupField label="X Chat passcode" autoFocus type={showCode ? "text" : "password"} inputMode="numeric" autoComplete="off" value={passcode} onChange={e => setPasscode(e.target.value.replace(/\D/g, ""))} maxLength={32} disabled={busy || checkingCode} hint="Enter the numeric code you use to open encrypted chats in X, not your account password. It is used only for this running connection and is not saved to disk." />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={() => setShowCode(value => !value)} aria-pressed={showCode} disabled={busy || checkingCode} className={setupSecondary}>{showCode ? "Hide code" : "Show code"}</button>
+        <button disabled={busy || checkingCode || passcode.length < 4} className={setupButton}>{checkingCode ? "Checking with X…" : "Unlock chats"}</button>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-neutral-400">We only confirm success after X opens your inbox. Incorrect codes are not retried automatically. <a href="https://x.com/i/chat" target="_blank" rel="noreferrer" className="text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Forgot your code? Recover it in X.</a></p>
     </form>}
+    {checkingCode && <p role="status" className="text-sm text-slate-500 dark:text-neutral-400">Waiting for X to unlock and display your inbox. This can take up to a minute.</p>}
+    {!checkingCode && feedback && feedback.state !== "required" && <p role={feedback.state === "unlocked" ? "status" : "alert"} className={`rounded-lg p-3 text-sm ${feedback.state === "unlocked" ? "bg-accent/10 text-slate-900 dark:text-neutral-100" : "bg-slate-50 text-slate-600 dark:bg-neutral-800 dark:text-neutral-300"}`}>{feedback.detail}</p>}
+    {unlockError && <SetupError>{unlockError}</SetupError>}
     {error && <SetupError>{error}</SetupError>}
     {message && <p role="status" className="text-sm text-slate-500 dark:text-neutral-400">{message}</p>}
   </div>;
@@ -117,7 +134,7 @@ export function SavedConnection({ accountId, platform, onClose, driver, onReconn
     {platform === "whatsapp" && live?.state === "qr"
       ? <WhatsAppLinkCode qr={live.qr} label="WhatsApp" accountId={accountId} canRefresh={driver === "web" || driver === "baileys"} />
       : <ConnectionProgress platform={platform} accountId={accountId} />}
-    {onReconnect && platform !== "whatsapp" && live?.state === "disconnected" && <button type="button" className={`${setupSecondary} mt-4 w-full`} onClick={onReconnect}>Sign in again</button>}
-    <button type="button" className={`${setupButton} mt-6 w-full`} onClick={onClose}>Done</button>
+    {onReconnect && platform !== "whatsapp" && live?.state === "disconnected" && !(platform === "x" && xNeedsUnlock(live)) && <button type="button" className={`${setupSecondary} mt-4 w-full`} onClick={onReconnect}>Sign in again</button>}
+    <button type="button" className={`${platform === "x" && xNeedsUnlock(live) ? setupSecondary : setupButton} mt-6 w-full`} onClick={onClose}>Done</button>
   </ConnectShell>;
 }

@@ -9,8 +9,10 @@ import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { XAvatarSources } from "../x-avatar-sources";
 import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
-import { isLocked, tryUnlock, type UnlockResult } from "../x-passcode";
+import { tryUnlock, type UnlockResult } from "../x-passcode";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
+import { inspectXChatGate, waitForXChatGate } from "../x-chat-gate";
+import type { XUnlockState } from "../../src/lib/x-unlock-state";
 import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview, xMediaPreviewExpectation, type XLatestPreview } from "../x-history";
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
@@ -133,6 +135,9 @@ export class XAdapter implements Adapter {
   private chatPage?: Page;
   private sendPage?: Page;
   private state: AdapterStatus["state"] = "starting";
+  private unlockStatus?: XUnlockState;
+  private unlockedPasscode?: string;
+  private manualUnlock = false;
   private detail?: string;
   private busy = false;
   private onMessage?: (m: InboundMessage) => Promise<void>;
@@ -227,6 +232,7 @@ export class XAdapter implements Adapter {
     }
     return {
       platform: "x",
+      unlock: this.unlockStatus,
       state: this.state === "ready" && Date.now() < this.inboxRetryAt ? "starting" : this.state,
       detail: this.detail || (this.automaticRepairQueue.size ? `X connected · repairing ${this.automaticRepairQueue.size} chats in the background` : undefined),
       sync: { lastCheckedAt: this.lastInboxCheckedAt || undefined, retryAt: this.inboxRetryAt,
@@ -821,15 +827,6 @@ export class XAdapter implements Adapter {
       console.error("[x] session invalid/expired — refresh X_AUTH_TOKEN/X_CT0.");
       return;
     }
-    if (inboxLoaded && await isLocked(this.page)) {
-      // Headless self-host: unlock ourselves from X_PASSCODE rather than waiting
-      // for someone to sit at a screen. Falls through to "locked" if we can't.
-      const result = await tryUnlock(this.page, { passcode: this.session ? (this.session.passcode || "") : undefined, accountId: this.accountId });
-      if (result !== "unlocked" && result !== "not-locked") {
-        this.markLocked(result);
-        return;
-      }
-    }
     this.chatPage = await this.browser.newPage();
     await this.configurePage(this.chatPage);
     if (!isCurrent()) return;
@@ -867,6 +864,9 @@ export class XAdapter implements Adapter {
       console.error("[x] requests page error:", err.message);
       this.scheduleReconnect();
     });
+    // Create every owned page before parking for user input, so submitting a
+    // passcode can resume this browser without launching another connection.
+    if (inboxLoaded && !(await this.unlockBackgroundPage(this.page, "inbox"))) return;
     if (inboxLoaded && Date.now() >= this.inboxRetryAt) {
       // Stagger the second live XChat route instead of opening two encrypted
       // inboxes in the same request burst.
@@ -1126,6 +1126,13 @@ export class XAdapter implements Adapter {
   // to decide whether to show the XChat unlock card.
   private markLocked(result: UnlockResult): void {
     this.state = "disconnected";
+    if (this.rateLimitUntil <= Date.now()) this.inboxRetryAt = 0;
+    this.unlockStatus = {
+      state: result === "rejected" ? "rejected" : result === "error" ? "error" : "required",
+      detail: result === "rejected" ? "X did not accept that passcode. Check it before trying a different code."
+        : result === "error" ? "X has not confirmed the unlock. Check your passcode or open X to recover access."
+        : "Enter your X Chat passcode here to unlock encrypted messages.",
+    };
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     if (this.liveTimer) clearInterval(this.liveTimer);
@@ -1133,7 +1140,7 @@ export class XAdapter implements Adapter {
     if (result === "no-passcode") {
       this.detail = "XChat locked — no passcode set";
       console.error(
-        "[x] XChat is locked. Set X_PASSCODE in .env to unlock automatically (works headless), or run `npm run x:unlock` on a machine with a screen."
+        "[x] XChat is locked. Open Connections > X and enter the chat passcode to verify the unlock."
       );
     } else if (result === "rejected") {
       this.detail = "XChat locked — passcode rejected";
@@ -1144,12 +1151,73 @@ export class XAdapter implements Adapter {
   }
 
   private async unlockBackgroundPage(page: Page, label: string): Promise<boolean> {
-    if (!(await isLocked(page))) return true;
-    const result = await tryUnlock(page, { passcode: this.session ? (this.session.passcode || "") : undefined, accountId: this.accountId });
+    const gate = await waitForXChatGate(page);
+    if (gate === "login") { this.markLoginRequired(); return false; }
+    if (gate !== "locked") return true;
+    // New locks require an explicit attempt in Connections. Only reuse a code
+    // that X verified during this worker session on its other owned chat pages.
+    const result = this.unlockedPasscode
+      ? await tryUnlock(page, { passcode: this.unlockedPasscode, accountId: this.accountId }) : "no-passcode";
     if (result === "unlocked" || result === "not-locked") return true;
     console.error(`[x] ${label} page could not be unlocked`);
     this.markLocked(result);
     return false;
+  }
+
+  private markLoginRequired(): void {
+    this.markLocked("error");
+    this.unlockStatus = { state: "login-required", detail: "Your X login expired. Sign in again from Connections before unlocking chats." };
+    this.detail = this.unlockStatus.detail;
+  }
+
+  /** One explicit user attempt on this account's existing browser. Never restart
+   * a second session or persist a submitted passcode to disk. */
+  async unlockChat(passcode: string): Promise<XUnlockState> {
+    if (!/^\d{4,32}$/.test(passcode)) throw new Error("Enter your numeric X Chat passcode, not your X password.");
+    if (this.manualUnlock || this.busy || this.connectPromise || this.outboundPending || this.manualRecoveryPending || this.automaticRepairRunning) throw new Error("X is busy. Wait for the current operation to finish, then try again.");
+    if (this.rateLimitUntil > Date.now()) throw new Error("X is rate limiting requests. Wait for the cooldown before unlocking.");
+    if (!this.page || this.page.isClosed() || !this.browser?.connected) throw new Error("X is reconnecting. Wait for the connection before entering a code.");
+    const lifecycle = this.lifecycleVersion;
+    this.manualUnlock = true;
+    this.busy = true;
+    this.state = "starting";
+    this.unlockStatus = { state: "verifying", detail: "Checking your passcode with X and waiting for the inbox…" };
+    this.detail = this.unlockStatus.detail;
+    try {
+      await this.cooldownParkPromise;
+      this.inboxRetryAt = 0;
+      if (this.page.url() === "about:blank") {
+        this.lastInboxNavigationAt = Date.now();
+        await this.page.goto("https://x.com/i/chat", { waitUntil: "domcontentloaded" });
+      }
+      const gate = await waitForXChatGate(this.page);
+      if (gate === "login") { this.markLoginRequired(); return this.unlockStatus!; }
+      const result = gate === "inbox" ? "not-locked" : gate === "locked"
+        ? await tryUnlock(this.page, { passcode, accountId: this.accountId, explicit: true }) : "error";
+      if (this.stopping || lifecycle !== this.lifecycleVersion) return { state: "error", detail: "The X connection restarted before verification finished. Reopen setup to check its status." };
+      if (result !== "unlocked" && result !== "not-locked") {
+        this.markLocked(result);
+        return this.unlockStatus!;
+      }
+      if (result === "unlocked") this.unlockedPasscode = passcode;
+      this.unlockStatus = { state: "unlocked", detail: result === "unlocked" ? "X confirmed the unlock. Your inbox is available and syncing resumes." : "Your X inbox is already unlocked. No code was submitted; syncing resumes." };
+      this.inboxFailures = 0;
+      this.state = "ready";
+      this.detail = undefined;
+      this.lastInboxCheckedAt = Date.now();
+      // markLocked stops these loops. Restore them once the inbox is verified.
+      if (!this.timer) this.timer = setInterval(() => void this.sync(this.onMessage!).catch(() => null), Math.max(60000, Number(process.env.X_POLL_MS || 60000)));
+      if (!this.liveTimer) this.liveTimer = setInterval(() => void this.syncLivePreviews().catch(() => null), 5000);
+      this.scheduleAutomaticRepair();
+      return this.unlockStatus;
+    } catch {
+      if (this.stopping || lifecycle !== this.lifecycleVersion) return { state: "error", detail: "The X connection closed before verification finished. Reopen setup to check its status." };
+      this.markLocked("error");
+      return this.unlockStatus!;
+    } finally {
+      if (lifecycle === this.lifecycleVersion) this.busy = false;
+      this.manualUnlock = false;
+    }
   }
 
   private scheduleReconnect(): void {
@@ -1195,7 +1263,7 @@ export class XAdapter implements Adapter {
     this.busy = true;
     try {
       const inboxSelector =
-        '[data-testid="dm-conversation-scroller"] a[href*="/i/chat/"]';
+        '[data-testid="dm-conversation-scroller"]';
       const recoveryMs = Math.max(
         5 * 60 * 1000,
         Number(process.env.X_INBOX_RECOVERY_MS || 10 * 60 * 1000)
@@ -1230,6 +1298,12 @@ export class XAdapter implements Adapter {
           timeout: initial || navigated ? 15000 : 3000,
         });
       } catch {
+        // The passcode redirect can arrive after the first unlock check.
+        // Never classify that gate as a generic page failure/cooldown.
+        if (await inspectXChatGate(this.page).catch(() => "loading") === "locked") {
+          this.markLocked("no-passcode");
+          return;
+        }
         const diagnostic = await this.page.evaluate(() => {
           const root =
             document.querySelector<HTMLElement>('[data-testid="xchatEmbedRoute"]')
@@ -1281,6 +1355,7 @@ export class XAdapter implements Adapter {
       }
       if (this.stopping || run !== this.pageRun || Date.now() < this.inboxRetryAt) return;
       this.inboxFailures = 0;
+      this.lastInboxCheckedAt = Date.now();
       // One successful DOM read only proves the page loaded. Keep recent
       // strikes long enough for a second 429 to receive a longer cooldown;
       // otherwise X was retried every 15 minutes indefinitely.
@@ -2748,6 +2823,8 @@ export class XAdapter implements Adapter {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.unlockedPasscode = undefined;
+    this.unlockStatus = undefined;
     this.lifecycleVersion += 1;
     this.pageRun += 1;
     this.busy = false;

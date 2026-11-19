@@ -1,9 +1,8 @@
 import { sameSetupOrigin, setupBody } from "@/lib/setup-origin";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { encrypt, decrypt } from "@/lib/crypto";
 import { getCurrentUser, clientIp } from "@/lib/currentUser";
-import { reloadConnections } from "@/lib/reload-connections";
+import type { XUnlockState } from "@/lib/x-unlock-state";
 export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   if (!sameSetupOrigin(req)) return NextResponse.json({ error: "Open setup from your app to continue." }, { status: 403 });
@@ -14,13 +13,17 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser(clientIp(req));
     const account = await prisma.account.findFirst({ where: { id: accountId, userId: user.id, platform: "x" } });
-    if (!account?.session) return NextResponse.json({ error: "Pair your X account first." }, { status: 404 });
-    const session = JSON.parse(decrypt(account.session));
-    if (!session.authToken || !session.ct0) return NextResponse.json({ error: "Reconnect this account with the browser extension first." }, { status: 400 });
-    await prisma.account.update({ where: { id: accountId }, data: { session: encrypt(JSON.stringify({ ...session, passcode })), status: "pending" } });
-    await reloadConnections();
-    return NextResponse.json({ ok: true });
+    if (!account || account.driver === "api") return NextResponse.json({ error: "Select a saved X browser connection first." }, { status: 404 });
+    // The running adapter owns the correct browser, including legacy accounts.
+    // Never start a second session or confuse saving a code with verification.
+    const response = await fetch(`${process.env.SYNC_CONTROL_URL || "http://localhost:4001"}/x/unlock`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+      body: JSON.stringify({ accountId, passcode }), signal: AbortSignal.timeout(90_000),
+    });
+    const result = await response.json() as { unlock?: XUnlockState; error?: string };
+    if (!response.ok || !result.unlock) return NextResponse.json({ error: result.error || "Start or update the sync worker, then try unlocking again." }, { status: response.ok ? 503 : response.status });
+    return NextResponse.json({ unlock: result.unlock });
   } catch {
-    return NextResponse.json({ error: "Could not save the passcode securely. Check the server and try again." }, { status: 503 });
+    return NextResponse.json({ error: "The unlock result could not be confirmed. Check the live status before trying again; the code was not saved to disk." }, { status: 503 });
   }
 }

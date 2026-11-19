@@ -1,5 +1,6 @@
 import type { Page } from "puppeteer";
 import { createHash } from "node:crypto";
+import { inspectXChatGate } from "./x-chat-gate";
 
 /* XChat (X's encrypted DMs) gates the inbox behind a numeric passcode. On a
    machine with a screen you type it yourself (`npm run x:unlock`); on a headless
@@ -51,7 +52,8 @@ async function enterPasscode(page: Page, passcode: string): Promise<void> {
     await page.keyboard.press("Backspace");
   }
 
-  if (inputs.length >= passcode.length) {
+  if (inputs.length > 1 && inputs.length !== passcode.length) throw new Error("passcode length does not match the gate");
+  if (inputs.length > 1) {
     for (let i = 0; i < passcode.length; i++) {
       await inputs[i].click();
       await page.keyboard.type(passcode[i], { delay: 90 });
@@ -61,8 +63,9 @@ async function enterPasscode(page: Page, passcode: string): Promise<void> {
     await page.keyboard.type(passcode, { delay: 120 });
   }
 
-  await wait(700);
-  await page.keyboard.press("Enter");
+  // Digit gates submit on the final digit. Enter would submit a rejected code
+  // twice, or hit a control on the newly opened inbox.
+  if (inputs.length === 1) await page.keyboard.press("Enter");
 }
 
 export type UnlockResult =
@@ -76,6 +79,7 @@ export type UnlockResult =
 // and walking the account toward a recovery lockout. Cleared by restarting the
 // worker (i.e. after you've fixed X_PASSCODE).
 const rejected = new Set<string>();
+const uncertain = new Set<string>();
 
 export function passcodeRejected(): boolean {
   return rejected.size > 0;
@@ -84,14 +88,11 @@ export function passcodeRejected(): boolean {
 async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
   try {
     return await page.evaluate(() => {
-      const root =
-        document.querySelector<HTMLElement>('[data-testid="xchatEmbedRoute"]')
-          ?.shadowRoot ?? document;
-      const text = (
-        root === document
-          ? document.body?.innerText || ""
-          : root.textContent || ""
-      ).slice(0, 1200);
+      const roots: Array<Document | ShadowRoot> = [document];
+      for (const root of roots) for (const el of root.querySelectorAll("*")) if (el.shadowRoot) roots.push(el.shadowRoot);
+      const text = roots.flatMap(root => Array.from(root.children)
+        .filter(el => !["STYLE", "SCRIPT"].includes(el.tagName))
+        .map(el => (el as HTMLElement).innerText || "")).join(" ");
       return /(?:incorrect|wrong|invalid)\s+(?:pin|passcode)|(?:pin|passcode)\s+(?:incorrect|wrong|invalid)/i.test(
         text
       );
@@ -101,13 +102,16 @@ async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
   }
 }
 
-export async function tryUnlock(page: Page, options: { passcode?: string; accountId?: string } = {}): Promise<UnlockResult> {
-  if (!(await isLocked(page))) return "not-locked";
+export async function tryUnlock(page: Page, options: { passcode?: string; accountId?: string; explicit?: boolean; timeoutMs?: number } = {}): Promise<UnlockResult> {
+  const gate = await inspectXChatGate(page);
+  if (gate === "inbox") return "not-locked";
+  if (gate !== "locked") return "error";
 
   const passcode = (options.passcode ?? process.env.X_PASSCODE ?? "").trim();
   if (!passcode) return "no-passcode";
   const key = createHash("sha256").update(`${options.accountId || "default"}:${passcode}`).digest("hex");
   if (rejected.has(key)) return "rejected";
+  if (uncertain.has(key) && !options.explicit) return "error";
 
   try {
     await enterPasscode(page, passcode);
@@ -115,25 +119,29 @@ export async function tryUnlock(page: Page, options: { passcode?: string; accoun
     // Wait for the actual chat surface, and only call the passcode rejected
     // when X renders an explicit error. A slow unlock must not become a false
     // disconnected state.
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await wait(1000);
-      if (!(await isLocked(page))) {
-        console.log("[x] XChat unlocked via X_PASSCODE");
+    const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+    do {
+      await wait(250);
+      if (await inspectXChatGate(page) === "inbox") {
+        uncertain.delete(key);
+        console.log("[x] XChat unlock confirmed by the inbox");
         return "unlocked";
       }
       if (await hasExplicitPasscodeError(page)) {
         rejected.add(key);
         // Never log the passcode itself.
         console.error(
-          "[x] XChat passcode rejected — not retrying, since repeated attempts trigger X's recovery lockout. Fix X_PASSCODE and restart the worker."
+          "[x] XChat passcode rejected — this code will not be retried. Check the code in Connections or recover access in X."
         );
         return "rejected";
       }
-    }
+    } while (Date.now() < deadline);
+    uncertain.add(key);
     console.error("[x] XChat unlock is still pending; not retrying automatically.");
     return "error";
-  } catch (e) {
-    console.error("[x] passcode entry failed:", e);
+  } catch {
+    uncertain.add(key);
+    console.error("[x] passcode entry could not be verified; no automatic retry.");
     return "error";
   }
 }
