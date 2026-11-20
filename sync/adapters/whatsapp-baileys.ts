@@ -21,6 +21,7 @@ import { avatarUnavailable } from "../avatar-errors";
 import { isGenericDirectIdentity } from "../../src/lib/direct-contact-identity";
 import { nativeMutationId } from "../../src/lib/message-mutations";
 import { drainWhatsAppEvents } from "../whatsapp-event-buffer";
+import { createWhatsAppReceiveLogger, WhatsAppReceiveHealth } from "../whatsapp-receive-health";
 import type {
   Adapter,
   AdapterStatus,
@@ -155,6 +156,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
   private lastMessageSavedAt = 0;
   private connectedAt = 0;
   private eventFlushTimer?: ReturnType<typeof setInterval>;
+  private receiveHealth = new WhatsAppReceiveHealth();
   private historyRequests = new Map<
     string,
     {
@@ -183,11 +185,14 @@ export class WhatsAppBaileysAdapter implements Adapter {
       this.state = "disconnected";
       this.detail = "WhatsApp connection lost; reconnecting automatically";
     }
+    const receiveHealth = this.receiveHealth?.snapshot();
+    const receiveStalled = this.state === "ready" && receiveHealth?.stalled;
     return {
       platform: "whatsapp",
-      state: this.state,
+      state: receiveStalled ? "disconnected" : this.state,
       qr: this.state === "qr" ? this.qr : null,
-      detail: this.detail,
+      detail: receiveStalled ? "Incoming WhatsApp messages are stuck; reconnecting automatically" : this.detail,
+      receiveHealth,
       sync: {
         lastMessageAt: this.lastMessageSavedAt || undefined,
         pendingChats: new Set([...this.historyRequests.values()].filter(r => !r.timedOut).map(r => r.chatExternalId)).size,
@@ -250,6 +255,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
     clearInterval(this.eventFlushTimer);
     this.eventFlushTimer = undefined;
     this.connectedAt = 0;
+    this.receiveHealth = new WhatsAppReceiveHealth();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -278,7 +284,9 @@ export class WhatsAppBaileysAdapter implements Adapter {
     const sock = makeWASocket({
       version,
       auth: state,
-      logger: silent,
+      logger: createWhatsAppReceiveLogger(id => {
+        if (generation === this.connectionGeneration && !this.stopped) this.receiveHealth.decryptionFailed(id);
+      }),
       browser: ["2 Many DMs", "Chrome", "1.0.0"],
       // Phone-delivered history is persisted without downloading binaries in
       // this event. It is independent of the old heavy browser startup import.
@@ -290,6 +298,10 @@ export class WhatsAppBaileysAdapter implements Adapter {
       },
     });
     this.sock = sock;
+
+    sock.ws.on("CB:message", (node: any) => {
+      if (generation === this.connectionGeneration && !this.stopped) this.receiveHealth.receive(node);
+    });
 
     sock.ev.on("creds.update", () => {
       if (generation !== this.connectionGeneration || this.stopped) return;
@@ -391,6 +403,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
       if (generation !== this.connectionGeneration || this.stopped) return;
       if (type !== "notify" && type !== "append") return;
       for (const msg of messages) {
+        this.receiveHealth.upsert(msg, proto.WebMessageInfo.StubType.CIPHERTEXT);
         try {
           const im = await this.toInbound(msg, false);
           if (im && type === "append") im.historical = true;
@@ -462,6 +475,7 @@ export class WhatsAppBaileysAdapter implements Adapter {
       const pending = requestId ? this.historyRequests.get(requestId) : undefined;
       let count = 0;
       for (const msg of messages || []) {
+        this.receiveHealth.upsert(msg, proto.WebMessageInfo.StubType.CIPHERTEXT);
         try {
           const im = await this.toInbound(msg, false);
           if (

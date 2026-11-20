@@ -131,6 +131,7 @@ export type AdapterState =
   | "disabled";
 
 export interface AdapterStatus {
+  receiveHealth?: ReturnType<import("../whatsapp-receive-health").WhatsAppReceiveHealth["snapshot"]>;
   unlock?: import("../../src/lib/x-unlock-state").XUnlockState;
   platform: Platform;
   state: AdapterState;
