@@ -1,6 +1,7 @@
 import type { Page } from "puppeteer";
 import { createHash } from "node:crypto";
 import { inspectXChatGate } from "./x-chat-gate";
+import { isXChatPin } from "../src/lib/x-unlock-state";
 
 /* XChat (X's encrypted DMs) gates the inbox behind a numeric passcode. On a
    machine with a screen you type it yourself (`npm run x:unlock`); on a headless
@@ -43,8 +44,21 @@ export async function isLocked(page: Page): Promise<boolean> {
 // Type the passcode and submit. The gate renders one <input> per digit; older
 // builds use a single field, so handle both.
 async function enterPasscode(page: Page, passcode: string): Promise<void> {
-  const inputs = await page.$$("pierce/input");
-  if (!inputs.length) throw new Error("no passcode input found on the page");
+  // X keeps unrelated search and hidden inputs mounted around its Chat gate.
+  // Never count those as PIN slots or type a credential into them.
+  const candidates = await page.$$("pierce/input");
+  const inputs = [];
+  for (const input of candidates) {
+    const eligible = await input.evaluate(el => {
+      const field = el as HTMLInputElement;
+      const style = getComputedStyle(field);
+      return !field.disabled && !field.readOnly && field.getBoundingClientRect().width > 0 &&
+        field.getBoundingClientRect().height > 0 && style.visibility !== "hidden" && style.display !== "none" &&
+        (field.type === "password" || field.inputMode === "numeric" || /passcode|\bpin\b/i.test(`${field.name} ${field.getAttribute("aria-label") || ""} ${field.placeholder}`));
+    });
+    if (eligible) inputs.push(input); else await input.dispose();
+  }
+  if (inputs.length !== 1 && inputs.length !== 4) throw new Error("X PIN fields are not ready");
 
   // Clear first — a half-finished earlier attempt leaves digits behind.
   for (const input of inputs) {
@@ -93,7 +107,7 @@ async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
       const text = roots.flatMap(root => Array.from(root.children)
         .filter(el => !["STYLE", "SCRIPT"].includes(el.tagName))
         .map(el => (el as HTMLElement).innerText || "")).join(" ");
-      return /(?:incorrect|wrong|invalid)\s+(?:pin|passcode)|(?:pin|passcode)\s+(?:incorrect|wrong|invalid)/i.test(
+      return /(?:incorrect|wrong|invalid)\s+(?:pin|passcode|code)|(?:pin|passcode|code)\s+(?:is\s+)?(?:incorrect|wrong|invalid)|(?:pin|passcode)\s+(?:does not|doesn't)\s+match/i.test(
         text
       );
     });
@@ -109,6 +123,7 @@ export async function tryUnlock(page: Page, options: { passcode?: string; accoun
 
   const passcode = (options.passcode ?? process.env.X_PASSCODE ?? "").trim();
   if (!passcode) return "no-passcode";
+  if (!isXChatPin(passcode)) return "error";
   const key = createHash("sha256").update(`${options.accountId || "default"}:${passcode}`).digest("hex");
   if (rejected.has(key)) return "rejected";
   if (uncertain.has(key) && !options.explicit) return "error";

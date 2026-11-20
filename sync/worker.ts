@@ -5,6 +5,7 @@ import { TelegramAdapter } from "./adapters/telegram";
 import { WhatsAppAdapter } from "./adapters/whatsapp";
 import { WhatsAppBaileysAdapter } from "./adapters/whatsapp-baileys";
 import { XAdapter } from "./adapters/x";
+import { isXChatPin } from "../src/lib/x-unlock-state";
 import { XApiAdapter } from "./adapters/x-api";
 import { GmailAdapter } from "./adapters/gmail";
 import { DiscordBotAdapter } from "./adapters/discord";
@@ -529,8 +530,8 @@ function startControlServer(): Promise<void> {
             if (body.length > 1024) { res.writeHead(413); return res.end(JSON.stringify({ error: "Unlock request is too large." })); }
           }
           const { accountId, passcode } = JSON.parse(body);
-          if (typeof accountId !== "string" || typeof passcode !== "string" || !/^\d{4,32}$/.test(passcode)) {
-            res.writeHead(400); return res.end(JSON.stringify({ error: "Enter your numeric X Chat passcode." }));
+          if (typeof accountId !== "string" || !isXChatPin(passcode)) {
+            res.writeHead(400); return res.end(JSON.stringify({ error: "Enter your 4-digit X Chat PIN." }));
           }
           const adapter = adapters.get(accountId);
           if (!(adapter instanceof XAdapter)) { res.writeHead(404); return res.end(JSON.stringify({ error: "This X browser connection is not running." })); }

@@ -19,6 +19,7 @@ import { existingAvatar, saveAvatarFromUrl } from "../avatars";
 import { avatarUnavailable } from "../avatar-errors";
 import { isGenericDirectIdentity } from "../../src/lib/direct-contact-identity";
 import { nativeMutationId } from "../../src/lib/message-mutations";
+import { drainWhatsAppEvents } from "../whatsapp-event-buffer";
 import type {
   Adapter,
   AdapterStatus,
@@ -151,6 +152,8 @@ export class WhatsAppBaileysAdapter implements Adapter {
   private connectionPromise?: Promise<void>;
   private reconnectAttempts = 0;
   private lastMessageSavedAt = 0;
+  private connectedAt = 0;
+  private eventFlushTimer?: ReturnType<typeof setInterval>;
   private historyRequests = new Map<
     string,
     {
@@ -175,6 +178,10 @@ export class WhatsAppBaileysAdapter implements Adapter {
   }
 
   getStatus(): AdapterStatus {
+    if (this.state === "ready" && !this.sock?.ws.isOpen) {
+      this.state = "disconnected";
+      this.detail = "WhatsApp connection lost; reconnecting automatically";
+    }
     return {
       platform: "whatsapp",
       state: this.state,
@@ -239,6 +246,9 @@ export class WhatsAppBaileysAdapter implements Adapter {
 
   private async connectOnce(): Promise<void> {
     const generation = ++this.connectionGeneration;
+    clearInterval(this.eventFlushTimer);
+    this.eventFlushTimer = undefined;
+    this.connectedAt = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -310,11 +320,22 @@ export class WhatsAppBaileysAdapter implements Adapter {
         this.relinking = false;
         this.reconnectAttempts = 0;
         this.qr = null;
+        this.connectedAt = Date.now();
+        clearInterval(this.eventFlushTimer);
+        this.eventFlushTimer = setInterval(() => {
+          if (this.stopped || generation !== this.connectionGeneration || this.sock !== sock) return;
+          try { drainWhatsAppEvents(sock, this.connectedAt); }
+          catch { console.error("[whatsapp:baileys] could not release buffered events"); }
+        }, 1000);
+        this.eventFlushTimer.unref?.();
         const me = sock.user?.id ? numberFromJid(sock.user.id) : undefined;
         this.detail = me ? "+" + me : undefined;
         console.log("[whatsapp:baileys] ready", this.detail || "");
       }
       if (connection === "close") {
+        clearInterval(this.eventFlushTimer);
+        this.eventFlushTimer = undefined;
+        this.connectedAt = 0;
         this.connectionGeneration++; // Retire events from this socket immediately.
         const code = (lastDisconnect?.error as any)?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
@@ -1230,6 +1251,8 @@ export class WhatsAppBaileysAdapter implements Adapter {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    clearInterval(this.eventFlushTimer);
+    this.eventFlushTimer = undefined;
     this.connectionGeneration++;
     await this.credentialsWrite;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);

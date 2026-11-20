@@ -12,7 +12,7 @@ async function fixture(browser: Browser, mode: "delayed" | "reject" | "success" 
   await page.setRequestInterception(true);
   page.on("request", request => {
     if (request.resourceType() !== "document") { void request.abort(); return; }
-    void request.respond({ contentType: "text/html", body: `<!doctype html><div id="host"></div><script>
+    void request.respond({ contentType: "text/html", body: `<!doctype html><input type="search" aria-label="Search"><input type="password" style="display:none"><div id="host"></div><script>
       window.submissions=0; window.enters=0;
       const root=document.querySelector('#host').attachShadow({mode:'open'});
       const nested=document.createElement('div');root.append(nested);const chat=nested.attachShadow({mode:'open'});
@@ -22,7 +22,7 @@ async function fixture(browser: Browser, mode: "delayed" | "reject" | "success" 
         const submit=()=>{window.submissions++;const value=inputs.map(i=>i.value).join('');
           if(${JSON.stringify(mode)}==='blank'){history.replaceState({},'', '/i/chat');chat.innerHTML='<p>Loading…</p>';return;}
           if(value==='1234'){setTimeout(inbox,300);return;}
-          const error=document.createElement('p');error.role='alert';error.textContent='Incorrect passcode';chat.append(error);
+          const error=document.createElement('p');error.role='alert';error.textContent='Your PIN is incorrect';chat.append(error);
         };
         inputs.forEach(input=>{input.oninput=()=>{chat.querySelector('[role=alert]')?.remove();if(inputs.length>1 && inputs.every(i=>i.value.length===1))submit();};input.onkeydown=e=>{if(e.key==='Enter'){window.enters++;submit();}};});
       }
@@ -49,6 +49,8 @@ test("X checks the actual inbox, submits once, and never retries a rejected code
   try {
     const page = await fixture(browser, "reject");
     const options = { accountId: "fixture-rejected", passcode: "0000", explicit: true, timeoutMs: 1500 };
+    assert.equal(await tryUnlock(page, { ...options, passcode: "123456" }), "error");
+    assert.equal(await page.evaluate(() => Reflect.get(window, "submissions")), 0, "invalid lengths never reach X");
     assert.equal(await tryUnlock(page, options), "rejected");
     assert.equal(await tryUnlock(page, options), "rejected");
     assert.deepEqual(await page.evaluate(() => [Reflect.get(window, "submissions"), Reflect.get(window, "enters")]), [1, 0]);

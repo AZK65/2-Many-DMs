@@ -12,7 +12,7 @@ import { chromeProxyServer, proxyArgs } from "../proxy";
 import { tryUnlock, type UnlockResult } from "../x-passcode";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
 import { inspectXChatGate, waitForXChatGate } from "../x-chat-gate";
-import type { XUnlockState } from "../../src/lib/x-unlock-state";
+import { isXChatPin, type XUnlockState } from "../../src/lib/x-unlock-state";
 import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate, stableXInboxDate, xInboxDateIsEstimate, xSnowflakeDate, xHistoryMatchesPreview, xMediaPreviewExpectation, type XLatestPreview } from "../x-history";
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
@@ -1130,8 +1130,8 @@ export class XAdapter implements Adapter {
     this.unlockStatus = {
       state: result === "rejected" ? "rejected" : result === "error" ? "error" : "required",
       detail: result === "rejected" ? "X did not accept that passcode. Check it before trying a different code."
-        : result === "error" ? "X has not confirmed the unlock. Check your passcode or open X to recover access."
-        : "Enter your X Chat passcode here to unlock encrypted messages.",
+        : result === "error" ? "X did not confirm whether the PIN is correct. The connection or PIN screen did not finish responding. No automatic retry was made. Check X before trying again."
+        : "Enter your 4-digit X Chat PIN to unlock encrypted messages.",
     };
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
@@ -1173,7 +1173,7 @@ export class XAdapter implements Adapter {
   /** One explicit user attempt on this account's existing browser. Never restart
    * a second session or persist a submitted passcode to disk. */
   async unlockChat(passcode: string): Promise<XUnlockState> {
-    if (!/^\d{4,32}$/.test(passcode)) throw new Error("Enter your numeric X Chat passcode, not your X password.");
+    if (!isXChatPin(passcode)) throw new Error("Enter your 4-digit X Chat PIN, not your X password.");
     if (this.manualUnlock || this.busy || this.connectPromise || this.outboundPending || this.manualRecoveryPending || this.automaticRepairRunning) throw new Error("X is busy. Wait for the current operation to finish, then try again.");
     if (this.rateLimitUntil > Date.now()) throw new Error("X is rate limiting requests. Wait for the cooldown before unlocking.");
     if (!this.page || this.page.isClosed() || !this.browser?.connected) throw new Error("X is reconnecting. Wait for the connection before entering a code.");
@@ -1181,14 +1181,14 @@ export class XAdapter implements Adapter {
     this.manualUnlock = true;
     this.busy = true;
     this.state = "starting";
-    this.unlockStatus = { state: "verifying", detail: "Checking your passcode with X and waiting for the inbox…" };
+    this.unlockStatus = { state: "verifying", detail: "Checking your 4-digit PIN with X…", startedAt: Date.now() };
     this.detail = this.unlockStatus.detail;
     try {
       await this.cooldownParkPromise;
       this.inboxRetryAt = 0;
       if (this.page.url() === "about:blank") {
         this.lastInboxNavigationAt = Date.now();
-        await this.page.goto("https://x.com/i/chat", { waitUntil: "domcontentloaded" });
+        await this.page.goto("https://x.com/i/chat", { waitUntil: "domcontentloaded", timeout: 15_000 });
       }
       const gate = await waitForXChatGate(this.page);
       if (gate === "login") { this.markLoginRequired(); return this.unlockStatus!; }

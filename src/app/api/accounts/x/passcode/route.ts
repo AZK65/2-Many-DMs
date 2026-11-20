@@ -2,13 +2,13 @@ import { sameSetupOrigin, setupBody } from "@/lib/setup-origin";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser, clientIp } from "@/lib/currentUser";
-import type { XUnlockState } from "@/lib/x-unlock-state";
+import { isXChatPin, type XUnlockState } from "@/lib/x-unlock-state";
 export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   if (!sameSetupOrigin(req)) return NextResponse.json({ error: "Open setup from your app to continue." }, { status: 403 });
   const { accountId, passcode } = await setupBody(req);
-  if (typeof accountId !== "string" || typeof passcode !== "string" || !/^\d{4,32}$/.test(passcode)) {
-    return NextResponse.json({ error: "Enter the numeric passcode you use to open X Chat. Do not enter your X password." }, { status: 400 });
+  if (typeof accountId !== "string" || !isXChatPin(passcode)) {
+    return NextResponse.json({ error: "Enter your 4-digit X Chat PIN. This is the code you created in X Chat, not your account password or a login verification code." }, { status: 400 });
   }
   try {
     const user = await getCurrentUser(clientIp(req));
