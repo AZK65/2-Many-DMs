@@ -28,6 +28,7 @@ import type {
 import { startOcrIndexer } from "./ocr";
 import { ConnectorOperations } from "./connector-operations";
 import { MessageMutations } from "./message-mutations";
+import { GroupMembership } from "./group-membership";
 import { acquireWorkerLocks } from "./worker-lock";
 import { recordDeliveryReceipt } from "./delivery-receipt";
 import { MessageRetention, canonicalWhatsAppMessage } from "./retention";
@@ -44,6 +45,7 @@ const accountMeta = new Map<string, { platform: string; label: string | null }>(
 const accountVersions = new Map<string, string>();
 const connectorOperations = new ConnectorOperations<Adapter>();
 const messageMutations = new MessageMutations(prisma, id => adapters.get(id), (adapter, task) => connectorOperations.send(adapter, task));
+const groupMembership = new GroupMembership(prisma, id => adapters.get(id), (adapter, task) => connectorOperations.send(adapter, task));
 let adapterReload: Promise<void> | undefined;
 let controlServer: http.Server | undefined;
 let recoveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -518,6 +520,26 @@ function resolveAdapter(body: {
 function startControlServer(): Promise<void> {
   const port = Number(process.env.SYNC_CONTROL_PORT || 4001);
   controlServer = http.createServer(async (req, res) => {
+      if (req.method === "POST" && ["/group/members/resolve", "/group/members/add"].includes(req.url || "")) {
+        res.setHeader("Content-Type", "application/json");
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {
+          res.writeHead(403); return res.end(JSON.stringify({ error: "Local workspace requests only." }));
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 12_000) { res.writeHead(413); return res.end(JSON.stringify({ error: "Too many people selected." })); }
+          }
+          const input = JSON.parse(body);
+          const result = await withDeadline<unknown>(req.url?.endsWith("/resolve") ? groupMembership.resolve(input) : groupMembership.execute(input), 60_000, "Group membership check");
+          return res.end(JSON.stringify({ result }));
+        } catch (error) {
+          res.writeHead(409); return res.end(JSON.stringify({ error: error instanceof OperationTimeoutError
+            ? "Could not confirm the result yet. Check the native group before trying again; this action is not automatically retried."
+            : error instanceof Error ? error.message : "Group action failed." }));
+        }
+      }
       if (req.method === "POST" && req.url === "/x/unlock") {
         res.setHeader("Content-Type", "application/json");
         if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {

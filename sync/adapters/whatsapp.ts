@@ -1,4 +1,5 @@
 import path from "node:path";
+import { addWebGroupMember } from "../group-member-transports";
 import { randomUUID } from "node:crypto";
 import { Client, LocalAuth, MessageMedia } from "whatsapp-web.js";
 import { downloadContentFromMessage } from "@whiskeysockets/baileys";
@@ -1556,6 +1557,11 @@ export class WhatsAppAdapter implements Adapter {
       console.error("[whatsapp] sent message id lookup failed:", error);
     }
     return null;
+  }
+
+  async addGroupMember(chatExternalId: string, participantKey: string) {
+    await this.ensureReady();
+    return addWebGroupMember(this.client, chatExternalId, participantKey);
   }
 
   async createGroup(

@@ -165,6 +165,7 @@ export interface InboundReaction {
 
 export interface Adapter {
   platform: Platform;
+  addGroupMember?(chatExternalId: string, participantKey: string): Promise<Pick<import("../../src/lib/group-membership").MemberResult, "status" | "detail">>;
   editMessage?(chatExternalId: string, messageExternalId: string, body: string, context?: { expectedBody: string }): Promise<void>;
   deleteMessage?(chatExternalId: string, messageExternalId: string, context?: { expectedBody: string }): Promise<void>;
   start(

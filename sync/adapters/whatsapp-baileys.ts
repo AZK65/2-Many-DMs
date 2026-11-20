@@ -1,4 +1,5 @@
 import path from "node:path";
+import { addBaileysGroupMember } from "../group-member-transports";
 import fs from "node:fs";
 import QRCode from "qrcode";
 import qrcodeTerminal from "qrcode-terminal";
@@ -992,6 +993,11 @@ export class WhatsAppBaileysAdapter implements Adapter {
     await sock.sendMessage(jidNormalizedUser(chatExternalId), {
       react: { text: reaction.remove ? "" : reaction.emoji, key },
     });
+  }
+
+  async addGroupMember(chatExternalId: string, participantKey: string) {
+    await this.ensureReady();
+    return addBaileysGroupMember(this.sock, chatExternalId, participantKey);
   }
 
   async createGroup(

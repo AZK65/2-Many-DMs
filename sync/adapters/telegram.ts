@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { addTelegramGroupMember } from "../group-member-transports";
 import { randomUUID } from "node:crypto";
 import { Api, TelegramClient, utils } from "telegram";
 import bigInt from "big-integer";
@@ -1059,6 +1060,11 @@ export class TelegramAdapter implements Adapter {
         addToRecent: !reaction.remove,
       })
     );
+  }
+
+  async addGroupMember(chatExternalId: string, participantKey: string) {
+    await this.ensureReady();
+    return addTelegramGroupMember(this.client, Api, await this.resolvePeer(parseTarget(chatExternalId).id), participantKey);
   }
 
   async createGroup(

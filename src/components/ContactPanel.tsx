@@ -11,6 +11,7 @@ import { PLATFORMS } from "@/lib/platforms";
 import { Avatar } from "./Avatar";
 
 import { GroupMembers } from "./GroupMembers";
+import { AddGroupPeople } from "./AddGroupPeople";
 import { LinkedChats } from "./LinkedChats";
 
 import {
@@ -237,7 +238,7 @@ export function ContactPanel({
       </div>
 
       {conversation.isGroup && (
-        <Section title="People seen in this group">
+        <Section title="People" action={readOnly ? undefined : <AddGroupPeople conversationId={conversation.id} platform={conversation.platform} />}>
           <GroupMembers
             conversationId={conversation.id}
             platform={conversation.platform}
