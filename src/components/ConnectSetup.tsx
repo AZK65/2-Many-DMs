@@ -7,7 +7,7 @@ import { PLATFORMS, type Platform } from "@/lib/platforms";
 import { fetchJson } from "@/lib/fetch-json";
 import type { SetupConnections } from "@/lib/connection-setup";
 import { WhatsAppLinkCode } from "./WhatsAppLinkCode";
-import { isXChatPin, X_CHAT_PIN_LENGTH, xInboxVerified, xNeedsUnlock, type XUnlockState } from "@/lib/x-unlock-state";
+import { isXChatPin, X_CHAT_PIN_LENGTH, latestXUnlockState, xUnlockCheckExpired, X_UNLOCK_UI_TIMEOUT_MS, xInboxVerified, xNeedsUnlock, type XUnlockState } from "@/lib/x-unlock-state";
 
 export const setupButton = "rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-offset-neutral-900";
 export const setupSecondary = "rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors duration-200 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800";
@@ -72,7 +72,6 @@ export function useSetupConnections() {
 export function ConnectionProgress({ accountId, platform, onReady }: { accountId: string; platform: Platform; onReady?: () => void }) {
   const { connections, error } = useSetupConnections();
   const live = connections?.platforms.accounts?.find(a => a.accountId === accountId);
-  const ready = connections?.workerRunning && (platform === "x" ? xInboxVerified(live) : live?.state === "ready");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [passcode, setPasscode] = useState("");
@@ -81,19 +80,44 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
   const [showCode, setShowCode] = useState(false);
   const [checkStartedAt, setCheckStartedAt] = useState(0);
   const [now, setNow] = useState(Date.now);
-  const unlockRequest = useRef(false);
-  const checkingCode = unlockRequest.current || (!unlockResult && !unlockError && live?.unlock?.state === "verifying");
-  const checkOverdue = checkingCode && now - (checkStartedAt || live?.unlock?.startedAt || now) >= 75_000;
-  const needsCode = platform === "x" && xNeedsUnlock(live);
-  const feedback = unlockResult || live?.unlock;
+  const unlockRequest = useRef<AbortController | null>(null);
+  const feedback = latestXUnlockState(live?.unlock, unlockResult);
+  const checking = Boolean(unlockRequest.current) || (!unlockError && feedback?.state === "verifying");
+  const checkOverdue = checking && xUnlockCheckExpired(checkStartedAt || feedback?.startedAt || 0, now);
+  const checkingCode = checking && !checkOverdue;
+  const ready = !checking && connections?.workerRunning && (platform === "x" ? xInboxVerified(live) : live?.state === "ready");
+  const needsCode = platform === "x" && (xNeedsUnlock(live) || checking || Boolean(unlockError));
   const notified = useRef(false);
   const callback = useRef(onReady); callback.current = onReady;
   useEffect(() => { if (ready && !notified.current) { notified.current = true; callback.current?.(); } }, [ready]);
   useEffect(() => {
-    if (!checkingCode) return;
+    if (!checking) return;
+    // Older workers may omit startedAt. Start a local deadline once instead
+    // of resetting it on every render, which used to leave "Checking" forever.
+    if (!checkStartedAt || (!unlockRequest.current && (feedback?.startedAt || 0) > checkStartedAt)) setCheckStartedAt(feedback?.startedAt || Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [checkingCode]);
+  }, [checking, checkStartedAt, feedback?.startedAt]);
+  useEffect(() => {
+    if (!checkOverdue) return;
+    unlockRequest.current?.abort(); unlockRequest.current = null;
+    setBusy(false); setPasscode("");
+    setUnlockError("X did not return a result in time. This does not mean your PIN is wrong. Check the connection before trying again; no automatic retry was made.");
+  }, [checkOverdue]);
+  useEffect(() => () => { unlockRequest.current?.abort(); unlockRequest.current = null; }, []);
+  useEffect(() => {
+    const update = live?.unlock;
+    if (!unlockRequest.current || !update || update.state === "verifying" || update.state === "required" ||
+      (update.updatedAt ?? update.startedAt ?? 0) < checkStartedAt) return;
+    // A lost POST response must not conceal the result already received by
+    // status polling. Aborting the local fetch never resubmits the PIN.
+    unlockRequest.current.abort(); unlockRequest.current = null;
+    setUnlockResult(update); setUnlockError(""); setBusy(false); setPasscode("");
+  }, [live?.unlock, checkStartedAt]);
+  useEffect(() => {
+    if (live?.unlock?.state !== "unlocked") return;
+    setUnlockError("");
+  }, [live?.unlock?.state, live?.unlock?.updatedAt]);
   async function start() {
     if (busy) return;
     setBusy(true); setMessage("");
@@ -105,19 +129,23 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
   }
   async function unlock(e: React.FormEvent) {
     e.preventDefault(); if (busy || checkingCode || unlockRequest.current || !isXChatPin(passcode)) return;
-    unlockRequest.current = true; setBusy(true); setMessage(""); setUnlockError(""); setUnlockResult(null);
+    const controller = new AbortController();
+    unlockRequest.current = controller; setBusy(true); setMessage(""); setUnlockError(""); setUnlockResult(null);
     setCheckStartedAt(Date.now()); setNow(Date.now());
     const code = passcode; setShowCode(false);
     try {
-      const result = await fetchJson<{ unlock: XUnlockState }>("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode: code }), signal: AbortSignal.timeout(95_000) }, "X Chat unlock");
-      setUnlockResult(result.unlock);
-    } catch (cause) { setUnlockError((cause as Error).name === "TimeoutError" ? "X did not return a result in time. This does not mean your PIN is wrong. Check X before trying again; no automatic retry was made." : (cause as Error).message); }
-    finally { unlockRequest.current = false; setBusy(false); setPasscode(""); }
+      const result = await fetchJson<{ unlock: XUnlockState }>("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode: code }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(X_UNLOCK_UI_TIMEOUT_MS)]) }, "X Chat unlock");
+      if (unlockRequest.current === controller) setUnlockResult(result.unlock);
+    } catch (cause) {
+      if (unlockRequest.current === controller) setUnlockError((cause as Error).name === "TimeoutError" ? "X did not return a result in time. This does not mean your PIN is wrong. Check X before trying again; no automatic retry was made." : (cause as Error).message);
+    } finally {
+      if (unlockRequest.current === controller) { unlockRequest.current = null; setBusy(false); setPasscode(""); }
+    }
   }
   return <div className="space-y-4">
     <div role="status" className={`rounded-xl p-4 ${ready ? "bg-accent/10" : "bg-slate-50 dark:bg-neutral-800"}`}>
       <p className="text-sm font-semibold">{checkOverdue ? "X has not returned a result" : checkingCode ? "Checking your PIN with X…" : ready ? "Connected and ready" : feedback?.state === "rejected" ? "Incorrect PIN" : feedback?.state === "error" || unlockError ? "Could not verify your PIN" : needsCode ? "Unlock your X chats" : !connections ? "Checking your connection" : !connections.workerRunning ? "Account saved. Start sync to continue" : live?.state === "disconnected" || live?.state === "disabled" ? "Connection needs attention" : "Account saved. Connecting…"}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">{ready ? "Your inbox is available. Older chats may continue importing in the background; connection does not mean all history is loaded." : checkOverdue ? "Verification is taking too long. You can close setup and check X. This does not mean the PIN is wrong; we will not retry it automatically." : needsCode ? checkingCode ? "Waiting for X to accept or reject your PIN and open the inbox." : "Use the 4-digit PIN you created when setting up X Chat." : live?.detail || (platform === "whatsapp" ? "Your account slot is saved. Link your phone when the QR appears. You can reopen setup to finish later." : "Your login is saved on this server. You can close setup without losing it.")}</p>
+      <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">{ready ? "Your inbox is available. Older chats may continue importing in the background; connection does not mean all history is loaded." : checkOverdue ? "Verification is taking too long. You can close setup and check X. This does not mean the PIN is wrong; we will not retry it automatically." : needsCode ? checkingCode ? `${feedback?.state === "verifying" ? feedback.detail : "Waiting for X to accept or reject your PIN and open the inbox."} This check stops after 45 seconds.` : "Use the 4-digit PIN you created when setting up X Chat." : live?.detail || (platform === "whatsapp" ? "Your account slot is saved. Link your phone when the QR appears. You can reopen setup to finish later." : "Your login is saved on this server. You can close setup without losing it.")}</p>
     </div>
     {connections && !connections.workerRunning && <button type="button" disabled={busy} onClick={start} className={setupButton}>{busy ? "Starting sync…" : "Start sync"}</button>}
     {needsCode && <form onSubmit={unlock} className="space-y-3" aria-busy={checkingCode}>

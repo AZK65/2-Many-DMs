@@ -10,6 +10,7 @@ import { XAvatarSources } from "../x-avatar-sources";
 import { cleanChromeLocks, HARDENED_CHROME_ARGS } from "../chrome-locks";
 import { chromeProxyServer, proxyArgs } from "../proxy";
 import { tryUnlock, type UnlockResult } from "../x-passcode";
+import { runXUnlockAttempt, unlockStep, XUnlockTimeout } from "../x-unlock-attempt";
 import { isXRateLimitRelevant, xRateLimitTransition, xRetryDeadline } from "../x-rate-limit";
 import { inspectXChatGate, waitForXChatGate } from "../x-chat-gate";
 import { isXChatPin, type XUnlockState } from "../../src/lib/x-unlock-state";
@@ -1128,6 +1129,8 @@ export class XAdapter implements Adapter {
     this.state = "disconnected";
     if (this.rateLimitUntil <= Date.now()) this.inboxRetryAt = 0;
     this.unlockStatus = {
+      startedAt: this.unlockStatus?.startedAt,
+      updatedAt: Date.now(),
       state: result === "rejected" ? "rejected" : result === "error" ? "error" : "required",
       detail: result === "rejected" ? "X did not accept that passcode. Check it before trying a different code."
         : result === "error" ? "X did not confirm whether the PIN is correct. The connection or PIN screen did not finish responding. No automatic retry was made. Check X before trying again."
@@ -1166,7 +1169,7 @@ export class XAdapter implements Adapter {
 
   private markLoginRequired(): void {
     this.markLocked("error");
-    this.unlockStatus = { state: "login-required", detail: "Your X login expired. Sign in again from Connections before unlocking chats." };
+    this.unlockStatus = { state: "login-required", detail: "Your X login expired. Sign in again from Connections before unlocking chats.", updatedAt: Date.now() };
     this.detail = this.unlockStatus.detail;
   }
 
@@ -1178,29 +1181,48 @@ export class XAdapter implements Adapter {
     if (this.rateLimitUntil > Date.now()) throw new Error("X is rate limiting requests. Wait for the cooldown before unlocking.");
     if (!this.page || this.page.isClosed() || !this.browser?.connected) throw new Error("X is reconnecting. Wait for the connection before entering a code.");
     const lifecycle = this.lifecycleVersion;
+    const page = this.page;
+    const browser = this.browser;
     this.manualUnlock = true;
     this.busy = true;
     this.state = "starting";
-    this.unlockStatus = { state: "verifying", detail: "Checking your 4-digit PIN with X…", startedAt: Date.now() };
+    this.unlockStatus = { state: "verifying", detail: "Opening X’s PIN screen…", startedAt: Date.now(), updatedAt: Date.now() };
     this.detail = this.unlockStatus.detail;
     try {
-      await this.cooldownParkPromise;
-      this.inboxRetryAt = 0;
-      if (this.page.url() === "about:blank") {
-        this.lastInboxNavigationAt = Date.now();
-        await this.page.goto("https://x.com/i/chat", { waitUntil: "domcontentloaded", timeout: 15_000 });
-      }
-      const gate = await waitForXChatGate(this.page);
-      if (gate === "login") { this.markLoginRequired(); return this.unlockStatus!; }
-      const result = gate === "inbox" ? "not-locked" : gate === "locked"
-        ? await tryUnlock(this.page, { passcode, accountId: this.accountId, explicit: true }) : "error";
+      const result = await runXUnlockAttempt(async signal => {
+        await unlockStep(signal, async () => { await this.cooldownParkPromise; });
+        this.inboxRetryAt = 0;
+        if (page.url() === "about:blank") {
+          this.lastInboxNavigationAt = Date.now();
+          await unlockStep(signal, () => page.goto("https://x.com/i/chat", { waitUntil: "domcontentloaded", timeout: 15_000 }));
+        }
+        const gate = await waitForXChatGate(page, 20_000, signal);
+        if (gate === "login") return "login" as const;
+        return gate === "inbox" ? "not-locked" : gate === "locked"
+          ? await tryUnlock(page, { passcode, accountId: this.accountId, explicit: true, signal,
+              onPhase: detail => {
+                if (this.stopping || lifecycle !== this.lifecycleVersion || signal.aborted) return;
+                this.unlockStatus = { state: "verifying", detail, startedAt: this.unlockStatus?.startedAt, updatedAt: Date.now() };
+                this.detail = detail;
+              } }) : "error";
+      }, async () => {
+        // A timed-out browser command may still be pending. Close its target
+        // before allowing another PIN attempt; never replay the submitted PIN.
+        let closeTimer: ReturnType<typeof setTimeout>;
+        const closed = await Promise.race([page.close().then(() => true, () => false),
+          new Promise<false>(resolve => { closeTimer = setTimeout(() => resolve(false), 3000); })]);
+        clearTimeout(closeTimer!);
+        if (!closed && !page.isClosed()) browser.process()?.kill("SIGKILL");
+        if (!this.stopping && lifecycle === this.lifecycleVersion) this.scheduleReconnect();
+      });
       if (this.stopping || lifecycle !== this.lifecycleVersion) return { state: "error", detail: "The X connection restarted before verification finished. Reopen setup to check its status." };
+      if (result === "login") { this.markLoginRequired(); return this.unlockStatus!; }
       if (result !== "unlocked" && result !== "not-locked") {
         this.markLocked(result);
         return this.unlockStatus!;
       }
       if (result === "unlocked") this.unlockedPasscode = passcode;
-      this.unlockStatus = { state: "unlocked", detail: result === "unlocked" ? "X confirmed the unlock. Your inbox is available and syncing resumes." : "Your X inbox is already unlocked. No code was submitted; syncing resumes." };
+      this.unlockStatus = { state: "unlocked", startedAt: this.unlockStatus?.startedAt, updatedAt: Date.now(), detail: result === "unlocked" ? "X confirmed the unlock. Your inbox is available and syncing resumes." : "Your X inbox is already unlocked. No code was submitted; syncing resumes." };
       this.inboxFailures = 0;
       this.state = "ready";
       this.detail = undefined;
@@ -1210,9 +1232,13 @@ export class XAdapter implements Adapter {
       if (!this.liveTimer) this.liveTimer = setInterval(() => void this.syncLivePreviews().catch(() => null), 5000);
       this.scheduleAutomaticRepair();
       return this.unlockStatus;
-    } catch {
+    } catch (error) {
       if (this.stopping || lifecycle !== this.lifecycleVersion) return { state: "error", detail: "The X connection closed before verification finished. Reopen setup to check its status." };
       this.markLocked("error");
+      if (error instanceof XUnlockTimeout) {
+        this.unlockStatus!.detail = "X did not finish checking your PIN within 45 seconds. This does not mean it was incorrect. The stalled PIN screen was closed and the connection is restarting; no automatic PIN retry was made.";
+        this.detail = this.unlockStatus!.detail;
+      }
       return this.unlockStatus!;
     } finally {
       if (lifecycle === this.lifecycleVersion) this.busy = false;

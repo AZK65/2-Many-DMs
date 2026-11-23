@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     // Never start a second session or confuse saving a code with verification.
     const response = await fetch(`${process.env.SYNC_CONTROL_URL || "http://localhost:4001"}/x/unlock`, {
       method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
-      body: JSON.stringify({ accountId, passcode }), signal: AbortSignal.timeout(90_000),
+      body: JSON.stringify({ accountId, passcode }), signal: AbortSignal.timeout(55_000),
     });
     const result = await response.json() as { unlock?: XUnlockState; error?: string };
     if (!response.ok || !result.unlock) return NextResponse.json({ error: result.error || "Start or update the sync worker, then try unlocking again." }, { status: response.ok ? 503 : response.status });

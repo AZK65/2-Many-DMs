@@ -1,4 +1,5 @@
 import type { Page } from "puppeteer";
+import { unlockStep } from "./x-unlock-attempt";
 
 export type XChatGate = "inbox" | "locked" | "login" | "loading";
 
@@ -21,10 +22,10 @@ export async function inspectXChatGate(page: Page): Promise<XChatGate> {
   });
 }
 
-export async function waitForXChatGate(page: Page, timeoutMs = 20_000): Promise<XChatGate> {
+export async function waitForXChatGate(page: Page, timeoutMs = 20_000, signal?: AbortSignal): Promise<XChatGate> {
   const deadline = Date.now() + timeoutMs;
   do {
-    const state = await inspectXChatGate(page).catch(() => "loading" as const);
+    const state = await unlockStep(signal, () => inspectXChatGate(page).catch(() => "loading" as const));
     if (state !== "loading") return state;
     await new Promise(resolve => setTimeout(resolve, 250));
   } while (!page.isClosed() && Date.now() < deadline);

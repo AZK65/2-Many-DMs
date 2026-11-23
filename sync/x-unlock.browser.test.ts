@@ -75,6 +75,36 @@ test("X loading is not unlock success, and unknown attempts are not repeated in 
   } finally { await browser.close(); }
 });
 
+test("PIN entry survives covered slots and inputs replaced after every digit", async () => {
+  const browser = await puppeteer.launch({ channel: "chrome", headless: true });
+  try {
+    const page = await fixture(browser, "empty");
+    await page.evaluate(`(() => {
+      history.replaceState({}, "", "/i/chat/pin/recovery");
+      const root = document.querySelector("#host").shadowRoot.firstElementChild.shadowRoot;
+      const digits = ["", "", "", ""];
+      const render = () => {
+        root.innerHTML = '<p>Enter passcode</p><div style="position:relative"><div style="position:absolute;inset:0;z-index:2"></div>' +
+          digits.map((_, i) => '<input type="text" inputmode="numeric" maxlength="1" aria-label="Digit ' + (i + 1) + ' of 4">').join("") + '</div>';
+        root.querySelectorAll("input").forEach((input, i) => {
+          input.value = digits[i];
+          input.oninput = () => {
+            digits[i] = input.value;
+            if (digits.every(Boolean)) {
+              Reflect.set(window, "submissions", Number(Reflect.get(window, "submissions")) + 1);
+              history.replaceState({}, "", "/i/chat");
+              root.innerHTML = '<div data-testid="dm-conversation-scroller"></div>';
+            } else render();
+          };
+        });
+      };
+      render();
+    })()`);
+    assert.equal(await tryUnlock(page, { accountId: "fixture-replaced-inputs", passcode: "1234", explicit: true, timeoutMs: 1000 }), "unlocked");
+    assert.equal(await page.evaluate(() => Reflect.get(window, "submissions")), 1);
+  } finally { await browser.close(); }
+});
+
 test("manual unlock preserves cooldowns, rejects overlapping attempts, resumes loops, and reports expired login", async () => {
   const browser = await puppeteer.launch({ channel: "chrome", headless: true });
   // Construct only the transport state, avoiding the real adapter's disk/store setup.

@@ -2,6 +2,7 @@ import type { Page } from "puppeteer";
 import { createHash } from "node:crypto";
 import { inspectXChatGate } from "./x-chat-gate";
 import { isXChatPin } from "../src/lib/x-unlock-state";
+import { unlockStep } from "./x-unlock-attempt";
 
 /* XChat (X's encrypted DMs) gates the inbox behind a numeric passcode. On a
    machine with a screen you type it yourself (`npm run x:unlock`); on a headless
@@ -43,43 +44,58 @@ export async function isLocked(page: Page): Promise<boolean> {
 
 // Type the passcode and submit. The gate renders one <input> per digit; older
 // builds use a single field, so handle both.
-async function enterPasscode(page: Page, passcode: string): Promise<void> {
+async function enterPasscode(page: Page, passcode: string, signal?: AbortSignal): Promise<void> {
   // X keeps unrelated search and hidden inputs mounted around its Chat gate.
   // Never count those as PIN slots or type a credential into them.
-  const candidates = await page.$$("pierce/input");
-  const inputs = [];
+  const candidates = await unlockStep(signal, () => page.$$("pierce/input"));
+  const inputs: typeof candidates = [];
   for (const input of candidates) {
-    const eligible = await input.evaluate(el => {
+    const eligible = await unlockStep(signal, () => input.evaluate(el => {
       const field = el as HTMLInputElement;
       const style = getComputedStyle(field);
       return !field.disabled && !field.readOnly && field.getBoundingClientRect().width > 0 &&
         field.getBoundingClientRect().height > 0 && style.visibility !== "hidden" && style.display !== "none" &&
         (field.type === "password" || field.inputMode === "numeric" || /passcode|\bpin\b/i.test(`${field.name} ${field.getAttribute("aria-label") || ""} ${field.placeholder}`));
-    });
+    }));
     if (eligible) inputs.push(input); else await input.dispose();
   }
   if (inputs.length !== 1 && inputs.length !== 4) throw new Error("X PIN fields are not ready");
 
-  // Clear first — a half-finished earlier attempt leaves digits behind.
-  for (const input of inputs) {
-    await input.click({ clickCount: 3 });
-    await page.keyboard.press("Backspace");
-  }
-
-  if (inputs.length > 1 && inputs.length !== passcode.length) throw new Error("passcode length does not match the gate");
-  if (inputs.length > 1) {
-    for (let i = 0; i < passcode.length; i++) {
-      await inputs[i].click();
-      await page.keyboard.type(passcode[i], { delay: 90 });
-    }
-  } else {
-    await inputs[0].click();
-    await page.keyboard.type(passcode, { delay: 120 });
-  }
-
-  // Digit gates submit on the final digit. Enter would submit a rejected code
-  // twice, or hit a control on the newly opened inbox.
-  if (inputs.length === 1) await page.keyboard.press("Enter");
+  const count = inputs.length;
+  try {
+    // Focus inputs directly. Clicking a segmented PIN slot can land on its
+    // decorative overlay. Re-query after each change: X may replace its inputs.
+    const field = async (index: number, action: (input: typeof inputs[number]) => Promise<void>) => {
+      const fresh = await unlockStep(signal, () => page.$$("pierce/input"));
+      try {
+        const eligible: typeof candidates = [];
+        for (const input of fresh) if (await unlockStep(signal, () => input.evaluate(el => {
+          const f = el as HTMLInputElement, r = f.getBoundingClientRect();
+          return !f.disabled && !f.readOnly && r.width > 0 && r.height > 0 && getComputedStyle(f).visibility !== "hidden" &&
+            (f.type === "password" || f.inputMode === "numeric" || /passcode|\bpin\b/i.test(`${f.name} ${f.getAttribute("aria-label") || ""} ${f.placeholder}`));
+        }))) eligible.push(input);
+        if (eligible.length !== count) throw new Error("X PIN fields changed before entry finished");
+        await action(eligible[index]);
+      } finally { await Promise.all(fresh.map(input => input.dispose().catch(() => null))); }
+    };
+    for (let i = 0; i < count; i++) await field(i, async input => {
+      if (!await unlockStep(signal, () => input.evaluate(el => (el as HTMLInputElement).value.length > 0))) return;
+      await unlockStep(signal, () => input.focus());
+      await unlockStep(signal, () => input.evaluate(el => (el as HTMLInputElement).select()));
+      await unlockStep(signal, () => page.keyboard.press("Backspace"));
+    });
+    if (count === 4) {
+      for (let i = 0; i < passcode.length; i++) await field(i, async input => {
+        await unlockStep(signal, () => input.focus());
+        await unlockStep(signal, () => page.keyboard.type(passcode[i], { delay: 90 }));
+      });
+    } else await field(0, async input => {
+      await unlockStep(signal, () => input.focus());
+      for (const digit of passcode) await unlockStep(signal, () => page.keyboard.type(digit, { delay: 90 }));
+      await unlockStep(signal, () => page.keyboard.press("Enter"));
+    });
+    // Segmented gates submit on the final digit. Never send Enter as well.
+  } finally { await Promise.all(inputs.map(input => input.dispose().catch(() => null))); }
 }
 
 export type UnlockResult =
@@ -116,8 +132,8 @@ async function hasExplicitPasscodeError(page: Page): Promise<boolean> {
   }
 }
 
-export async function tryUnlock(page: Page, options: { passcode?: string; accountId?: string; explicit?: boolean; timeoutMs?: number } = {}): Promise<UnlockResult> {
-  const gate = await inspectXChatGate(page);
+export async function tryUnlock(page: Page, options: { passcode?: string; accountId?: string; explicit?: boolean; timeoutMs?: number; signal?: AbortSignal; onPhase?: (detail: string) => void } = {}): Promise<UnlockResult> {
+  const gate = await unlockStep(options.signal, () => inspectXChatGate(page));
   if (gate === "inbox") return "not-locked";
   if (gate !== "locked") return "error";
 
@@ -129,7 +145,9 @@ export async function tryUnlock(page: Page, options: { passcode?: string; accoun
   if (uncertain.has(key) && !options.explicit) return "error";
 
   try {
-    await enterPasscode(page, passcode);
+    options.onPhase?.("Entering your PIN into X…");
+    await enterPasscode(page, passcode, options.signal);
+    options.onPhase?.("PIN entered. Waiting for X to accept it and open your inbox…");
     // XChat can spend well over seven seconds restoring its encrypted inbox.
     // Wait for the actual chat surface, and only call the passcode rejected
     // when X renders an explicit error. A slow unlock must not become a false
@@ -137,12 +155,12 @@ export async function tryUnlock(page: Page, options: { passcode?: string; accoun
     const deadline = Date.now() + (options.timeoutMs ?? 30_000);
     do {
       await wait(250);
-      if (await inspectXChatGate(page) === "inbox") {
+      if (await unlockStep(options.signal, () => inspectXChatGate(page)) === "inbox") {
         uncertain.delete(key);
         console.log("[x] XChat unlock confirmed by the inbox");
         return "unlocked";
       }
-      if (await hasExplicitPasscodeError(page)) {
+      if (await unlockStep(options.signal, () => hasExplicitPasscodeError(page))) {
         rejected.add(key);
         // Never log the passcode itself.
         console.error(

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isXChatPin, xInboxVerified, xNeedsUnlock } from "./x-unlock-state";
+import { isXChatPin, latestXUnlockState, xUnlockCheckExpired, xInboxVerified, xNeedsUnlock } from "./x-unlock-state";
 
 test("X Chat accepts exactly four digits and preserves leading zeroes", () => {
   assert.equal(isXChatPin("0123"), true);
@@ -22,4 +22,15 @@ test("setup distinguishes passcode locks from an expired account login", () => {
   assert.equal(xNeedsUnlock({ unlock: { state: "rejected", detail: "Check your code" } }), true);
   assert.equal(xNeedsUnlock({ detail: "Unlock needs login", unlock: { state: "login-required", detail: "Sign in again" } }), false);
   assert.equal(xNeedsUnlock({ unlock: { state: "unlocked", detail: "Inbox verified" } }), false);
+});
+
+test("old polling cannot hide a completed attempt, and newer success replaces an old error", () => {
+  const checking = { state: "verifying" as const, detail: "checking", startedAt: 100, updatedAt: 110 };
+  const failed = { state: "error" as const, detail: "unknown", startedAt: 100, updatedAt: 200 };
+  const success = { state: "unlocked" as const, detail: "confirmed", updatedAt: 300 };
+  assert.equal(latestXUnlockState(checking, failed), failed);
+  assert.equal(latestXUnlockState(success, failed), success);
+  assert.equal(latestXUnlockState(undefined, failed), failed);
+  assert.equal(xUnlockCheckExpired(1000, 60_999), false);
+  assert.equal(xUnlockCheckExpired(1000, 61_000), true);
 });
