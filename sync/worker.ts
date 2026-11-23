@@ -31,6 +31,7 @@ import { MessageMutations } from "./message-mutations";
 import { GroupMembership } from "./group-membership";
 import { acquireWorkerLocks } from "./worker-lock";
 import { recordDeliveryReceipt } from "./delivery-receipt";
+import { DeliveryAttempts } from "./delivery-attempts";
 import { MessageRetention, canonicalWhatsAppMessage } from "./retention";
 import fs from "node:fs";
 import { AvatarBackfill } from "./avatar-backfill";
@@ -76,7 +77,7 @@ function withDeadline<T>(operation: Promise<T>, timeoutMs: number, label: string
   });
 }
 
-const sendOperations = new Map<string, Promise<SentMessage>>();
+const sendOperations = new DeliveryAttempts<SentMessage>();
 
 function isUncertainSendError(error: unknown): boolean {
   const message = String(error);
@@ -91,7 +92,7 @@ function isUncertainSendError(error: unknown): boolean {
     return false;
   // Once X's trusted Send click has happened, any later exception is an
   // uncertain confirmation result—not proof that delivery failed.
-  if (/waiting for X acceptance failed/i.test(message)) return true;
+  if (/(?:sending message|waiting for X acceptance) failed/i.test(message)) return true;
   if (error instanceof OperationTimeoutError) return true;
   return /timeout|timed out|enet|econn|fetch failed|socket|not connected|connection closed|disconnected|network|detached frame|target closed/i.test(
     message
@@ -205,89 +206,83 @@ function trackedSend(
   media?: OutboundMedia,
   mentions?: string[],
   replyToExternalId?: string,
-  context?: OutboundSendContext
+  context?: OutboundSendContext,
+  sendAttempt = 1
 ): Promise<SentMessage> {
-  if (pendingMessageId) {
-    const existing = sendOperations.get(pendingMessageId);
-    if (existing) return existing;
-  }
-  const operation = connectorOperations
-    .send(adapter, () => adapter.send(chatExternalId, body, media, mentions, replyToExternalId, context))
-    .then(async (sent) => {
-      if (pendingMessageId) {
-        await markDeliverySent(
-          pendingMessageId,
-          sent,
-          adapter.platform === "x" && context?.inboxCategory === "spam"
-        );
-        if (sent.messageExternalId.includes(":pending:")) {
-          const provisionalKey = sent.messageExternalId;
-          const echoTimeoutMs = Math.max(
-            45_000,
-            Number(
-              adapter.platform === "x"
-                ? process.env.X_DELIVERY_ECHO_TIMEOUT_MS || 90_000
-                : process.env.WHATSAPP_DELIVERY_ECHO_TIMEOUT_MS || 45_000
-            )
+  return sendOperations.run(pendingMessageId, sendAttempt, () => {
+    const operation = connectorOperations
+      .send(adapter, () => adapter.send(chatExternalId, body, media, mentions, replyToExternalId, context))
+      .then(async (sent) => {
+        if (pendingMessageId) {
+          await markDeliverySent(
+            pendingMessageId,
+            sent,
+            adapter.platform === "x" && context?.inboxCategory === "spam"
           );
-          const echoWatchdog = setTimeout(() => {
-            void prisma.message.updateMany({
-              where: {
-                id: pendingMessageId,
-                externalKey: provisionalKey,
-                deliveryStatus: "sent",
-              },
-              data: {
-                deliveryStatus: "unconfirmed",
-                deliveryError:
-                  `${adapter.platform === "x" ? "X" : "WhatsApp"} accepted the send, but did not return its final message confirmation. Check the native app before retrying.`,
-              },
-            }).catch((error) =>
-              console.error(
-                `[${adapter.platform}] delivery echo watchdog failed:`,
-                error
+          if (sent.messageExternalId.includes(":pending:")) {
+            const provisionalKey = sent.messageExternalId;
+            const echoTimeoutMs = Math.max(
+              45_000,
+              Number(
+                adapter.platform === "x"
+                  ? process.env.X_DELIVERY_ECHO_TIMEOUT_MS || 90_000
+                  : process.env.WHATSAPP_DELIVERY_ECHO_TIMEOUT_MS || 45_000
               )
             );
-          }, echoTimeoutMs);
-          echoWatchdog.unref?.();
+            const echoWatchdog = setTimeout(() => {
+              void prisma.message.updateMany({
+                where: {
+                  id: pendingMessageId,
+                  externalKey: provisionalKey,
+                  deliveryStatus: "sent",
+                },
+                data: {
+                  deliveryStatus: "unconfirmed",
+                  deliveryError:
+                    `${adapter.platform === "x" ? "X" : "WhatsApp"} accepted the send, but did not return its final message confirmation. Check the native app before retrying.`,
+                },
+              }).catch((error) =>
+                console.error(
+                  `[${adapter.platform}] delivery echo watchdog failed:`,
+                  error
+                )
+              );
+            }, echoTimeoutMs);
+            echoWatchdog.unref?.();
+          }
         }
-      }
-      return sent;
-    })
-    .catch(async (error) => {
-      if (pendingMessageId) await markDeliveryProblem(pendingMessageId, error);
-      throw error;
-    });
-  // Async acknowledgement returns before delivery completes. Always observe
-  // the rejection, even when there is no HTTP caller awaiting confirmation.
-  void operation.catch((error) =>
-    console.error(`[${adapter.platform}] send failed:`, error)
-  );
-  if (pendingMessageId) {
-    const confirmationWatchdog = setTimeout(() => {
-      void prisma.message.updateMany({
-        where: { id: pendingMessageId, deliveryStatus: "pending" },
-        data: {
-          deliveryStatus: "unconfirmed",
-          deliveryError:
-            "The platform did not confirm delivery. Check the native app before retrying.",
-        },
-      }).catch((error) =>
-        console.error("[sync] delivery confirmation watchdog failed:", error)
+        return sent;
+      })
+      .catch(async (error) => {
+        if (pendingMessageId) await markDeliveryProblem(pendingMessageId, error);
+        throw error;
+      });
+    // Async acknowledgement returns before delivery completes. Always observe
+    // the rejection, even when there is no HTTP caller awaiting confirmation.
+    void operation.catch((error) =>
+      console.error(`[${adapter.platform}] send failed:`, error)
+    );
+    if (pendingMessageId) {
+      const confirmationWatchdog = setTimeout(() => {
+        void prisma.message.updateMany({
+          where: { id: pendingMessageId, deliveryStatus: "pending" },
+          data: {
+            deliveryStatus: "unconfirmed",
+            deliveryError:
+              "The platform did not confirm delivery. Check the native app before retrying.",
+          },
+        }).catch((error) =>
+          console.error("[sync] delivery confirmation watchdog failed:", error)
+        );
+      }, 45_000);
+      confirmationWatchdog.unref?.();
+      void operation.then(
+        () => clearTimeout(confirmationWatchdog),
+        () => clearTimeout(confirmationWatchdog)
       );
-    }, 45_000);
-    confirmationWatchdog.unref?.();
-    void operation.then(
-      () => clearTimeout(confirmationWatchdog),
-      () => clearTimeout(confirmationWatchdog)
-    );
-    sendOperations.set(pendingMessageId, operation);
-    void operation.then(
-      () => setTimeout(() => sendOperations.delete(pendingMessageId), 5 * 60 * 1000).unref?.(),
-      () => setTimeout(() => sendOperations.delete(pendingMessageId), 5 * 60 * 1000).unref?.()
-    );
-  }
-  return operation;
+    }
+    return operation;
+  });
 }
 
 function safeJson(s: string): { authToken: string; ct0: string; passcode?: string } | undefined {
@@ -683,6 +678,12 @@ function startControlServer(): Promise<void> {
                   ),
                 }
               : undefined;
+            // The web route atomically increments this only for an explicit
+            // retry of a failed message. Read it here so older open clients
+            // also get a fresh attempt, without trusting a caller's counter.
+            const sendAttempt = pendingMessageId
+              ? (await prisma.message.findUnique({ where: { id: pendingMessageId }, select: { sendAttempts: true } }))?.sendAttempts || 1
+              : 1;
             const operation = trackedSend(
               pendingMessageId,
               adapter,
@@ -691,7 +692,8 @@ function startControlServer(): Promise<void> {
               outMedia,
               mentions,
               replyToExternalId,
-              { inboxCategory }
+              { inboxCategory },
+              sendAttempt
             );
             // The web app already rendered and persisted this message. Return
             // as soon as a ready connector owns the operation; trackedSend

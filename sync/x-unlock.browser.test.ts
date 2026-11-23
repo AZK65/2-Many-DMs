@@ -125,6 +125,12 @@ test("manual unlock preserves cooldowns, rejects overlapping attempts, resumes l
     assert.equal(adapter.state, "ready");
     assert.ok(adapter.timer && adapter.liveTimer);
     assert.equal(adapter.inboxRetryAt, 0);
+    // A ready inbox must not hide the locked tab used for outbound messages.
+    const sendPage = await fixture(browser, "success");
+    Object.assign(adapter, { sendPage });
+    assert.equal((await adapter.unlockChat("1234")).state, "unlocked");
+    assert.equal(await sendPage.evaluate(() => Reflect.get(window, "submissions")), 1);
+    assert.equal(await inspectXChatGate(sendPage), "inbox");
     adapter.page = await fixture(browser, "login");
     assert.equal((await adapter.unlockChat("1234")).state, "login-required");
     assert.equal(adapter.timer, undefined);

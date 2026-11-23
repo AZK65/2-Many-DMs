@@ -18,6 +18,7 @@ import { mergeXHistory, orderXMinuteMessages, parseXDate, parseXMessageInfoDate,
 import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
+import { focusXComposer, X_COMPOSER_SELECTOR } from "../x-composer";
 import { downloadNativeXFile, downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
 import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapshot, reconcileXAccountPreviews, xSnapshotProofs } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
@@ -1181,7 +1182,11 @@ export class XAdapter implements Adapter {
     if (this.rateLimitUntil > Date.now()) throw new Error("X is rate limiting requests. Wait for the cooldown before unlocking.");
     if (!this.page || this.page.isClosed() || !this.browser?.connected) throw new Error("X is reconnecting. Wait for the connection before entering a code.");
     const lifecycle = this.lifecycleVersion;
-    const page = this.page;
+    // The inbox may already be unlocked while an action tab still has its own
+    // PIN gate. Verify the tab that actually needs the code, instead of falsely
+    // reporting success from the already-open inbox on every retry.
+    const page = [this.sendPage, this.requestPage, this.chatPage, this.page].find(candidate =>
+      candidate && !candidate.isClosed() && /\/i\/chat\/(?:pin|passcode|recovery)(?:\/|\?|$)/i.test(candidate.url())) || this.page;
     const browser = this.browser;
     this.manualUnlock = true;
     this.busy = true;
@@ -2087,16 +2092,28 @@ export class XAdapter implements Adapter {
     requireComposer = true
   ): Promise<void> {
     this.assertNotCoolingDown();
+    // Activate before waiting: X may replace the initially mounted composer
+    // (or expose its PIN gate) as soon as this background tab gets focus.
+    if (requireComposer) await page.bringToFront();
     const targetPath = `/i/chat/${conversationId}`;
     const targetUrl = `https://x.com${targetPath}`;
     const messageSelector =
       '[data-testid="dm-message-list"],[data-testid="dm-message-list-container"]';
-    const composerSelector =
-      '[data-testid="dm-composer-textarea"],textarea[aria-label="Message"],[data-testid="dm-conversation-panel"] [contenteditable="true"],[data-testid="dm-conversation-panel"] [role="textbox"],[data-testid="dmComposerTextInput"]';
+    const composerSelector = X_COMPOSER_SELECTOR;
     const waitUntilReady = async (timeoutMs: number): Promise<boolean> => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         this.assertNotCoolingDown();
+        const gate = await inspectXChatGate(page).catch(() => "loading" as const);
+        if (gate === "login") { this.markLoginRequired(); throw new Error("X login expired. Sign in from Connections."); }
+        if (gate === "locked") {
+          if (!await this.unlockBackgroundPage(page, requireComposer ? "send" : "history")) {
+            throw new Error("X Chat is locked. Open Connections > X to unlock it.");
+          }
+          if (new URL(page.url()).pathname !== targetPath) {
+            await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+          }
+        }
         const ready = await page
           .evaluate(
             (path, messages, composer, needsComposer) => {
@@ -2516,9 +2533,11 @@ export class XAdapter implements Adapter {
         // and then replaces it while promoting the chat. Typing into that
         // transient node caused the observed detached-composer timeout. Send
         // from the dedicated, stable regular-chat page instead.
-        await this.openGeneralConversation(sendPage, chatExternalId);
+        try { await this.openGeneralConversation(sendPage, chatExternalId); }
+        catch (error) { throw new Error(`finding composer failed: ${String(error).replace(/^Error: /, "")}`); }
       } else {
-        await this.openGeneralConversation(sendPage, chatExternalId);
+        try { await this.openGeneralConversation(sendPage, chatExternalId); }
+        catch (error) { throw new Error(`finding composer failed: ${String(error).replace(/^Error: /, "")}`); }
       }
       return await this.sendFromOpenConversation(
         sendPage,
@@ -2547,13 +2566,7 @@ export class XAdapter implements Adapter {
     try {
       // XChat's current composer is a textarea. Keep the older selectors as
       // fallbacks because X rolls interface revisions out per account.
-      const composerSelector = [
-        '[data-testid="dm-composer-textarea"]',
-        'textarea[aria-label="Message"]',
-        '[data-testid="dm-conversation-panel"] [contenteditable="true"]',
-        '[data-testid="dm-conversation-panel"] [role="textbox"]',
-        '[data-testid="dmComposerTextInput"]',
-      ].join(",");
+      const composerSelector = X_COMPOSER_SELECTOR;
       const composerDeadline = Date.now() + 30000;
       let composerReady = false;
       while (Date.now() < composerDeadline) {
@@ -2570,24 +2583,7 @@ export class XAdapter implements Adapter {
       await page.bringToFront();
       stage = "preparing message";
 
-      // XChat replaces its controlled textarea while the conversation finishes
-      // hydrating. Never retain that ElementHandle for typing: it may detach
-      // between the initial wait and the first click. Resolve the current node
-      // for every attempt and retry the trusted click if hydration swaps it.
-      const focusLiveComposer = async () => {
-        let lastError: unknown;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            await page.click(xchatSelector(composerSelector));
-            return;
-          } catch (error) {
-            lastError = error;
-            if (!/detached|not clickable|no element/i.test(String(error))) throw error;
-            await delay(250);
-          }
-        }
-        throw lastError;
-      };
+      const focusLiveComposer = () => focusXComposer(page, chatExternalId);
 
       // Remember the rendered messages before sending. XChat later exposes the
       // real UUID in the new bubble; returning that UUID lets the worker and
@@ -2724,6 +2720,10 @@ export class XAdapter implements Adapter {
       let sendClickError: unknown;
       for (let attempt = 0; attempt < 4; attempt += 1) {
         try {
+          if (new URL(page.url()).pathname !== `/i/chat/${chatExternalId}`) {
+            throw new Error("X changed conversations before Send; no message was sent");
+          }
+          stage = "sending message";
           await page.click(xchatSelector(sendButtonSelector));
           sendClickError = undefined;
           break;
@@ -2732,6 +2732,9 @@ export class XAdapter implements Adapter {
           if (!/detached|not clickable|not an Element|no element/i.test(String(error))) {
             throw error;
           }
+          // These selector failures precede mouse dispatch. Other click errors
+          // remain uncertain; never label them safe to retry automatically.
+          stage = "waiting for Send button";
           await delay(200);
         }
       }
