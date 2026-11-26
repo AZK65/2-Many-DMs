@@ -8,6 +8,7 @@ import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
 import { existingAvatar, saveAvatarBuffer } from "../avatars";
 import { TelegramHistorySync } from "../telegram-history-sync";
+import { RecentChatRefresh } from "../recent-chat-refresh";
 import { MediaRecoveryQueue } from "../media-recovery";
 import { reuseTelegramPrimarySender } from "../telegram-media-sender";
 import { TelegramMediaDownloader } from "../telegram-media-download";
@@ -167,6 +168,19 @@ export class TelegramAdapter implements Adapter {
   private backgroundPauseUntil = 0;
   private historySync?: TelegramHistorySync;
   private historyTimer?: ReturnType<typeof setInterval>;
+  private historyContinueTimer?: ReturnType<typeof setTimeout>;
+  private catchUpRunning = false;
+  private recentRefresh = new RecentChatRefresh({
+    refresh: target => this.requestHistory(target.id, "", 0, 30, { recentOnly: true }),
+    ready: () => Boolean(!this.stopped && this.state === "ready" && this.client.connected),
+    busy: () => Date.now() < this.backgroundPauseUntil,
+    retryAt: () => this.historySync?.getStatus().retryAt || 0,
+    intervalMs: 1000,
+    onError: error => {
+      if (/FLOOD_WAIT|FLOOD_PREMIUM_WAIT/i.test(String(error))) this.historySync?.defer(error);
+      console.warn("[telegram] recent chat refresh deferred:", String(error));
+    },
+  });
   private mediaRecovery = new MediaRecoveryQueue();
   private mediaDownloader = new TelegramMediaDownloader();
   private avatarDownloader = new TelegramMediaDownloader(undefined, 45_000);
@@ -179,9 +193,9 @@ export class TelegramAdapter implements Adapter {
   }
 
   private async waitForOutboundPriority(): Promise<void> {
-    while (Date.now() < this.backgroundPauseUntil) {
+    while (!this.stopped && (Date.now() < this.backgroundPauseUntil || this.recentRefresh.pending)) {
       await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(250, this.backgroundPauseUntil - Date.now()))
+        setTimeout(resolve, 250)
       );
     }
   }
@@ -742,8 +756,22 @@ export class TelegramAdapter implements Adapter {
   }
 
   private catchUp(): void {
-    void this.historySync?.run().catch(error => console.error("[telegram] automatic history error:", error));
+    if (this.stopped || !this.historySync || this.catchUpRunning) return;
+    clearTimeout(this.historyContinueTimer);
+    this.catchUpRunning = true;
+    void this.historySync.run().catch(error => console.error("[telegram] automatic history error:", error)).finally(() => {
+      this.catchUpRunning = false;
+      const status = this.historySync?.getStatus();
+      if (!this.stopped && this.state === "ready" && status && this.historySync?.needsCatchUp()) {
+        // Keep the per-page pace and FLOOD_WAIT deadline, without an unrelated
+        // five-minute idle gap between batches that still have work.
+        this.historyContinueTimer = setTimeout(() => this.catchUp(), Math.max(1000, (status.retryAt || 0) - Date.now()));
+        this.historyContinueTimer.unref?.();
+      }
+    });
   }
+
+  refreshRecent(chatExternalId: string): void { this.recentRefresh.request(chatExternalId); }
 
   private initializeSync(): void {
     // Register live handlers before starting history import. Backfill can take
@@ -1328,7 +1356,7 @@ export class TelegramAdapter implements Adapter {
     oldestMessageId: string,
     _oldestTimestamp: number,
     count = 100,
-    context?: { isGroup?: boolean; sinceTimestamp?: number }
+    context?: { isGroup?: boolean; sinceTimestamp?: number; recentOnly?: boolean }
   ): Promise<void> {
     if (!this.onMessage) throw new Error("Telegram is not ready");
 
@@ -1411,7 +1439,7 @@ export class TelegramAdapter implements Adapter {
         chat,
         message,
         this.onMessage,
-        context?.sinceTimestamp
+        context?.sinceTimestamp || context?.recentOnly
           ? {
               // A whole-inbox repair should not download hundreds of avatars
               // and attachments serially. Preserve attachment metadata; the
@@ -1499,6 +1527,8 @@ export class TelegramAdapter implements Adapter {
     this.detail = "Telegram connector is stopped";
     this.liveInitialized = false;
     this.historySync?.stop();
+    this.recentRefresh.stop();
+    clearTimeout(this.historyContinueTimer);
     if (this.historyTimer) clearInterval(this.historyTimer);
     this.historyTimer = undefined;
     this.onMessage = undefined;

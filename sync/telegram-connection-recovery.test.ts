@@ -64,6 +64,38 @@ test("failed initial connection recovers live messages, reads, reactions and his
   assert.equal(f.reactions.length, 1);
 });
 
+test("unfinished Telegram batches continue after one second instead of waiting five minutes", async t => {
+  const f = fixture(t);
+  await f.start();
+  await f.adapter.historySync.run();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  let runs = 0;
+  f.adapter.historySync = {
+    run: async () => { runs++; },
+    getStatus: () => ({ pendingChats: runs < 2 ? 1 : 0, blockedChats: 0, retryAt: 0 }),
+    needsCatchUp: () => runs < 2,
+    stop() {},
+  };
+  f.adapter.catchUp(); f.adapter.catchUp();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(runs, 1, "one batch at a time");
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(runs, 2, "remaining work starts without the periodic five-minute timer");
+});
+
+test("an opened Telegram chat fetches recent text without downloading media or changing history checkpoints", async t => {
+  const f = fixture(t);
+  await f.start();
+  const messages = [{ id: 8, date: Math.floor(Date.now() / 1000) }];
+  const options: unknown[] = [], ingest: unknown[] = [];
+  f.adapter.resolvePeer = async () => ({});
+  Object.assign(f.client, { getEntity: async () => ({ id: 9 }), getMessages: async (_chat: unknown, value: unknown) => { options.push(value); return messages; } });
+  f.adapter.ingestMessage = async (_chat: unknown, _message: unknown, _save: unknown, value: unknown) => { ingest.push(value); };
+  await f.adapter.requestHistory("9", "", 0, 30, { recentOnly: true });
+  assert.deepEqual(options, [{ limit: 30 }]);
+  assert.deepEqual(ingest, [{ downloadAvatar: false, downloadMedia: false }]);
+});
+
 test("authorization failure with an open socket is not reported as connected", async t => {
   const f = fixture(t);
   const getMe = f.client.getMe;

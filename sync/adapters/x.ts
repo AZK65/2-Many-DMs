@@ -19,6 +19,7 @@ import { prisma, reconcileXConversationTime } from "../store";
 import { scrollXSurface } from "../x-dom-scroll";
 import { readXMessageDom, readXAttachmentBytes } from "../x-message-dom";
 import { focusXComposer, X_COMPOSER_SELECTOR } from "../x-composer";
+import { RecentChatRefresh } from "../recent-chat-refresh";
 import { downloadNativeXFile, downloadNativeXVoice, readNativeXMessageTime } from "../x-native-media";
 import { coalesceXPreviewRuns, reconcileXPreviewCopies, reconcileXVerifiedSnapshot, reconcileXAccountPreviews, xSnapshotProofs } from "../x-preview-reconciliation";
 import { MAX_BYTES, extFromMime, saveMedia } from "../media";
@@ -182,6 +183,14 @@ export class XAdapter implements Adapter {
   private lastInboxNavigationAt = 0;
   private lastRequestNavigationAt = 0;
   private lastHistoryRequestAt = 0;
+  private recentRefresh = new RecentChatRefresh({
+    refresh: target => this.requestHistory(target.id, "", 0, 30, { inboxCategory: target.inboxCategory, recentOnly: true }),
+    ready: () => !this.stopping && this.state === "ready",
+    busy: () => this.busy || this.outboundPending > 0 || this.manualUnlock || Boolean(this.connectPromise),
+    retryAt: () => this.inboxRetryAt,
+    intervalMs: 10_000,
+    onError: error => console.warn("[x] recent chat refresh deferred:", String(error)),
+  });
   private automaticRepairQueue = new Map<string, AutomaticRepair>();
   private repairedPreviews = new Map<string, string>();
   private repairStateLoaded = false;
@@ -1553,7 +1562,7 @@ export class XAdapter implements Adapter {
 
   private async processAutomaticRepair(): Promise<void> {
     if (this.stopping || this.automaticRepairRunning || this.automaticRepairQueue.size === 0) return;
-    if (this.manualRecoveryPending > 0) {
+    if (this.manualRecoveryPending > 0 || this.recentRefresh.pending) {
       this.scheduleAutomaticRepair(1000);
       return;
     }
@@ -1569,9 +1578,9 @@ export class XAdapter implements Adapter {
     // New replies must not sit behind hours of daily audit work. Keep the
     // same network pace, but service fresh activity before old backfills.
     const next = [...this.automaticRepairQueue.entries()].filter(([key]) => (this.repairRetryAt.get(key) || 0) <= Date.now()).sort((a, b) =>
+      Number(Boolean(b[1].live)) - Number(Boolean(a[1].live)) ||
       Number(Boolean(b[1].imageRecovery)) - Number(Boolean(a[1].imageRecovery)) ||
       Number(Boolean(b[1].mediaRecovery)) - Number(Boolean(a[1].mediaRecovery)) ||
-      Number(Boolean(b[1].live)) - Number(Boolean(a[1].live)) ||
       (a[1].live && b[1].live ? (b[1].activityAt || 0) - (a[1].activityAt || 0) : 0)
     )[0];
     if (!next) {
@@ -1602,7 +1611,7 @@ export class XAdapter implements Adapter {
     } catch (error) {
       const message = String(error);
       const deferred =
-        /already syncing|reconnecting|cooling down|being paced|not ready|paused for a send|history interrupted/i.test(
+        /already syncing|reconnecting|cooling down|being paced|not ready|paused for a send|paused for an open chat|history interrupted/i.test(
           message
         );
       if (!deferred) repair.attempts += 1;
@@ -1753,7 +1762,7 @@ export class XAdapter implements Adapter {
     loadHistory: boolean | number = false,
     isRequest = false,
     timeoutMs?: number,
-    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview },
+    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview; recentOnly?: boolean },
     onWindow?: (messages: ScrapedMessage[]) => Promise<void>
   ): Promise<{ messages: ScrapedMessage[]; covered: boolean }> {
     const page = isRequest ? this.requestPage : this.chatPage;
@@ -1825,25 +1834,28 @@ export class XAdapter implements Adapter {
           : 0;
     // Virtualized XChat removes bubbles as they scroll out of view. Capture
     // every window, including the newest one BEFORE scrolling backwards.
-    const windows: ScrapedMessage[][] = [await this.readMessageWindow(page, { onWindow })];
+    const windowOptions = { onWindow, passive: range?.recentOnly };
+    const windows: ScrapedMessage[][] = [await this.readMessageWindow(page, windowOptions)];
     // A cold encrypted route can initially expose only a cached, older window.
     // Wait for the observed newest message without reloading or increasing the
     // network polling rate; a partial pass must never be called fully repaired.
     const latestDeadline = Date.now() + 12_000;
     while (range?.latest && !xHistoryMatchesPreview(mergeXHistory(windows), range.latest) && Date.now() < latestDeadline) {
       this.assertNotCoolingDown();
+      if (this.automaticRepairRunning && this.recentRefresh.pending) throw new Error("X history paused for an open chat; retrying later");
       if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
       const jump = xchatSelector('[data-testid="dm-scroll-to-bottom-button"]');
       if (await page.$(jump)) await page.click(jump).catch(() => null);
       await page.evaluate(scrollXSurface, { kind: "messages", direction: "newer" } as const);
       await delay(1000);
-      windows.push(await this.readMessageWindow(page, { onWindow }));
+      windows.push(await this.readMessageWindow(page, windowOptions));
     }
     let unchanged = 0;
     let targetHydrationAttempts = 0;
     let reachedStart = false;
     const historyDeadline = Date.now() + 55_000;
     for (let k = 0; k < scrollRounds; k++) {
+      if (this.automaticRepairRunning && this.recentRefresh.pending) throw new Error("X history paused for an open chat; retrying later");
       this.assertNotCoolingDown();
       if (Date.now() >= historyDeadline) break;
       if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
@@ -1909,6 +1921,7 @@ export class XAdapter implements Adapter {
           timestamp = saved?.createdAt.getTime() || null;
         }
         if (!options.passive && !timestamp && infoReads < 12 && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
+          if (this.automaticRepairRunning && this.recentRefresh.pending) throw new Error("X history paused for an open chat; retrying later");
           // Don't make already-dated newest replies wait behind an older
           // row's missing Info control. Keep the native oldest-first order.
           if (infoReads === 0 && messages.length) await options.onWindow?.([...messages].reverse());
@@ -1944,6 +1957,7 @@ export class XAdapter implements Adapter {
       for (const message of messages) {
         const row = rows.find(row => row.id === message.id)!;
         for (const [index, attachment] of row.attachments.entries()) {
+          if (this.automaticRepairRunning && this.recentRefresh.pending) throw new Error("X history paused for an open chat; retrying later");
           if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
           message.attachments![index] = await this.downloadAttachment(page, message.id, index, attachment);
         }
@@ -2204,6 +2218,10 @@ export class XAdapter implements Adapter {
     // A real send still opens the composer on demand in performSend().
   }
 
+  refreshRecent(chatExternalId: string, context?: OutboundSendContext): void {
+    this.recentRefresh.request(chatExternalId, context?.inboxCategory);
+  }
+
   private async restoreRequestList(page: Page): Promise<void> {
     if (this.stopping || Date.now() < this.inboxRetryAt) {
       await this.parkActionPage(page);
@@ -2239,6 +2257,7 @@ export class XAdapter implements Adapter {
       inboxCategory?: "general" | "spam";
       sinceTimestamp?: number;
       targetMessageId?: string;
+      recentOnly?: boolean;
     }
   ): Promise<void> {
     if (!this.page || !this.chatPage || !this.onMessage || this.state !== "ready") {
@@ -2259,7 +2278,7 @@ export class XAdapter implements Adapter {
       Number(process.env.X_HISTORY_PACE_MS || 60000)
     );
     const historyWaitMs = this.lastHistoryRequestAt + historyPaceMs - Date.now();
-    if (historyWaitMs > 0) {
+    if (historyWaitMs > 0 && !context?.recentOnly) {
       throw new Error(
         `X history is being paced. Try again in ${Math.ceil(historyWaitMs / 1000)} seconds`
       );
@@ -2313,10 +2332,10 @@ export class XAdapter implements Adapter {
         chatExternalId,
         // Longer explicit windows progressively load more history while still
         // retaining a hard ceiling so a single repair cannot hammer X.
-        requestedScrolls,
+        context?.recentOnly ? 0 : requestedScrolls,
         isRequest,
         undefined,
-        { sinceTimestamp: context?.sinceTimestamp, beforeTimestamp: _oldestTimestamp || undefined, count: Math.max(1, Math.min(500, _count)), targetId: context?.targetMessageId,
+        { recentOnly: context?.recentOnly, sinceTimestamp: context?.sinceTimestamp, beforeTimestamp: _oldestTimestamp || undefined, count: Math.max(1, Math.min(500, _count)), targetId: context?.targetMessageId,
           latest: (!context?.targetMessageId && (context?.sinceTimestamp || !_oldestTimestamp) && "direction" in conversation) ? conversation as XLatestPreview : undefined },
         saveWindow
       );
@@ -2349,9 +2368,14 @@ export class XAdapter implements Adapter {
           ? { since: Math.min(...dated.map(message => message.timestamp!)), until: Math.max(...dated.map(message => message.timestamp!)) } : undefined;
         const removed = await coalesceXPreviewRuns(prisma, this.accountId, chatExternalId) +
           await reconcileXPreviewCopies(prisma, this.accountId, chatExternalId, dated.map(message => `x:${message.id}`), coverage) +
-          (covered && !undated && "direction" in conversation && xHistoryMatchesPreview(messages, conversation as XLatestPreview)
+          (!context?.recentOnly && covered && !undated && "direction" in conversation && xHistoryMatchesPreview(messages, conversation as XLatestPreview)
             ? await reconcileXVerifiedSnapshot(prisma, this.accountId, chatExternalId, { preview: conversation.preview, direction: conversation.direction, checkedAt: Date.now() }) : 0);
         if (removed) console.log(`[x] reconciled ${removed} duplicate inbox previews; recovery copies saved`);
+      }
+      if (context?.recentOnly) {
+        // Keep native/preview deduplication, but leave deep repair queued: a
+        // fast newest-window read earns no complete-history checkpoint.
+        return;
       }
       console.log(`[x] history saved ${messages.length - undated}/${messages.length} dated messages`);
       if (undated) throw new Error(`X did not expose dates for ${undated} messages; preserved existing history instead of assigning today's date`);
@@ -2852,6 +2876,7 @@ export class XAdapter implements Adapter {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.recentRefresh.stop();
     this.unlockedPasscode = undefined;
     this.unlockStatus = undefined;
     this.lifecycleVersion += 1;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-type Checkpoint = { highId: number; checkedAt: number; retryAt?: number; pending?: { targetId: number; lowerId: number; offsetId: number; since: number } };
+type Checkpoint = { highId: number; checkedAt: number; recentId?: number; retryAt?: number; pending?: { targetId: number; lowerId: number; offsetId: number; since: number } };
 type Dialog = { id: string; latestId: number; entity: unknown };
 type Message = { id: number; date: number };
 type Options = {
@@ -31,6 +31,23 @@ export class TelegramHistorySync {
     } catch { /* First run: establish a recent baseline, then retain it. */ }
   }
   stop() { this.stopped = true; }
+  needsCatchUp() {
+    const now = (this.options.now || Date.now)();
+    // Preserve inaccessible/deleted chats in the checkpoint file, but don't
+    // spin discovery every second when none of the remaining work can run.
+    return this.observedDialogs.some(dialog => {
+      const checkpoint = this.state.chats[dialog.id];
+      return dialog.latestId > 0 && (checkpoint?.retryAt || 0) <= now &&
+        (Boolean(checkpoint?.pending) || dialog.latestId > (checkpoint?.highId || 0));
+    });
+  }
+  defer(error: unknown) {
+    const now = this.options.now || Date.now;
+    const seconds = Number((error as { seconds?: number })?.seconds) || Number(String(error).match(/(?:FLOOD_WAIT|FLOOD_PREMIUM_WAIT)[_ ](\d+)/i)?.[1]);
+    this.state.retryAt = Math.max(this.state.retryAt, now() + Math.max(60, seconds || 300) * 1000);
+    this.persist();
+    console.warn("[telegram] automatic history paused until", new Date(this.state.retryAt).toISOString(), String(error));
+  }
   getStatus(): import("../src/lib/sync-health").SyncHealth {
     const now = (this.options.now || Date.now)();
     const chats = Object.entries(this.state.chats).filter(([, c]) => c.pending).map(([id, c]) => ({
@@ -58,7 +75,7 @@ export class TelegramHistorySync {
   }
   private async runOnce() {
     const now = this.options.now || Date.now;
-    const ready = () => !this.stopped && this.options.ready();
+    const ready = () => !this.stopped && this.options.ready() && now() >= this.state.retryAt;
     if (!ready() || now() < this.state.retryAt) return;
     let pages = 0;
     let saved = 0;
@@ -101,6 +118,26 @@ export class TelegramHistorySync {
         if (!ready()) return;
         pages++;
         try {
+          // Do not hide fresh messages behind a multi-page gap from yesterday.
+          // Save the newest window first, but leave the unfinished range and
+          // highId untouched: seeing the tail does not prove the gap is filled.
+          if (dialog.latestId > Math.max(range.targetId, checkpoint.recentId || 0)) {
+            const recent = await this.options.fetch(dialog.entity, { limit: 100, offsetId: dialog.latestId + 1, minId: range.targetId, maxId: dialog.latestId + 1 });
+            if (!ready()) return;
+            for (const message of [...recent].filter(m => m.id > range.targetId && m.id <= dialog.latestId).reverse()) {
+              if (!ready()) return;
+              await this.options.save(dialog.entity, message); saved++;
+            }
+            // Only a successful write of the observed head suppresses another
+            // tail fetch. An empty/incomplete server response cannot do so.
+            if (recent.some(m => m.id === dialog.latestId)) checkpoint.recentId = dialog.latestId;
+            this.persist();
+            if (pages >= (this.options.maxPages || 20)) break;
+            await (this.options.pause?.() || new Promise(resolve => setTimeout(resolve, 1000)));
+            await this.options.beforePage();
+            if (!ready()) return;
+            pages++;
+          }
           // GramJS takes max(offsetId, maxId) for descending history. Keeping
           // maxId at the original target resets every page to page one.
           const upperId = range.offsetId || range.targetId + 1;
@@ -135,10 +172,7 @@ export class TelegramHistorySync {
       this.persist();
       if (pages) console.log(`[telegram] automatic history saved=${saved} pages=${pages} incomplete=${Object.values(this.state.chats).filter(c => c.pending).length}`);
     } catch (error) {
-      const seconds = Number((error as { seconds?: number })?.seconds) || Number(String(error).match(/(?:FLOOD_WAIT|FLOOD_PREMIUM_WAIT)[_ ](\d+)/i)?.[1]);
-      this.state.retryAt = now() + Math.max(60, seconds || 300) * 1000;
-      this.persist();
-      console.warn("[telegram] automatic history paused until", new Date(this.state.retryAt).toISOString(), String(error));
+      this.defer(error);
     }
   }
 }

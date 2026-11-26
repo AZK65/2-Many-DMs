@@ -204,6 +204,9 @@ export interface Adapter {
     chatExternalId: string,
     context?: OutboundSendContext
   ): Promise<void>;
+  // Opening a chat requests its newest window independently of deep backfill.
+  // Queue/coalesce locally; never block serving already-saved messages.
+  refreshRecent?(chatExternalId: string, context?: OutboundSendContext): void;
   // Keep the source app and Omni in sync for the inbox-clearing action. This
   // is deliberately separate from `hidden`, which classifies non-clients.
   setArchivedAndMuted?(

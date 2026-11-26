@@ -36,8 +36,12 @@ test("Telegram fills more than one page and resumes its exact gap after restart"
     assert.equal(h.state().chats["test-chat"].pending.offsetId, 226);
     h.latest(330); // New messages cannot move the unfinished gap boundary.
     const resumed = new TelegramHistorySync(h.options);
+    await resumed.run();
+    assert.equal(h.saved.size, 105, "fresh tail arrives before the older gap finishes");
+    assert.equal(h.state().chats["test-chat"].pending.offsetId, 226, "tail reads never advance the old gap cursor");
+    assert.equal(h.state().chats["test-chat"].highId, 0);
     await resumed.run(); await resumed.run(); await resumed.run();
-    assert.equal(h.saved.size, 325);
+    assert.equal(h.saved.size, 330);
     assert.equal(h.state().chats["test-chat"].highId, 325);
     await resumed.run();
     assert.equal(h.saved.size, 330);
@@ -76,6 +80,33 @@ test("Telegram respects persisted flood waits and disconnects", async () => {
     h.connected(false); await resumed.run(); assert.equal(h.calls(), 0);
     h.connected(true); await resumed.run(); assert.equal(h.calls(), 1);
     resumed.stop(); await resumed.run(); assert.equal(h.calls(), 1);
+  } finally { h.cleanup(); }
+});
+
+test("continuation ignores unavailable and blocked chats without dropping checkpoints", async () => {
+  const h = harness();
+  try {
+    const worker = new TelegramHistorySync(h.options);
+    await worker.run(); assert.equal(worker.needsCatchUp(), true);
+    const unavailable = new TelegramHistorySync({ ...h.options, list: async () => [] });
+    await unavailable.run();
+    assert.equal(unavailable.getStatus().pendingChats, 1);
+    assert.equal(unavailable.needsCatchUp(), false);
+    const blocked = new TelegramHistorySync({ ...h.options, fetch: async () => { throw Error("CHAT_FORBIDDEN"); } });
+    await blocked.run();
+    assert.equal(blocked.needsCatchUp(), false);
+    h.advance(15 * 60_000 + 1);
+    assert.equal(blocked.needsCatchUp(), true);
+  } finally { h.cleanup(); }
+});
+
+test("a foreground flood wait stops an already-running background batch before its next page", async () => {
+  const h = harness();
+  try {
+    const worker = new TelegramHistorySync({ ...h.options, beforePage: async () => { worker.defer(Error("FLOOD_WAIT_60")); } });
+    await worker.run();
+    assert.equal(h.calls(), 0);
+    assert.equal(h.state().chats["test-chat"].pending.offsetId, 0);
   } finally { h.cleanup(); }
 });
 

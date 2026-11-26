@@ -748,6 +748,7 @@ function startControlServer(): Promise<void> {
           try {
             const { platform, accountId, chatExternalId, inboxCategory } = JSON.parse(body);
             const adapter = resolveAdapter({ accountId, platform });
+            adapter?.refreshRecent?.(chatExternalId, { inboxCategory });
             if (adapter?.markRead) {
               await adapter.markRead(chatExternalId, { inboxCategory });
             }
