@@ -1,0 +1,16 @@
+{
+  "name": "chat-mcp-gateway",
+  "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
+  "main": "/absolute/path/to/app/scripts/mcp-cloudflare-worker.mjs",
+  "compatibility_date": "2026-11-26",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "vars": { "PUBLIC_ORIGIN": "https://mcp.example.com" },
+  "vpc_services": [
+    { "binding": "MCP_ORIGIN", "service_id": "YOUR_GATEWAY_VPC_SERVICE_ID" }
+  ],
+  "routes": [
+    { "pattern": "mcp.example.com", "custom_domain": true }
+  ]
+}

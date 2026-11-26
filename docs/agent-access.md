@@ -47,6 +47,20 @@ Localhost is reachable only on this computer. For an agent on another machine, a
 
 This setting authorizes the hostname; it does not provision a domain, tunnel, or certificate. Bearer keys are mandatory even on localhost. For ChatGPT and Claude web, choose OAuth in their custom connector setup. The server supports authorization discovery, dynamic client registration, authorization codes with PKCE (S256), and rotating refresh tokens. The authorization screen asks for the agent key you created in local Settings; this approves only that key's selected accounts. Access tokens expire after 15 minutes and refresh tokens after 30 days. Revoking the parent key immediately blocks both. No account password or platform login is shared with the agent. The public marketing website never serves chat MCP data.
 
+### Cloudflare managed hostname
+
+An alternative to creating the tunnel's DNS record manually is a dedicated Worker Custom Domain backed by a VPC Service. Cloudflare manages the hostname and certificate; the VPC Service must target only `127.0.0.1:4030` through your tunnel. Do not bind the Worker to the whole network or port 3000.
+
+1. Run the app and `scripts/mcp-gateway.mjs` with the same HTTPS `MCP_PUBLIC_URL`.
+2. Run a dedicated Cloudflare Tunnel on the same computer as the gateway.
+3. Create an HTTP VPC Service for that tunnel with IPv4 `127.0.0.1` and HTTP port `4030`.
+4. Copy `scripts/mcp-cloudflare-worker.wrangler.example.jsonc` to a private deployment directory. Set the account, service ID, desired hostname, and an absolute `main` path to `scripts/mcp-cloudflare-worker.mjs`.
+5. Deploy that configuration using Wrangler. The Worker and local gateway share the same route/header restrictions. No app keys or chat data belong in the deployment configuration.
+
+The hosted gateway is stateless: it forwards permitted requests to the running app and does not store chats. Closing the browser does not interrupt it; an asleep/offline computer or stopped app remains unavailable. Run the tunnel and local gateway under a service supervisor for automatic restart. Keep Worker request logging disabled. Verify unauthenticated MCP requests return 401, OAuth discovery returns the HTTPS address, and `/api/mcp/access`, `/api/accounts`, and `/` return 404 before connecting agents.
+
+References: [Cloudflare Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) and [VPC Services](https://developers.cloudflare.com/workers-vpc/configuration/vpc-services/).
+
 ## What agents can do
 
 - `connection_status`: permitted account status and counts of saved chats/messages.
