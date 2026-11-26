@@ -51,6 +51,19 @@ export async function middleware(req: NextRequest) {
     );
   if (isAsset) return NextResponse.next();
 
+  // This exact machine endpoint authenticates every request with its own
+  // revocable key. Key management remains behind the local-owner boundary.
+  const agentPath = pathname === "/api/mcp" ||
+    ["register", "authorize", "approve", "token", "revoke"].some(action => pathname === `/api/mcp/oauth/${action}`) ||
+    ["/mcp/authorize", "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/mcp"].includes(pathname);
+  if (agentPath && process.env.MARKETING_ONLY !== "1") {
+    const response = NextResponse.next();
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Frame-Options", "DENY");
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
+
   if (process.env.MARKETING_ONLY !== "1") {
     const host = (req.headers.get("host") || "").split(":")[0];
     const local = host === "localhost" || host === "127.0.0.1" || host === "::1";

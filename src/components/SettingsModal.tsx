@@ -2,6 +2,7 @@
 
 import { OverlayPortal } from "./OverlayPortal";
 import { UpdatePreferences } from "./UpdatePreferences";
+import { AgentAccessSettings } from "./AgentAccessSettings";
 import { AISetup } from "./AISetup";
 
 import { useEffect, useState } from "react";
@@ -97,7 +98,7 @@ const SETTINGS_PAGES: Array<{
   { id: "organization", label: "Organization", description: "Tabs and conversation tags" },
   { id: "workflow", label: "Workflow", description: "Board stages and ordering" },
   { id: "groups", label: "Groups", description: "Macros and reusable templates" },
-  { id: "integrations", label: "Integrations", description: "Scheduling" },
+  { id: "integrations", label: "Integrations", description: "Agents and scheduling" },
   { id: "connections", label: "Connections", description: "Connected messaging accounts" },
   { id: "ai", label: "AI assistant", description: "OpenRouter key and privacy" },
 ];
@@ -732,6 +733,7 @@ export function SettingsModal({ onClose, initialPage = "general" }: { onClose: (
 
               {page === "integrations" && (
                 <div className="space-y-5">
+                  <AgentAccessSettings />
                   <IntegrationPanel icon={<ClockIcon className="h-5 w-5" />} name="Cal.com" description="Create confirmed bookings and email every guest from the chat scheduler." enabled={s.plugins.calcom.enabled} onToggle={(enabled) => update({ plugins: { ...s.plugins, calcom: { ...s.plugins.calcom, enabled } } })}>
                     {s.plugins.calcom.enabled && (
                       <div className="space-y-4">

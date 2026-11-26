@@ -1,6 +1,17 @@
 {
-  "current": "0.6.9",
+  "current": "0.7.0",
   "entries": [
+    {
+      "version": "0.7.0",
+      "date": "2026-11-26",
+      "title": "Connect your agents to chats",
+      "notes": [
+        "Agent access in Settings → Integrations connects MCP-compatible agents to saved chat search, conversation history and locally extracted photo text.",
+        "Give each agent a separate revocable access key and choose the accounts it can read. Chat access is read-only and does not change unread counts.",
+        "Supports local commands, authenticated HTTP and cloud-agent OAuth approval. Available while the app service is running; cloud agents need a configured HTTPS address.",
+        "Results label unverified inbox previews and incomplete saved history. Keys and chat data stay out of the public repository."
+      ]
+    },
     {
       "version": "0.6.9",
       "date": "2026-11-02",

@@ -28,3 +28,17 @@ test("binary data is not rendered as text, but its private pathname is checked",
   assert.equal(inspect("prisma/data.db", Buffer.from([0, 1, 2]))[0].rule, "private-file");
   assert.deepEqual(inspect("docs/inbox.png", Buffer.from([0, 1, 2])), []);
 });
+
+test("detect MCP access keys without revealing them", () => {
+  const token = "tmd_mcp_" + "A".repeat(43);
+  const report = inspect("config.json", Buffer.from(token));
+  assert.equal(report[0].rule, "MCP-agent-key");
+  assert.ok(!JSON.stringify(report).includes(token));
+});
+
+test("detect OAuth bearer and refresh credentials", () => {
+  for (const prefix of ["tmd_oauth_", "tmd_refresh_"]) {
+    const token = prefix + "A".repeat(43);
+    assert.equal(inspect("config.json", Buffer.from(token))[0].rule, "MCP-agent-key");
+  }
+});

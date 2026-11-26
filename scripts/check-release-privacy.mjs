@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const git = (args, input) => execFileSync("git", args, { input, maxBuffer: 128 * 1024 * 1024 });
 const ownFiles = new Set(["scripts/check-release-privacy.mjs", "scripts/check-release-privacy.test.mjs"]);
 const rules = [
+  ["MCP-agent-key", /\btmd_(?:mcp|oauth|refresh)_[A-Za-z0-9_-]{43}\b/],
   ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
   ["GitHub-token", /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b/],
   ["service-token", /\bxox[baprs]-[A-Za-z0-9-]{15,}\b/],
