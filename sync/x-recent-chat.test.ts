@@ -100,7 +100,21 @@ test("recent history saves before attachments and only succeeds with verified la
   assert.equal(observed[1], 8, "bounded recent-history scroll budget");
   assert.equal(observed[4].latest, latest);
   assert.equal(observed[4].recentOnly, true, "old media downloads stay out of the first pass");
+  assert.equal(observed[4].recentHistory, true, "recent history can verify native dates within a bounded budget");
   assert.equal(adapter.busy, false);
+});
+
+test("a recent metadata window publishes text and photo placeholders without downloading binaries", async () => {
+  const adapter = new XAdapter() as any;
+  let saved = 0;
+  const page = { evaluate: async () => [{ id: "native", direction: "in", text: "hello", dateHints: [new Date().toISOString()], day: "Today", timeText: "", attachments: [{ type: "image", name: "photo" }] }] };
+  adapter.downloadAttachment = async () => { assert.fail("recent history must not wait for a media download"); };
+  const rows = await adapter.readMessageWindow(page, { skipMedia: true, nativeTimeBudget: { remaining: 3 }, onWindow: async () => { saved++; } });
+  assert.ok(saved > 0);
+  assert.equal(rows[0].text, "hello");
+  assert.equal(rows[0].attachments[0].type, "image");
+  assert.equal(rows[0].attachments[0].url, null);
+  assert.ok(rows[0].timestamp);
 });
 
 test("recent work interrupts a deeper pass but never itself, and wakes an old timer promptly", () => {

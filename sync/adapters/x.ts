@@ -384,7 +384,7 @@ export class XAdapter implements Adapter {
         attempts: existing?.attempts || 0,
         live: existing?.live,
         activityAt: Math.max(existing?.activityAt || 0, ...rows.map((row) => row.createdAt.getTime())),
-        latest: existing?.latest || { preview: newest.body, direction: newest.direction as "in" | "out", timestamp: newest.createdAt.getTime() },
+        latest: existing ? xRepairLatest(existing) : { preview: newest.body, direction: newest.direction as "in" | "out", timestamp: newest.createdAt.getTime() },
         mediaRecovery: true,
         imageRecovery: rows.some((row) => row.expectation.type === "image"),
         sinceTimestamp: Math.min(existing?.sinceTimestamp || sinceTimestamp, sinceTimestamp),
@@ -1814,7 +1814,7 @@ export class XAdapter implements Adapter {
     loadHistory: boolean | number = false,
     isRequest = false,
     timeoutMs?: number,
-    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview; recentOnly?: boolean },
+    range?: { sinceTimestamp?: number; beforeTimestamp?: number; count: number; targetId?: string; latest?: XLatestPreview; recentOnly?: boolean; recentHistory?: boolean },
     onWindow?: (messages: ScrapedMessage[]) => Promise<void>
   ): Promise<{ messages: ScrapedMessage[]; covered: boolean }> {
     const page = isRequest ? this.requestPage : this.chatPage;
@@ -1886,7 +1886,11 @@ export class XAdapter implements Adapter {
           : 0;
     // Virtualized XChat removes bubbles as they scroll out of view. Capture
     // every window, including the newest one BEFORE scrolling backwards.
-    const windowOptions = { onWindow, passive: range?.recentOnly };
+    // Recent history may need native timestamps for grouped bubbles, but
+    // never wait for binary downloads. Share the small Info budget across all
+    // windows so a single undated chat cannot hold up the rest of the inbox.
+    const windowOptions = { onWindow, passive: range?.recentOnly && !range.recentHistory,
+      skipMedia: range?.recentOnly, nativeTimeBudget: range?.recentHistory ? { remaining: 3 } : undefined };
     const windows: ScrapedMessage[][] = [await this.readMessageWindow(page, windowOptions)];
     // A cold encrypted route can initially expose only a cached, older window.
     // Wait for the observed newest message without reloading or increasing the
@@ -1953,7 +1957,7 @@ export class XAdapter implements Adapter {
     return { messages, covered };
   }
 
-  private async readMessageWindow(page: Page, options: { passive?: boolean; onWindow?: (messages: ScrapedMessage[]) => Promise<void> } = {}): Promise<ScrapedMessage[]> {
+  private async readMessageWindow(page: Page, options: { passive?: boolean; skipMedia?: boolean; nativeTimeBudget?: { remaining: number }; onWindow?: (messages: ScrapedMessage[]) => Promise<void> } = {}): Promise<ScrapedMessage[]> {
     const rows = await page.evaluate(readXMessageDom);
     const now = Date.now();
     const messages: ScrapedMessage[] = [];
@@ -1972,7 +1976,7 @@ export class XAdapter implements Adapter {
           const saved = await prisma.message.findUnique({ where: { externalKey: `x:${message.id}` }, select: { createdAt: true } });
           timestamp = saved?.createdAt.getTime() || null;
         }
-        if (!options.passive && !timestamp && infoReads < 12 && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
+        if (!options.passive && !timestamp && infoReads < 12 && (!options.nativeTimeBudget || options.nativeTimeBudget.remaining > 0) && (this.nativeTimeRetryAt.get(message.id) || 0) <= now) {
           this.yieldHistoryForRecentChats();
           // Don't make already-dated newest replies wait behind an older
           // row's missing Info control. Keep the native oldest-first order.
@@ -1980,6 +1984,7 @@ export class XAdapter implements Adapter {
           this.assertNotCoolingDown();
           if (this.stopping || this.outboundPending > 0) throw new Error("X history paused for a send; retrying later");
           infoReads++;
+          if (options.nativeTimeBudget) options.nativeTimeBudget.remaining--;
           try {
             const sent = await readNativeXMessageTime(page, message.id);
             timestamp = sent ? parseXMessageInfoDate(sent, Date.now()) : null;
@@ -2005,7 +2010,7 @@ export class XAdapter implements Adapter {
     // Publish full text before any slow attachment download or older-history
     // scroll. A later error must not discard the good newest window.
     await options.onWindow?.(messages);
-    if (!options.passive) {
+    if (!options.passive && !options.skipMedia) {
       for (const message of messages) {
         const row = rows.find(row => row.id === message.id)!;
         for (const [index, attachment] of row.attachments.entries()) {
@@ -2395,7 +2400,7 @@ export class XAdapter implements Adapter {
         context?.recentOnly ? (context.recentHistory ? 8 : 0) : requestedScrolls,
         isRequest,
         undefined,
-        { recentOnly: context?.recentOnly, sinceTimestamp: context?.sinceTimestamp, beforeTimestamp: _oldestTimestamp || undefined, count: Math.max(1, Math.min(500, _count)), targetId: context?.targetMessageId,
+        { recentOnly: context?.recentOnly, recentHistory: context?.recentHistory, sinceTimestamp: context?.sinceTimestamp, beforeTimestamp: _oldestTimestamp || undefined, count: Math.max(1, Math.min(500, _count)), targetId: context?.targetMessageId,
           latest: !context?.targetMessageId && (context?.sinceTimestamp || !_oldestTimestamp) ? latest : undefined },
         saveWindow
       );
@@ -2436,7 +2441,7 @@ export class XAdapter implements Adapter {
         if (context.recentHistory) {
           if (run !== this.pageRun || this.stopping || this.outboundPending > 0) throw new Error("X history interrupted by a send");
           if (!latest || !messages.length || undated || !covered || !xHistoryMatchesPreview(messages, latest)) {
-            throw new Error("X saved the available recent messages, but has not verified the latest conversation window yet");
+            throw new Error(`X saved the available recent messages, but has not verified the latest conversation window yet (dated=${messages.length - undated}/${messages.length}, range=${covered}, latest=${Boolean(latest && xHistoryMatchesPreview(messages, latest))})`);
           }
         }
         // Keep native/preview deduplication, but leave deep repair queued: a
