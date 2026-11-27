@@ -1248,7 +1248,7 @@ export class XAdapter implements Adapter {
         return this.unlockStatus!;
       }
       if (result === "unlocked") this.unlockedPasscode = passcode;
-      this.unlockStatus = { state: "unlocked", startedAt: this.unlockStatus?.startedAt, updatedAt: Date.now(), detail: result === "unlocked" ? "X confirmed the unlock. Your inbox is available and syncing resumes." : "Your X inbox is already unlocked. No code was submitted; syncing resumes." };
+      this.unlockStatus = { state: "unlocked", startedAt: this.unlockStatus?.startedAt, updatedAt: Date.now(), pinVerified: result === "unlocked", detail: result === "unlocked" ? "X confirmed the unlock. Your inbox is available and syncing resumes." : "Your X inbox is already unlocked. No code was submitted; syncing resumes." };
       this.inboxFailures = 0;
       this.state = "ready";
       this.detail = undefined;

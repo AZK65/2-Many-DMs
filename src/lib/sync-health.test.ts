@@ -25,6 +25,18 @@ test("history issues match the exact peer and its forum topics", () => {
   assert.equal(chatSyncIssue(null, sync), undefined);
 });
 
+test("recent-message progress is separate from complete older histories", () => {
+  const sync = { pendingChats: 103, blockedChats: 0, history: { recentReady: 34, recentPending: 69, olderPending: 34, completed: 0, discovering: true, pagesFetched: 34 } };
+  const status = { platform: "x", state: "ready", sync };
+  assert.equal(syncHealthView(status).label, "Loading recent messages");
+  assert.match(syncHealthView(status).detail, /34 chats ready, 69 still to check/);
+  assert.equal(syncHealthView({ ...status, sync: { ...sync, history: { ...sync.history, recentReady: 103, recentPending: 0, olderPending: 103 } } }).label, "Recent messages ready");
+  assert.notEqual(syncHealthView({ ...status, sync: { ...sync, pendingChats: 0, history: { ...sync.history, recentPending: 0, olderPending: 0 } } }).label, "History restored");
+  assert.equal(syncHealthView({ ...status, sync: { ...sync, pendingChats: 0, history: { ...sync.history, recentReady: 103, recentPending: 0, olderPending: 0, completed: 103, discovering: false } } }).label, "History restored");
+  assert.equal(syncHealthView({ ...status, sync: { ...sync, retryAt: 2000 } }, 1000).label, "Sync paused");
+  assert.equal(syncHealthView({ ...status, state: "disconnected" }).tone, "attention");
+});
+
 test("broadcasts do not require a reply, direct and group incoming messages do", () => {
   const chat = { platform: "telegram", isGroup: true, contact: { handle: "Channel" }, lastDirection: "in" };
   assert.equal(needsReply(chat), false);

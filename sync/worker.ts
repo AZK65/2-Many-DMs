@@ -5,7 +5,10 @@ import { TelegramAdapter } from "./adapters/telegram";
 import { WhatsAppAdapter } from "./adapters/whatsapp";
 import { WhatsAppBaileysAdapter } from "./adapters/whatsapp-baileys";
 import { XAdapter } from "./adapters/x";
-import { isXChatPin } from "../src/lib/x-unlock-state";
+import { XHybridAdapter } from "./adapters/x-hybrid";
+import { mautrixPilotEnabled } from "./x-mautrix-pilot";
+import { xPinMemory, withXPinLock, type XPinMemory } from "./x-pin-memory";
+import { isXChatPin, type XUnlockState } from "../src/lib/x-unlock-state";
 import { XApiAdapter } from "./adapters/x-api";
 import { GmailAdapter } from "./adapters/gmail";
 import { DiscordBotAdapter } from "./adapters/discord";
@@ -295,6 +298,30 @@ function safeJson(s: string): { authToken: string; ct0: string; passcode?: strin
   return undefined;
 }
 
+const pinMemories = new Map<string, XPinMemory>();
+const restoredPins = new WeakSet<Adapter>();
+function pinMemoryForAccount(acc: RunnableAccount) {
+  let token = acc.session ? safeJson(acc.session)?.authToken : process.env.X_AUTH_TOKEN;
+  if (!token) try {
+    token = JSON.parse(fs.readFileSync(path.join(process.cwd(), ".x_auth/cookies.json"), "utf8"))
+      .find((cookie: { name: string }) => cookie.name === "auth_token")?.value;
+  } catch {}
+  return xPinMemory(acc.id, token || "");
+}
+async function restoreRememberedXPin(id: string, adapter: Adapter) {
+  if (!(adapter instanceof XAdapter) && !(adapter instanceof XHybridAdapter)) return;
+  if (restoredPins.has(adapter) || adapter.getStatus().unlock?.state !== "required" || !connectorOperations.canRecover(adapter)) return;
+  restoredPins.add(adapter);
+  await withXPinLock(id, async () => {
+    if (shuttingDown || adapters.get(id) !== adapter || adapter.getStatus().unlock?.state !== "required") return;
+    await pinMemories.get(id)?.restore(async pin => {
+      let result!: XUnlockState;
+      await connectorOperations.runLifecycle(adapter, "recover", async () => { result = await adapter.unlockChat(pin); });
+      return result;
+    });
+  });
+}
+
 // Heavy = a real browser (whatsapp-web.js or the XChat browser). Light = the
 // browser-free drivers (telegram MTProto, baileys and x-api).
 function isHeavy(acc: RunnableAccount): boolean {
@@ -320,6 +347,7 @@ function buildAdapter(acc: RunnableAccount): Adapter | null {
       : new WhatsAppAdapter({ clientId: acc.label === "default" ? undefined : acc.id, onIdentities: (identities) => repairWhatsAppIdentities(acc.id, identities) });
   }
   if (acc.platform === "x") {
+    if (acc.driver !== "api" && mautrixPilotEnabled(acc.id)) return new XHybridAdapter({ accountId: acc.id, session: acc.session ? safeJson(acc.session) : undefined });
     if (acc.driver === "api") {
       const auth = acc.session ? safeJson(acc.session) : undefined;
       return new XApiAdapter(auth ? { auth } : {});
@@ -409,7 +437,7 @@ async function reconcileAdapters() {
     try {
       // startAdapters is also used by /reload after a browser-extension pairing.
       // Never create a second live adapter for an account already running.
-      const version = createHash("sha256").update(`${acc.driver}:${acc.session || "env"}`).digest("hex");
+      const version = createHash("sha256").update(`${acc.driver}:${acc.session || "env"}:${acc.platform === "x" && mautrixPilotEnabled(acc.id)}`).digest("hex");
       const current = adapters.get(acc.id);
       if (current) {
         if (accountVersions.get(acc.id) === version) continue;
@@ -432,6 +460,7 @@ async function reconcileAdapters() {
       }
       const adapter = buildAdapter(acc);
       if (!adapter) continue;
+      if (acc.platform === "x" && acc.driver !== "api") pinMemories.set(acc.id, pinMemoryForAccount(acc));
       adapters.set(acc.id, adapter);
       accountVersions.set(acc.id, version);
       accountMeta.set(acc.id, { platform: acc.platform, label: acc.label });
@@ -470,6 +499,7 @@ async function reconcileAdapters() {
       const startup = connectorOperations.runLifecycle(adapter, "start", () =>
         adapter.start(onMessage, onRead, onReaction)
       );
+      void startup.then(() => restoreRememberedXPin(acc.id, adapter)).catch(() => {});
       const startupTimeoutMs = Number(process.env.SYNC_START_TIMEOUT_MS || 90_000);
       await withDeadline(startup, startupTimeoutMs, `${acc.platform} startup`).catch((e) =>
         console.error(`[${acc.platform}:${acc.label || acc.id}] startup not ready:`, e)
@@ -535,6 +565,22 @@ function startControlServer(): Promise<void> {
             : error instanceof Error ? error.message : "Group action failed." }));
         }
       }
+      if (req.method === "POST" && req.url === "/x/pin") {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {
+          res.writeHead(403); return res.end(JSON.stringify({ error: "Local workspace requests only." }));
+        }
+        try {
+          let body = "";
+          for await (const chunk of req) { body += chunk; if (body.length > 1024) { res.writeHead(413); return res.end(); } }
+          const { accountId, action } = JSON.parse(body);
+          const memory = pinMemories.get(accountId);
+          if (!memory || !["status", "forget"].includes(action)) { res.writeHead(404); return res.end(JSON.stringify({ error: "This X connection is not running." })); }
+          const pinStorage = action === "forget" ? await withXPinLock(accountId, () => memory.forget()) : await memory.status();
+          return res.end(JSON.stringify({ pinStorage }));
+        } catch { res.writeHead(503); return res.end(JSON.stringify({ error: "Could not access saved PIN settings." })); }
+      }
       if (req.method === "POST" && req.url === "/x/unlock") {
         res.setHeader("Content-Type", "application/json");
         if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress || "") || req.headers.origin) {
@@ -546,16 +592,23 @@ function startControlServer(): Promise<void> {
             body += chunk;
             if (body.length > 1024) { res.writeHead(413); return res.end(JSON.stringify({ error: "Unlock request is too large." })); }
           }
-          const { accountId, passcode } = JSON.parse(body);
+          const { accountId, passcode, rememberPin } = JSON.parse(body);
           if (typeof accountId !== "string" || !isXChatPin(passcode)) {
             res.writeHead(400); return res.end(JSON.stringify({ error: "Enter your 4-digit X Chat PIN." }));
           }
           const adapter = adapters.get(accountId);
-          if (!(adapter instanceof XAdapter)) { res.writeHead(404); return res.end(JSON.stringify({ error: "This X browser connection is not running." })); }
+          if (!(adapter instanceof XAdapter) && !(adapter instanceof XHybridAdapter)) { res.writeHead(404); return res.end(JSON.stringify({ error: "This X connection is not running." })); }
           if (!connectorOperations.canRecover(adapter)) { res.writeHead(409); return res.end(JSON.stringify({ error: "X is busy. Wait for the current operation to finish." })); }
-          let unlock;
-          await connectorOperations.runLifecycle(adapter, "recover", async () => { unlock = await adapter.unlockChat(passcode); });
-          return res.end(JSON.stringify({ unlock }));
+          const result = await withXPinLock(accountId, async () => {
+            if (adapters.get(accountId) !== adapter) throw new Error("Connection changed");
+            let unlock!: XUnlockState;
+            await connectorOperations.runLifecycle(adapter, "recover", async () => { unlock = await adapter.unlockChat(passcode); });
+            const memory = pinMemories.get(accountId);
+            const pinStorage = rememberPin === true ? await memory?.rememberVerified(passcode, unlock)
+              : rememberPin === false ? await memory?.forget() : await memory?.status();
+            return { unlock, pinStorage };
+          });
+          return res.end(JSON.stringify(result));
         } catch {
           res.writeHead(409); return res.end(JSON.stringify({ error: "X could not check the code yet. Wait for any active sync or rate limit to finish; no automatic retry was requested." }));
         }
@@ -1172,6 +1225,7 @@ function startConnectorRecovery() {
       );
     }
     for (const [id, adapter] of adapters) {
+      void restoreRememberedXPin(id, adapter).catch(() => {});
       const { state, detail } = adapter.getStatus();
       const now = Date.now();
       if (state === "ready") {

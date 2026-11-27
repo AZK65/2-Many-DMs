@@ -2,10 +2,11 @@
 // request pending across a reconnect; terminating this thread cancels the real
 // transport instead of merely timing out an HTTP observer of that request.
 const { parentPort, workerData } = require("node:worker_threads");
-const { Api, TelegramClient, utils } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { BinaryReader } = require("telegram/extensions/BinaryReader");
-const { Logger } = require("telegram/extensions/Logger");
+const { Api, TelegramClient, utils } = require("teleproto");
+const { StringSession } = require("teleproto/sessions");
+const { BinaryReader } = require("teleproto/extensions/BinaryReader");
+const { Logger } = require("teleproto/extensions/Logger");
+const { configureDownloadOnlyClient } = require("./telegram-download-only.cjs");
 
 async function resolveProfileEntity(client, peer) {
   // GramJS getEntity cannot getPeerId(InputPeerUserFromMessage). Use the
@@ -29,6 +30,7 @@ async function download() {
       baseLogger: new Logger("none"),
     });
   client.setLogLevel("none");
+  configureDownloadOnlyClient(client);
   // Do not create an exported connection to the already authenticated DC.
   const getSender = client.getSender.bind(client);
   client.getSender = dc => getSender(dc === client.session.dcId ? 0 : dc);

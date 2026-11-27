@@ -7,6 +7,8 @@ export type XUnlockState = {
   detail: string;
   startedAt?: number;
   updatedAt?: number;
+  /** True only when this attempt submitted and verified the supplied PIN. */
+  pinVerified?: boolean;
 };
 
 /** Polling can lag behind a completed request; old results must not mask a

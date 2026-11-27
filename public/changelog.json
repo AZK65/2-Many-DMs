@@ -1,6 +1,18 @@
 {
-  "current": "0.7.0",
+  "current": "0.7.1",
   "entries": [
+    {
+      "version": "0.7.1",
+      "date": "2026-11-27",
+      "title": "Live inbox updates and faster X chats",
+      "notes": [
+        "New messages refresh the inbox and open chats as soon as the sync worker saves them, with polling available if the live connection drops.",
+        "Telegram attachment and avatar downloads no longer subscribe to live updates, keeping new-message delivery on the main connection.",
+        "Optional Mautrix X connector prioritizes live messages and recent chats while older history restores. The existing browser connector remains the default and fallback; see the X connector setup guide.",
+        "X history progress now separates recent messages from older restoration, with longer waits after repeated rate limits.",
+        "On Mac, optionally remember a verified X Chat PIN in Keychain and remove it from Connections. Pending sends keep clean timestamps while failed or uncertain delivery remains visible."
+      ]
+    },
     {
       "version": "0.7.0",
       "date": "2026-11-26",

@@ -4,10 +4,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import bigInt from "big-integer";
 import { TelegramAdapter } from "./adapters/telegram";
-import { telegramSpecialBody, telegramPlaceholderRepair } from "./telegram-message-content";
+import { telegramRichMessageBody, telegramSpecialBody, telegramPlaceholderRepair } from "./telegram-message-content";
 
 test("native group creation and member additions have readable event summaries", () => {
   const created = new Api.MessageService({ id: 1, peerId: new Api.PeerChat({ chatId: bigInt(42) }), date: 1700000000, out: true, action: new Api.MessageActionChatCreate({ title: "Studio", users: [bigInt(7)] }) });
@@ -35,6 +35,20 @@ test("contacts, rich text polls, dice and valid locations retain their content",
   assert.doesNotMatch(telegramSpecialBody({ media: { className: "MessageMediaGeo", geo: { lat: NaN, long: 999 } } }), /https:/);
 });
 
+test("new Telegram rich messages render lists and formatting inside Omni", () => {
+  const richMessage = {
+    blocks: [{
+      className: "PageBlockOrderedList",
+      items: [
+        { className: "PageListOrderedItemText", num: "1", text: { className: "TextAutoEmail", text: { className: "TextPlain", text: "first@example.com" } } },
+        { className: "PageListOrderedItemText", num: "2", text: { className: "TextBold", text: { className: "TextPlain", text: "Second item" } } },
+      ],
+    }],
+  };
+  assert.equal(telegramRichMessageBody(richMessage), "1. first@example.com\n2. Second item");
+  assert.equal(telegramSpecialBody({ richMessage }), "1. first@example.com\n2. Second item");
+});
+
 test("adapter keeps actual text and attachments intact and formats real service messages", async () => {
   const adapter = new TelegramAdapter(12345, "a".repeat(32), "") as any;
   const chat = { id: 42, title: "Studio" };
@@ -50,7 +64,8 @@ test("adapter keeps actual text and attachments intact and formats real service 
 
 test("repair is restricted to exact Telegram placeholders", () => {
   assert.equal(telegramPlaceholderRepair("telegram", "[unsupported message]", "Group created."), true);
-  for (const [platform, old, next] of [["whatsapp", "[unsupported message]", "new"], ["telegram", "Real content", "new"], ["telegram", "[unsupported message]", ""], ["telegram", "[unsupported message]", "[unsupported message]"]]) assert.equal(telegramPlaceholderRepair(platform, old, next), false);
+  assert.equal(telegramPlaceholderRepair("telegram", "Telegram message type is not available here. Open Telegram to view it.", "1. Rich item"), true);
+  for (const [platform, old, next] of [["whatsapp", "[unsupported message]", "new"], ["telegram", "Real content", "new"], ["telegram", "[unsupported message]", ""], ["telegram", "[unsupported message]", "[unsupported message]"], ["telegram", "[unsupported message]", "Telegram message type is not available here. Open Telegram to view it."]]) assert.equal(telegramPlaceholderRepair(platform, old, next), false);
 });
 
 test("backfill repairs saved placeholders without duplicates, unread changes or losing timestamps", async () => {

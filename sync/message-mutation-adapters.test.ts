@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import bigInt from "big-integer";
 import { TelegramAdapter } from "./adapters/telegram";
 import { WhatsAppBaileysAdapter } from "./adapters/whatsapp-baileys";

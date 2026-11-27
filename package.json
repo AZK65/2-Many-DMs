@@ -28,7 +28,8 @@
     "x:login": "tsx sync/login-x.ts",
     "x:unlock": "tsx sync/x-unlock.ts",
     "x:clean-tweets": "tsx sync/delete-tweets.ts",
-    "db:clean-mock": "tsx prisma/clean-mock.ts"
+    "db:clean-mock": "tsx prisma/clean-mock.ts",
+    "x:build": "node scripts/build-x-mautrix.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -57,10 +58,10 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "skullet": "^0.0.3",
-    "telegram": "^2.26.22",
     "whatsapp-web.js": "github:timothydillan/whatsapp-web.js#fix/duplicate-events-and-bindings",
     "ws": "^8.21.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "teleproto": "^1.232.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.12",

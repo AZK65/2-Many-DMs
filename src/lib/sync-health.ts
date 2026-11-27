@@ -13,6 +13,15 @@ export type SyncHealth = {
   blockedChats: number;
   retryAt?: number;
   chats?: ChatSyncIssue[];
+  history?: {
+    recentReady: number;
+    recentPending: number;
+    olderPending: number;
+    completed: number;
+    discovering: boolean;
+    pagesFetched: number;
+    lastProgressAt?: number;
+  };
 };
 
 export type SyncStatus = {
@@ -29,6 +38,13 @@ export function syncHealthView(status?: SyncStatus, now = Date.now()) {
   if (paused) return { label: "Sync paused", tone: "attention", detail: "Automatic recovery is waiting for the platform. Saved messages remain available." } as const;
   if (status.state !== "ready") return { label: status.state === "qr" ? "Scan QR" : status.state === "starting" ? "Connecting" : status.detail?.toLowerCase().includes("reconnect") ? "Reconnect required" : "Connection interrupted", tone: "attention", detail: status.detail || "New messages may be delayed. Saved history remains available." } as const;
   if (health?.lastCheckedAt && now - health.lastCheckedAt > 15 * 60_000) return { label: "Checks delayed", tone: "attention", detail: "Connected, but the last successful inbox check is over 15 minutes old." } as const;
+  if (health?.history) {
+    const h = health.history;
+    const pausedChats = health.blockedChats ? ` ${health.blockedChats} ${health.blockedChats === 1 ? "chat will" : "chats will"} retry automatically.` : "";
+    if (h.recentPending) return { label: "Loading recent messages", tone: "progress", detail: `${h.recentReady} chats ready, ${h.recentPending} still to check. Recent messages load first; older history follows.${pausedChats}` } as const;
+    if (h.olderPending || h.discovering) return { label: "Recent messages ready", tone: "progress", detail: `${h.recentReady} chats checked. ${h.olderPending ? `Older history is loading in ${h.olderPending} chats.` : "Checking for older chats."}${h.completed ? ` ${h.completed} fully restored.` : ""}${pausedChats}` } as const;
+    return { label: "History restored", tone: "success", detail: `${h.completed} chats checked through the history X provided. Live messages stay connected.` } as const;
+  }
   if (health?.pendingChats) return { label: "Repairing history", tone: "progress", detail: `${health.pendingChats} chats queued${health.blockedChats ? `; ${health.blockedChats} paused chats will retry automatically` : ""}. Live messages stay connected.` } as const;
   if (health?.blockedChats) return { label: "History needs attention", tone: "attention", detail: `${health.blockedChats} chats are waiting for a later retry. Live messages remain connected, and saved history is safe.` } as const;
   if (health?.lastCheckedAt) return { label: "Recent inbox checked", tone: "success", detail: "No known pending history checks. This does not guarantee all older messages or attachments are available." } as const;

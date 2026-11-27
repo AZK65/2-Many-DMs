@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { watchInboxChanges } from "@/lib/live-inbox";
 import { Skeleton } from "skullet/react";
 import { MenuDetails } from "./MenuDetails";
 import { ClosePaneButton } from "./ClosePaneButton";
@@ -1738,7 +1739,7 @@ export function ChatThread({
       const ids = encodeURIComponent(deliveryIds(deliveryMessagesRef.current).join(","));
       const observed = encodeURIComponent(observedMessageIds(deliveryMessagesRef.current).join(","));
       const media = encodeURIComponent(pendingMediaIds(deliveryMessagesRef.current).join(","));
-      fetch(`/api/conversations/${conversation.id}/messages?limit=40&deliveryIds=${ids}&observedIds=${observed}&mediaIds=${media}`, { cache: "no-store" })
+      return fetch(`/api/conversations/${conversation.id}/messages?limit=40&deliveryIds=${ids}&observedIds=${observed}&mediaIds=${media}`, { cache: "no-store" })
         .then((r) => r.json())
         .then((data: { messages: MessageDTO[]; deliveries?: MessageDTO[]; missingObservedIds?: string[]; mediaUpdates?: MessageMediaUpdate[] }) => {
           if (!active || !data.messages) return;
@@ -1774,12 +1775,10 @@ export function ChatThread({
         })
         .catch(() => {});
     };
-    const t = setInterval(() => {
-      if (document.visibilityState === "visible") poll();
-    }, 3000);
+    const stopUpdates = watchInboxChanges(poll, 3000);
     return () => {
       active = false;
-      clearInterval(t);
+      stopUpdates();
       backfillAbortRef.current?.abort();
       backfillAbortRef.current = null;
     };
@@ -3845,7 +3844,7 @@ export function ChatThread({
                       <time dateTime={m.createdAt}>{clockTime(m.createdAt)}</time>
                       {m.editedAt && !m.deletedAt && <span title={new Date(m.editedAt).toLocaleString()}> · Edited</span>}
                       {!conversation.isGroup && (deliveryStatus === "sending" || deliveryStatus === "pending") && (
-                        <span> · Sending…</span>
+                        <span className="sr-only"> · Awaiting delivery confirmation</span>
                       )}
                       {conversation.platform === "x" && deliveryStatus === "sent" && m.externalKey?.includes(":pending:") && (
                         <span title="X accepted this message. Waiting for its final message confirmation."> · Sent to X</span>

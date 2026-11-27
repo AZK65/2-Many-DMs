@@ -11,6 +11,7 @@ const X_MEDIA_PREVIEWS: Record<string, string[]> = {
   file: ["Sent a file", "Sent a document", "Sent an attachment", "Attachment"],
 };
 import { configureSqlite } from "../src/lib/sqlite";
+import { publishInboxChange } from "../src/lib/inbox-events";
 
 export const prisma = new PrismaClient();
 export const prismaReady = configureSqlite(prisma);
@@ -18,7 +19,10 @@ export const prismaReady = configureSqlite(prisma);
 let writeQueue: Promise<void> = Promise.resolve();
 
 function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
-  const result = writeQueue.then(operation, operation);
+  const result = writeQueue.then(operation, operation).then(value => {
+    publishInboxChange();
+    return value;
+  });
   writeQueue = result.then(
     () => undefined,
     () => undefined

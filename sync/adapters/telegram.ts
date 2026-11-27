@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { addTelegramGroupMember } from "../group-member-transports";
 import { randomUUID } from "node:crypto";
-import { Api, TelegramClient, utils } from "telegram";
+import { Api, TelegramClient, utils } from "teleproto";
 import bigInt from "big-integer";
-import { StringSession } from "telegram/sessions";
-import { NewMessage, NewMessageEvent } from "telegram/events";
+import { StringSession } from "teleproto/sessions";
+import { NewMessage, NewMessageEvent } from "teleproto/events";
 import { existingAvatar, saveAvatarBuffer } from "../avatars";
 import { TelegramHistorySync } from "../telegram-history-sync";
 import { RecentChatRefresh } from "../recent-chat-refresh";
@@ -309,7 +309,7 @@ export class TelegramAdapter implements Adapter {
     await this.waitForOutboundPriority();
     const { id } = parseTarget(chatExternalId);
     const exactId = String(Math.abs(id));
-    const cachedPeer = (value: number, group: boolean): Api.TypeInputPeer | undefined => {
+    const cachedPeer = async (value: number, group: boolean): Promise<Api.TypeInputPeer | undefined> => {
       const entity = this.avatarEntities.get(String(Math.abs(value)));
       if (entity && Boolean(entity.title) === group) {
         try { return utils.getInputPeer(entity); } catch { /* incomplete entity */ }
@@ -322,17 +322,17 @@ export class TelegramAdapter implements Adapter {
           // MemorySession tries to cast TL Peer objects directly and throws
           // before consulting its entity cache. Pass the marked numeric ID.
           const markedId = utils.getPeerId(peer);
-          const input = this.client.session.getInputEntity(markedId);
+          const input = await this.client.session.getInputEntity(markedId);
           if (utils.getPeerId(input) === markedId) return input;
         } catch { /* not cached */ }
       }
       return undefined;
     };
-    let peer = cachedPeer(id, isGroup);
+    let peer = await cachedPeer(id, isGroup);
     if (!peer && !isGroup && context?.groupExternalId && context.senderMessageExternalId) {
       const groupId = parseTarget(context.groupExternalId).id;
       const match = /^telegram:(\d+):(\d+)$/.exec(context.senderMessageExternalId);
-      const group = cachedPeer(groupId, true);
+      const group = await cachedPeer(groupId, true);
       if (group && match && match[1] === String(Math.abs(groupId))) {
         peer = new Api.InputPeerUserFromMessage({ peer: group, msgId: Number(match[2]), userId: bigInt(exactId) });
       }
@@ -356,8 +356,8 @@ export class TelegramAdapter implements Adapter {
     this.forumTopics.set(chatId, map); // set first to avoid refetch storms
     try {
       const res: any = await this.client.invoke(
-        new Api.channels.GetForumTopics({
-          channel: chat,
+        new Api.messages.GetForumTopics({
+          peer: chat,
           limit: 100,
           offsetDate: 0,
           offsetId: 0,
@@ -1314,7 +1314,7 @@ export class TelegramAdapter implements Adapter {
     const setMuted = (muted: boolean) =>
       this.client.invoke(
         new Api.account.UpdateNotifySettings({
-          peer: new Api.InputNotifyPeer({ peer }),
+          peer,
           settings: new Api.InputPeerNotifySettings({
             // Telegram's maximum signed timestamp is its conventional
             // "forever" mute. Zero restores normal notifications.

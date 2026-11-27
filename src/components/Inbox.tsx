@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { watchInboxChanges } from "@/lib/live-inbox";
 import { AnimatePresence, motion } from "motion/react";
 import type {
   ConversationDTO,
@@ -524,10 +525,10 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
     };
   }, []);
 
-  // Poll for new inbound messages synced by the worker. Selection lives in its
+  // Refresh on worker notifications, with polling as a fallback. Selection lives in its
   // own state, so refreshing the list never changes which thread is open.
   useEffect(() => {
-    const t = setInterval(() => {
+    const refresh = () =>
       fetch("/api/conversations?poll=1", {
         headers: conversationEtag.current
           ? { "If-None-Match": conversationEtag.current }
@@ -545,7 +546,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
           // A newly synced conversation needs its contact/account metadata,
           // which is intentionally absent from the lightweight poll response.
           if (updates.some((update) => !conversationIdsRef.current.has(update.id))) {
-            fetch("/api/conversations", { cache: "no-store" })
+            return fetch("/api/conversations", { cache: "no-store" })
               .then((response) => {
                 conversationEtag.current = response.headers.get("etag");
                 return parseJsonResponse<ConversationDTO[]>(response, "Conversations");
@@ -558,7 +559,6 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
                 setLoadError(null);
               })
               .catch(() => {});
-            return;
           }
 
           const byId = new Map(updates.map((update) => [update.id, update]));
@@ -579,8 +579,7 @@ export function Inbox({ readOnly = false }: { readOnly?: boolean }) {
           );
         })
         .catch(() => {});
-    }, 5000);
-    return () => clearInterval(t);
+    return watchInboxChanges(refresh, 5000);
   }, []);
 
   useEffect(() => {

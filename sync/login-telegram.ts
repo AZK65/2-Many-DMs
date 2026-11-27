@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
+import { TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
 import input from "input";
 
 const apiId = Number(process.env.TELEGRAM_API_ID);

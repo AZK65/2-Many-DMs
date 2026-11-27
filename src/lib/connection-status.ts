@@ -25,7 +25,10 @@ export function livePlatformStatuses(raw: Record<string, unknown> | null) {
       platform, state: candidate.state as LiveConnectionState,
       ...(typeof candidate.detail === "string" ? { detail: candidate.detail.slice(0, 160) } : {}),
       ...(candidate.sync ? { sync: { lastCheckedAt: candidate.sync.lastCheckedAt, lastMessageAt: candidate.sync.lastMessageAt,
-        pendingChats: candidate.sync.pendingChats, blockedChats: candidate.sync.blockedChats, retryAt: candidate.sync.retryAt } } : {}),
+        pendingChats: candidate.sync.pendingChats, blockedChats: candidate.sync.blockedChats, retryAt: candidate.sync.retryAt,
+        ...(candidate.sync.history ? { history: { recentReady: candidate.sync.history.recentReady, recentPending: candidate.sync.history.recentPending,
+          olderPending: candidate.sync.history.olderPending, completed: candidate.sync.history.completed, discovering: candidate.sync.history.discovering,
+          pagesFetched: candidate.sync.history.pagesFetched, lastProgressAt: candidate.sync.history.lastProgressAt } } : {}) } } : {}),
     };
   }
   return result;

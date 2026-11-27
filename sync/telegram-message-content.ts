@@ -8,6 +8,56 @@ const kind = (value: Native | null | undefined): string => value?.className || "
 const memberName = (entity: Native | undefined): string =>
   [text(entity?.firstName), text(entity?.lastName)].filter(Boolean).join(" ") || text(entity?.username);
 
+function telegramRichText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  const node = value as Native;
+  if (Array.isArray(node.texts))
+    return node.texts.map(telegramRichText).filter(Boolean).join("");
+  if (node.text != null) return telegramRichText(node.text);
+  return "";
+}
+
+function telegramRichList(block: Native, ordered: boolean): string {
+  const items: Native[] = Array.isArray(block.items) ? block.items : [];
+  return items
+    .map((item, index) => {
+      const itemText = telegramRichText(item.text) ||
+        telegramRichBlocks(item.blocks);
+      if (!itemText) return "";
+      const checked = item.checkbox ? (item.checked ? "☑" : "☐") : "";
+      const marker = checked || (ordered ? `${text(item.num) || index + 1}.` : "•");
+      return `${marker} ${itemText}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function telegramRichBlock(block: Native): string {
+  switch (kind(block)) {
+    case "PageBlockOrderedList": return telegramRichList(block, true);
+    case "PageBlockList": return telegramRichList(block, false);
+    case "PageBlockDivider": return "—";
+    case "PageBlockPhoto": return telegramRichText(block.caption?.text) || "Photo";
+    case "PageBlockVideo": return telegramRichText(block.caption?.text) || "Video";
+    case "PageBlockAudio": return telegramRichText(block.caption?.text) || "Audio";
+    case "PageBlockEmbed": return telegramRichText(block.caption?.text) || text(block.url);
+    case "PageBlockMap": return telegramRichText(block.caption?.text) || "Map";
+    case "PageBlockUnsupported": return "";
+    default: return telegramRichText(block.text) || telegramRichBlocks(block.blocks);
+  }
+}
+
+function telegramRichBlocks(value: unknown): string {
+  const blocks: Native[] = Array.isArray(value) ? value : [];
+  return blocks.map(telegramRichBlock).filter(Boolean).join("\n\n");
+}
+
+export function telegramRichMessageBody(value: unknown): string {
+  const rich = value as Native | null;
+  return telegramRichBlocks(rich?.blocks).trim();
+}
+
 export function telegramSpecialBody(message: Native, actorName?: string, names?: ReadonlyMap<string, string>): string {
   const actorId = String(message.senderId ?? message.fromId?.userId ?? message.fromId?.channelId ?? "");
   const actor = message.out ? "You" : text(actorName) || memberName(message.sender) || "A member";
@@ -53,6 +103,8 @@ export function telegramSpecialBody(message: Native, actorName?: string, names?:
       default: return "Telegram service update. Open Telegram for details.";
     }
   }
+  const structured = telegramRichMessageBody(message.richMessage);
+  if (structured) return structured;
   const media = message.media;
   switch (kind(media)) {
     case "MessageMediaContact": return ["Shared contact", [text(media.firstName), text(media.lastName)].filter(Boolean).join(" "), text(media.phoneNumber)].filter(Boolean).join("\n");
@@ -73,5 +125,12 @@ export function telegramSpecialBody(message: Native, actorName?: string, names?:
 }
 
 export function telegramPlaceholderRepair(platform: string, oldBody: string, newBody: string): boolean {
-  return platform === "telegram" && oldBody.trim() === "[unsupported message]" && !!newBody.trim() && newBody.trim() !== "[unsupported message]";
+  const placeholders = new Set([
+    "[unsupported message]",
+    "Telegram message type is not available here. Open Telegram to view it.",
+  ]);
+  return platform === "telegram" &&
+    placeholders.has(oldBody.trim()) &&
+    !!newBody.trim() &&
+    !placeholders.has(newBody.trim());
 }

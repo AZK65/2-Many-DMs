@@ -78,6 +78,10 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
   const [unlockResult, setUnlockResult] = useState<XUnlockState | null>(null);
   const [unlockError, setUnlockError] = useState("");
   const [showCode, setShowCode] = useState(false);
+  const [rememberPin, setRememberPin] = useState(false);
+  const [pinStorage, setPinStorage] = useState<{ available: boolean; saved: boolean; autoUnlock: boolean; error?: string } | null>(null);
+  const [pinNotice, setPinNotice] = useState("");
+  const pinChoiceSet = useRef(false);
   const [checkStartedAt, setCheckStartedAt] = useState(0);
   const [now, setNow] = useState(Date.now);
   const unlockRequest = useRef<AbortController | null>(null);
@@ -89,6 +93,23 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
   const needsCode = platform === "x" && (xNeedsUnlock(live) || checking || Boolean(unlockError));
   const notified = useRef(false);
   const callback = useRef(onReady); callback.current = onReady;
+  useEffect(() => {
+    if (platform !== "x") return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      try {
+        const result = await fetchJson<{ pinStorage: NonNullable<typeof pinStorage> }>(`/api/accounts/x/passcode?accountId=${encodeURIComponent(accountId)}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) }, "Saved PIN settings");
+        if (!stopped) {
+          setPinStorage(result.pinStorage);
+          if (!pinChoiceSet.current) { setRememberPin(result.pinStorage.saved); pinChoiceSet.current = true; }
+        }
+      } catch { if (!stopped) setPinStorage(null); }
+      if (!stopped) timer = setTimeout(load, 4000);
+    };
+    void load();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [accountId, platform]);
   useEffect(() => { if (ready && !notified.current) { notified.current = true; callback.current?.(); } }, [ready]);
   useEffect(() => {
     if (!checking) return;
@@ -109,11 +130,16 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
     const update = live?.unlock;
     if (!unlockRequest.current || !update || update.state === "verifying" || update.state === "required" ||
       (update.updatedAt ?? update.startedAt ?? 0) < checkStartedAt) return;
+    // Saving follows provider verification. Keep this request long enough to
+    // report Keychain errors instead of treating an unlocked inbox as a save.
+    if (update.state === "unlocked" && rememberPin && pinStorage?.available) {
+      setUnlockResult(update); setPasscode(""); return;
+    }
     // A lost POST response must not conceal the result already received by
     // status polling. Aborting the local fetch never resubmits the PIN.
     unlockRequest.current.abort(); unlockRequest.current = null;
     setUnlockResult(update); setUnlockError(""); setBusy(false); setPasscode("");
-  }, [live?.unlock, checkStartedAt]);
+  }, [live?.unlock, checkStartedAt, rememberPin, pinStorage?.available]);
   useEffect(() => {
     if (live?.unlock?.state !== "unlocked") return;
     setUnlockError("");
@@ -134,13 +160,28 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
     setCheckStartedAt(Date.now()); setNow(Date.now());
     const code = passcode; setShowCode(false);
     try {
-      const result = await fetchJson<{ unlock: XUnlockState }>("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode: code }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(X_UNLOCK_UI_TIMEOUT_MS)]) }, "X Chat unlock");
-      if (unlockRequest.current === controller) setUnlockResult(result.unlock);
+      setPinNotice("");
+      const result = await fetchJson<{ unlock: XUnlockState; pinStorage?: NonNullable<typeof pinStorage> }>("/api/accounts/x/passcode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, passcode: code, ...(pinStorage?.available ? { rememberPin } : {}) }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(X_UNLOCK_UI_TIMEOUT_MS)]) }, "X Chat unlock");
+      if (unlockRequest.current === controller) {
+        setUnlockResult(result.unlock);
+        if (result.pinStorage) { setPinStorage(result.pinStorage); setPinNotice(result.pinStorage.error || ""); }
+      }
     } catch (cause) {
       if (unlockRequest.current === controller) setUnlockError((cause as Error).name === "TimeoutError" ? "X did not return a result in time. This does not mean your PIN is wrong. Check X before trying again; no automatic retry was made." : (cause as Error).message);
     } finally {
       if (unlockRequest.current === controller) { unlockRequest.current = null; setBusy(false); setPasscode(""); }
     }
+  }
+  async function forgetPin() {
+    if (busy || checkingCode) return;
+    setBusy(true); setPinNotice("");
+    try {
+      const result = await fetchJson<{ pinStorage: NonNullable<typeof pinStorage> }>(`/api/accounts/x/passcode?accountId=${encodeURIComponent(accountId)}`, { method: "DELETE", signal: AbortSignal.timeout(15_000) }, "Forget saved PIN");
+      setPinStorage(result.pinStorage);
+      if (result.pinStorage.error) setPinNotice(result.pinStorage.error);
+      else { setRememberPin(false); pinChoiceSet.current = true; setPinNotice("Saved PIN removed. This connection stays unlocked until it restarts."); }
+    } catch { setPinNotice("Could not remove the saved PIN. Try again when sync is running."); }
+    finally { setBusy(false); }
   }
   return <div className="space-y-4">
     <div role="status" className={`rounded-xl p-4 ${ready ? "bg-accent/10" : "bg-slate-50 dark:bg-neutral-800"}`}>
@@ -149,13 +190,22 @@ export function ConnectionProgress({ accountId, platform, onReady }: { accountId
     </div>
     {connections && !connections.workerRunning && <button type="button" disabled={busy} onClick={start} className={setupButton}>{busy ? "Starting sync…" : "Start sync"}</button>}
     {needsCode && <form onSubmit={unlock} className="space-y-3" aria-busy={checkingCode}>
-      <SetupField label="X Chat PIN · 4 digits" autoFocus type={showCode ? "text" : "password"} inputMode="numeric" autoComplete="off" value={passcode} onChange={e => setPasscode(e.target.value.replace(/\D/g, ""))} maxLength={X_CHAT_PIN_LENGTH} minLength={X_CHAT_PIN_LENGTH} pattern="[0-9]{4}" required disabled={busy || checkingCode} hint={`${passcode.length} of 4 digits entered. Use your Chat PIN, not your X password or an SMS code. The PIN is not saved to disk.`} />
+      <SetupField label="X Chat PIN · 4 digits" autoFocus type={showCode ? "text" : "password"} inputMode="numeric" autoComplete="off" value={passcode} onChange={e => setPasscode(e.target.value.replace(/\D/g, ""))} maxLength={X_CHAT_PIN_LENGTH} minLength={X_CHAT_PIN_LENGTH} pattern="[0-9]{4}" required disabled={busy || checkingCode} hint={`${passcode.length} of 4 digits entered. Use your Chat PIN, not your X password or an SMS code.`} />
+      {pinStorage?.available ? <label className="flex cursor-pointer items-start gap-3 rounded-lg p-2 transition-colors hover:bg-slate-50 dark:hover:bg-neutral-800">
+        <input type="checkbox" checked={rememberPin} disabled={busy || checkingCode} onChange={e => { pinChoiceSet.current = true; setRememberPin(e.target.checked); }} className="mt-0.5 h-4 w-4 shrink-0 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+        <span><span className="block text-sm font-medium">Remember PIN on this Mac</span><span className="mt-1 block text-xs text-slate-500 dark:text-neutral-400">Save in macOS Keychain to unlock X after restarts. You can forget it here anytime. Leave off to use it only for this session.</span></span>
+      </label> : <p className="text-xs text-slate-500 dark:text-neutral-400">{pinStorage?.error || "Checking whether this computer can remember your PIN…"}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button type="button" onClick={() => setShowCode(value => !value)} aria-pressed={showCode} disabled={busy || checkingCode} className={setupSecondary}>{showCode ? "Hide code" : "Show code"}</button>
         <button disabled={busy || checkingCode || !isXChatPin(passcode)} className={setupButton}>{checkOverdue ? "Result unavailable" : checkingCode ? "Checking PIN…" : "Unlock chats"}</button>
       </div>
       <p className="text-xs text-slate-500 dark:text-neutral-400">We only confirm success after X opens your inbox. Incorrect codes are not retried automatically. <a href="https://x.com/i/chat" target="_blank" rel="noreferrer" className="text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Forgot your code? Recover it in X.</a></p>
     </form>}
+    {platform === "x" && pinStorage?.saved && <div className="flex items-start justify-between gap-3 text-xs">
+      <p className="pt-2 text-slate-500 dark:text-neutral-400">{pinStorage.autoUnlock ? "PIN saved in this Mac’s Keychain. Automatic unlock is on." : "Saved PIN needs checking. Automatic unlock is paused; enter your PIN again to resume."}</p>
+      <button type="button" onClick={forgetPin} disabled={busy || checkingCode} className={`${setupSecondary} shrink-0`}>Forget PIN</button>
+    </div>}
+    {pinNotice && <p role="status" className="text-sm text-slate-500 dark:text-neutral-400">{pinNotice}</p>}
     {!checkingCode && feedback && feedback.state !== "required" && feedback.state !== "verifying" && <p role={feedback.state === "unlocked" ? "status" : "alert"} className={`rounded-lg p-3 text-sm ${feedback.state === "unlocked" ? "bg-accent/10 text-slate-900 dark:text-neutral-100" : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300"}`}>{feedback.detail}</p>}
     {unlockError && <SetupError>{unlockError}</SetupError>}
     {error && <SetupError>{error}</SetupError>}

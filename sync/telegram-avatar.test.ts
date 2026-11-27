@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import bigInt from "big-integer";
-import { BinaryReader } from "telegram/extensions/BinaryReader";
+import { BinaryReader } from "teleproto/extensions/BinaryReader";
 import { TelegramAdapter } from "./adapters/telegram";
 const { resolveProfileEntity } = require("./telegram-media-download-worker.cjs");
 

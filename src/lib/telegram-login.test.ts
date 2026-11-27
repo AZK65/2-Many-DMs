@@ -1,7 +1,7 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
+import { TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
 import { startLogin, verifyLogin, cancelLogin } from "./telegram-login";
 
 test("Telegram login survives bad codes and database retries, but cannot cross users", async () => {

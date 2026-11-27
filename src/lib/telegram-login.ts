@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { Api, TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
-import { computeCheck } from "telegram/Password";
-import { Logger } from "telegram/extensions";
-import { LogLevel } from "telegram/extensions/Logger";
+import { Api, TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
+import { computeCheck } from "teleproto/Password";
+import { Logger } from "teleproto/extensions";
+import { LogLevel } from "teleproto/extensions/Logger";
 import { telegramSetupError, telegramSetupErrorCode, type SetupError } from "./connection-setup";
 
 type Pending = {

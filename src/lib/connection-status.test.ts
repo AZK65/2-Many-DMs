@@ -19,3 +19,10 @@ test("restart badges use current status without credentials or historical fallba
     whatsapp: { state: "qr", detail: "Scan QR", qr: "secret" },
   }), { whatsapp: { platform: "whatsapp", state: "qr", detail: "Scan QR" } });
 });
+
+test("history progress reaches the connection panel without forwarding private chat records", () => {
+  const history = { recentReady: 34, recentPending: 69, olderPending: 34, completed: 0, discovering: true, pagesFetched: 34, lastProgressAt: 1000 };
+  const result = livePlatformStatuses({ x: { state: "ready", sync: { pendingChats: 103, blockedChats: 0, history: { ...history, secret: "must not pass" }, chats: [{ externalId: "private" }] } } });
+  assert.deepEqual(result.x.sync?.history, history);
+  assert.equal(result.x.sync?.chats, undefined);
+});
