@@ -59,9 +59,8 @@ import CryptoKit
     var selected: Conversation? { conversations.first { $0.id == selectedID } }
     var unreadCount: Int { conversations.filter { !$0.archived && !$0.hidden }.reduce(0) { $0 + $1.unread } }
     var visible: [Conversation] {
-        conversations.filter { filter.includes($0) && (platform == "all" || $0.platform == platform) &&
-            (search.isEmpty || "\($0.name) \($0.contact.handle) \($0.lastMessage ?? "")".localizedCaseInsensitiveContains(search)) }
-            .sorted { $0.pinned == $1.pinned ? $0.date > $1.date : $0.pinned && !$1.pinned }
+        sortedConversations(conversations.filter { filter.includes($0) && (platform == "all" || $0.platform == platform) &&
+            (search.isEmpty || "\($0.name) \($0.contact.handle) \($0.lastMessage ?? "")".localizedCaseInsensitiveContains(search)) })
     }
     var draft: String { get { drafts[selectedID ?? ""] ?? "" } set { guard let id = selectedID else { return }; drafts[id] = newValue; saveDrafts() } }
     var serviceAddress: String { api.base.absoluteString }

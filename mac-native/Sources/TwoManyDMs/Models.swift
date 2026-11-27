@@ -88,12 +88,28 @@ struct SearchHit: Decodable, Identifiable { var id: String; var conversationId: 
 struct SearchPage: Decodable { var results: [SearchHit]; var hasMore: Bool? }
 struct NetworkStatus: Identifiable, Equatable { var id: String; var name: String; var state: String; var detail: String }
 
+private enum NativeDates {
+    static let lock = NSLock()
+    static let cache: NSCache<NSString, NSDate> = { let cache = NSCache<NSString, NSDate>(); cache.countLimit = 20000; return cache }()
+    static let fractional: ISO8601DateFormatter = { let parser = ISO8601DateFormatter(); parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return parser }()
+    static let seconds: ISO8601DateFormatter = { let parser = ISO8601DateFormatter(); parser.formatOptions = [.withInternetDateTime]; return parser }()
+}
 func parseDate(_ value: String) -> Date {
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = parser.date(from: value) { return date }
-    parser.formatOptions = [.withInternetDateTime]
-    return parser.date(from: value) ?? .distantPast
+    if let cached = NativeDates.cache.object(forKey: value as NSString) { return cached as Date }
+    NativeDates.lock.lock(); defer { NativeDates.lock.unlock() }
+    let date = NativeDates.fractional.date(from: value) ?? NativeDates.seconds.date(from: value) ?? .distantPast
+    NativeDates.cache.setObject(date as NSDate, forKey: value as NSString)
+    return date
+}
+
+func sortedConversations(_ chats: [Conversation]) -> [Conversation] {
+    // Parse once per chat, outside the sort comparator. The original formatter
+    // allocation in every comparison blocked large real inboxes on startup.
+    chats.map { (chat: $0, date: $0.date) }.sorted {
+        if $0.chat.pinned != $1.chat.pinned { return $0.chat.pinned }
+        if $0.date != $1.date { return $0.date > $1.date }
+        return $0.chat.id < $1.chat.id
+    }.map(\.chat)
 }
 
 func mergeMessages(_ existing: [Message], _ incoming: [Message]) -> [Message] {

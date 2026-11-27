@@ -72,6 +72,20 @@ final class FixtureProtocol: URLProtocol {
         let restored = try JSONDecoder().decode(NativeDraftState.self, from: JSONEncoder().encode(journal))
         check(restored.attempts["fixture-chat"] == attempt && restored.drafts["fixture-chat"] == attempt.body, "draft and unresolved send identity survive a restart together")
         check(api.localMediaURL("http://user:secret@127.0.0.1:3000/media/example.png") == nil, "media URL cannot inject credentials")
+        let formatter = ISO8601DateFormatter()
+        let bulk = (0..<5000).map { index in
+            Conversation(id: "bulk-\(index)", platform: "x", unread: 0,
+                lastMessageAt: formatter.string(from: Date(timeIntervalSince1970: Double(1700000000 + index))),
+                pinned: false, hidden: false, archived: false, inboxCategory: "general", status: "open", isGroup: false,
+                contact: Contact(name: "Synthetic contact", handle: "test"))
+        }
+        let began = Date()
+        let sorted = sortedConversations(bulk)
+        check(sorted.first?.id == "bulk-4999" && sorted.last?.id == "bulk-0", "large inbox retains newest-first ordering")
+        check(Date().timeIntervalSince(began) < 5, "5000-chat initial sort stays within five seconds")
+        let cachedStart = Date()
+        for _ in 0..<10 { _ = sortedConversations(bulk) }
+        check(Date().timeIntervalSince(cachedStart) < 5, "repeated large inbox renders reuse parsed dates")
         if CommandLine.arguments.contains("--live") {
             let chats: [Conversation] = try await api.get("api/conversations")
             check(!chats.isEmpty, "existing inbox decodes in native client")
