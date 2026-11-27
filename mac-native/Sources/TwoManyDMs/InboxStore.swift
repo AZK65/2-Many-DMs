@@ -161,7 +161,7 @@ import CryptoKit
             if let attempt = attempts[id], let receipt = messages.first(where: { $0.id == attempt.id }) {
                 if drafts[id] == attempt.body { drafts[id] = "" }
                 attempts[id] = nil; uncertainSends.remove(id)
-                sendErrors[id] = receipt.uncertain || receipt.deliveryStatus == "failed" ? "Delivery needs checking. Open the full workspace to review it." : nil
+                sendErrors[id] = receipt.deliveryStatus == "unconfirmed" || receipt.deliveryStatus == "failed" ? "Delivery needs checking. Open the full workspace to review it." : nil
                 saveDrafts()
             }
             if markRead, let index = conversations.firstIndex(where: { $0.id == id }) { conversations[index].unread = 0 }
@@ -198,7 +198,7 @@ import CryptoKit
             if attachments[chat.id] == attachment { attachments[chat.id] = nil }
             if replies[chat.id]?.id == reply?.id { replies[chat.id] = nil }
             attempts[chat.id] = nil; uncertainSends.remove(chat.id); saveDrafts()
-            if message.deliveryStatus == "failed" || message.uncertain { sendErrors[chat.id] = message.deliveryError ?? "Delivery needs checking. Open the full workspace to review it." }
+            if message.deliveryStatus == "failed" || message.deliveryStatus == "unconfirmed" { sendErrors[chat.id] = message.deliveryError ?? "Delivery needs checking. Open the full workspace to review it." }
             await refresh()
         } catch ClientError.response(let detail) {
             attempts[chat.id] = nil; saveDrafts()
