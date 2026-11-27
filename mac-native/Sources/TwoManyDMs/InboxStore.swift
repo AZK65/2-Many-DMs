@@ -3,12 +3,13 @@ import SwiftUI
 import CryptoKit
 
 @MainActor final class InboxStore: ObservableObject {
-    @Published var conversations: [Conversation] = []
+    @Published var conversations: [Conversation] = [] { didSet { rebuildVisible() } }
+    @Published private(set) var visible: [Conversation] = []
     @Published var selectedID: String?
     @Published var messages: [Message] = []
-    @Published var filter: InboxFilter = .all
-    @Published var platform = "all"
-    @Published var search = ""
+    @Published var filter: InboxFilter = .all { didSet { rebuildVisible() } }
+    @Published var platform = "all" { didSet { rebuildVisible() } }
+    @Published var search = "" { didSet { rebuildVisible() } }
     @Published var searchHits: [SearchHit] = []
     @Published var searchBusy = false
     @Published var loading = true
@@ -34,6 +35,8 @@ import CryptoKit
     private var eventTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
+    private var draftSaveTask: Task<Void, Never>?
+    private var chatCache = NativeChatCache()
     private var refreshing = false, refreshAgain = false
     private var lastRefresh = Date.distantPast
     private let defaults: UserDefaults
@@ -50,6 +53,7 @@ import CryptoKit
             conversations = DemoData.chats; selectedID = conversations.first?.id
             messages = DemoData.messages; networks = DemoData.networks; loading = false; online = true
         } else { loadDrafts() }
+        rebuildVisible()
     }
     var sendError: String? {
         get { sendErrors[selectedID ?? ""] }
@@ -58,11 +62,23 @@ import CryptoKit
     var currentSendError: String? { sendError ?? (selectedID.map { uncertainSends.contains($0) } == true ? "An earlier send needs review. Check this chat in the full workspace before sending again." : nil) }
     var selected: Conversation? { conversations.first { $0.id == selectedID } }
     var unreadCount: Int { conversations.filter { !$0.archived && !$0.hidden }.reduce(0) { $0 + $1.unread } }
-    var visible: [Conversation] {
-        sortedConversations(conversations.filter { filter.includes($0) && (platform == "all" || $0.platform == platform) &&
+    private func rebuildVisible() {
+        let next = sortedConversations(conversations.filter { filter.includes($0) && (platform == "all" || $0.platform == platform) &&
             (search.isEmpty || "\($0.name) \($0.contact.handle) \($0.lastMessage ?? "")".localizedCaseInsensitiveContains(search)) })
+        if next != visible { visible = next }
     }
-    var draft: String { get { drafts[selectedID ?? ""] ?? "" } set { guard let id = selectedID else { return }; drafts[id] = newValue; saveDrafts() } }
+    var draft: String {
+        get { drafts[selectedID ?? ""] ?? "" }
+        set {
+            guard let id = selectedID, drafts[id] != newValue else { return }
+            drafts[id] = newValue
+            draftSaveTask?.cancel()
+            draftSaveTask = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: 300_000_000); self?.saveDrafts() } catch {}
+            }
+        }
+    }
+    func flushDrafts() { draftSaveTask?.cancel(); saveDrafts() }
     var serviceAddress: String { api.base.absoluteString }
     var canSend: Bool { selectedID != nil && !sending.contains(selectedID!) && !uncertainSends.contains(selectedID!) &&
         (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachments[selectedID!] != nil) }
@@ -98,7 +114,7 @@ import CryptoKit
             }
         }
     }
-    func stop() { refreshTask?.cancel(); eventTask?.cancel(); searchTask?.cancel(); selectionTask?.cancel(); refreshTask = nil; eventTask = nil }
+    func stop() { flushDrafts(); refreshTask?.cancel(); eventTask?.cancel(); searchTask?.cancel(); selectionTask?.cancel(); refreshTask = nil; eventTask = nil }
     func refresh() async {
         guard !demo else { return }
         if refreshing { refreshAgain = true; return }
@@ -114,15 +130,22 @@ import CryptoKit
             guard service === api else { return }
             if (response as? HTTPURLResponse)?.statusCode != 304 {
                 try service.validate(response, data)
-                if full { conversations = try JSONDecoder().decode([Conversation].self, from: data); needsFullSnapshot = false }
+                if full {
+                    let next = try JSONDecoder().decode([Conversation].self, from: data)
+                    if next != conversations { conversations = next }
+                    needsFullSnapshot = false
+                }
                 else {
                     let updates = try JSONDecoder().decode([ConversationUpdate].self, from: data)
                     let existing = Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { _, next in next })
                     if updates.contains(where: { existing[$0.id] == nil }) {
                         let snapshot: [Conversation] = try await service.get("api/conversations")
                         guard service === api else { return }
-                        conversations = snapshot
-                    } else { conversations = updates.compactMap { update in existing[update.id].map { update.applying(to: $0) } } }
+                        if conversations != snapshot { conversations = snapshot }
+                    } else {
+                        let next = updates.compactMap { update in existing[update.id].map { update.applying(to: $0) } }
+                        if next != conversations { conversations = next }
+                    }
                 }
                 etag = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
                 lastEndpoint = endpoint
@@ -137,11 +160,16 @@ import CryptoKit
         }
     }
     func select(_ id: String?, focus: String? = nil) {
-        selectedID = id; focusedMessageID = focus; messages = []; chatError = nil; hasMore = false
+        guard id != selectedID || focus != nil else { return }
+        flushDrafts()
+        if let current = selectedID { chatCache.store(current, messages: messages, hasMore: hasMore) }
         selectionTask?.cancel()
-        guard let id else { return }
-        if demo { messages = DemoData.messagesFor(id); return }
-        loadingChat = true
+        selectedID = id; focusedMessageID = focus; chatError = nil; loadingChat = false
+        guard let id else { messages = []; hasMore = false; return }
+        if demo { messages = chatCache.take(id)?.messages ?? DemoData.messagesFor(id); hasMore = false; return }
+        if let cached = chatCache.take(id) {
+            messages = cached.messages; hasMore = cached.hasMore
+        } else { messages = []; hasMore = false; loadingChat = true }
         selectionTask = Task {
             await refreshMessages(id, focus: focus, markRead: true)
             if selectedID == id { loadingChat = false }
@@ -149,8 +177,13 @@ import CryptoKit
     }
     private func apply(_ page: MessagePage, older: Bool = false) {
         let removed = Set(page.missingObservedIds ?? [])
-        messages = mergeMessages(messages.filter { !removed.contains($0.id) }, page.messages + (page.deliveries ?? []))
+        let next = mergeMessages(messages.filter { !removed.contains($0.id) }, page.messages + (page.deliveries ?? []))
+        if next != messages { messages = next }
         if older || messages.count <= 75 { hasMore = page.hasMore }
+        if let id = selectedID {
+            if messages.isEmpty { chatCache.remove(id) }
+            else { chatCache.store(id, messages: messages, hasMore: hasMore) }
+        }
     }
     func refreshMessages(_ id: String, focus: String? = nil, markRead: Bool = false) async {
         let service = api
@@ -226,16 +259,16 @@ import CryptoKit
             else { attachments[id] = url }
         }
     }
-    func update(_ chat: Conversation, body: [String: Any]) async {
+    @discardableResult func update(_ chat: Conversation, body: [String: Any]) async -> Bool {
         if demo {
             if let index = conversations.firstIndex(where: { $0.id == chat.id }) {
                 if let pinned = body["pinned"] as? Bool { conversations[index].pinned = pinned }
                 if let status = body["status"] as? String { conversations[index].status = status }
             }
-            return
+            return true
         }
-        do { try await api.patchConversation(chat.id, body: body); etag = nil; needsFullSnapshot = true; await refresh() }
-        catch { self.error = error.localizedDescription }
+        do { try await api.patchConversation(chat.id, body: body); error = nil; etag = nil; needsFullSnapshot = true; await refresh(); return true }
+        catch { self.error = error.localizedDescription; return false }
     }
     func searchMessages() {
         searchTask?.cancel(); searchHits = []
@@ -259,6 +292,7 @@ import CryptoKit
         stop(); api = LocalAPI(base: base); etag = nil; needsFullSnapshot = true; eventsConnected = false
         defaults.set(base.absoluteString, forKey: "serviceURL")
         conversations = []; messages = []; selectedID = nil; drafts = [:]; attachments = [:]; replies = [:]; loading = true
+        chatCache = NativeChatCache()
         attempts = [:]; uncertainSends = []; sendErrors = [:]; networks = []; searchHits = []
         search = ""; filter = .all; platform = "all"; chatError = nil; error = nil; online = false
         focusedMessageID = nil; hasMore = false; loadingChat = false
@@ -270,7 +304,7 @@ import CryptoKit
     }
     private func readNetworks(_ data: Data) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let platforms = root["platforms"] as? [String: Any] else { return }
-        networks = ["telegram", "whatsapp", "x", "discord", "gmail"].compactMap { platform in
+        let next: [NetworkStatus] = ["telegram", "whatsapp", "x", "discord", "gmail"].compactMap { platform -> NetworkStatus? in
             guard let value = platforms[platform] as? [String: Any], let state = value["state"] as? String else { return nil }
             let sync = value["sync"] as? [String: Any]
             let retry = (sync?["retryAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) > Date() } ?? false
@@ -278,6 +312,7 @@ import CryptoKit
             let detail = retry ? "Waiting for platform retry" : queued > 0 ? "\(queued) chats restoring older history" : (value["detail"] as? String ?? "")
             return NetworkStatus(id: platform, name: platform == "x" ? "X" : platform == "whatsapp" ? "WhatsApp" : platform.capitalized, state: state, detail: detail)
         }
+        if networks != next { networks = next }
     }
     private var draftURL: URL {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("2ManyDMs")

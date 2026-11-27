@@ -17,110 +17,133 @@ struct SidebarMaterial: NSViewRepresentable {
 
 struct InboxView: View {
     @EnvironmentObject var store: InboxStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showConnections = false
     @State private var showSettings = false
+    @State private var showDetails = false
+    @State private var visibility: NavigationSplitViewVisibility = .all
     @FocusState private var searchFocused: Bool
+    private var filterCount: Int { (store.filter == .all ? 0 : 1) + (store.platform == "all" ? 0 : 1) }
+
     var body: some View {
-        HSplitView {
-            sidebar.frame(minWidth: 260, idealWidth: 304, maxWidth: 340)
+        NavigationSplitView(columnVisibility: $visibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            if store.demo { Text("Preview · nothing is sent") }
+                            Picker("Inbox", selection: $store.filter) {
+                                ForEach(InboxFilter.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                            Picker("Network", selection: $store.platform) {
+                                Text("All networks").tag("all")
+                                ForEach(Array(Set(store.conversations.map(\.platform))).sorted(), id: \.self) { item in
+                                    Text(item == "x" ? "X" : item == "whatsapp" ? "WhatsApp" : item.capitalized).tag(item)
+                                }
+                            }
+                            if filterCount > 0 { Button("Clear filters") { store.filter = .all; store.platform = "all" } }
+                            Divider()
+                            Button("Connections", systemImage: "antenna.radiowaves.left.and.right") { showConnections = true }
+                            Button("Settings…", systemImage: "gearshape") { showSettings = true }
+                            Button("Open full workspace", systemImage: "arrow.up.right.square") { store.openWorkspace() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: filterCount == 0 ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill")
+                                if filterCount > 0 { Text("\(filterCount)").font(.caption.weight(.semibold)) }
+                            }
+                        }.help("Filter conversations").accessibilityLabel(filterCount == 0 ? "Inbox options" : "Inbox options, \(filterCount) filters active")
+                    }
+                }
+        } detail: {
             if let chat = store.selected {
-                ConversationView(chat: chat).id(chat.id).frame(minWidth: 480)
+                ConversationView(chat: chat, showingDetails: $showDetails).id(chat.id)
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 48, weight: .light)).foregroundStyle(.secondary)
-                    Text("Your conversations, together.").font(.title2.weight(.semibold))
-                    Text(store.online ? "Choose a chat to pick up where you left off." : "Start your local 2ManyDMs service to see your inbox.")
-                        .foregroundStyle(.secondary)
-                    if !store.online { Button("Retry connection") { Task { await store.refresh() } }.buttonStyle(.borderedProminent) }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+                VStack(spacing: 12) {
+                    Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(.tertiary)
+                    Text(store.loading ? "Opening your inbox" : "Your messages, together").font(.title3.weight(.medium))
+                    Text(store.online ? "Choose a conversation to get started." : "Connect to your local workspace to see your chats.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    if !store.online && !store.loading { Button("Retry connection") { Task { await store.refresh() } } }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .textBackgroundColor))
             }
         }
-        .frame(minWidth: 820, minHeight: 560)
-        .background(SidebarMaterial())
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 780, minHeight: 500)
+        .inspector(isPresented: $showDetails) {
+            if let chat = store.selected {
+                ConversationDetails(chat: chat) { withAnimation(reduceMotion ? nil : .smooth(duration: 0.28)) { showDetails = false } }
+                    .id(chat.id).inspectorColumnWidth(min: 280, ideal: 300, max: 340)
+            }
+        }
         .sheet(isPresented: $showSettings) { NativeSettings().environmentObject(store) }
+        .popover(isPresented: $showConnections) { ConnectionsPopover().environmentObject(store) }
         .onAppear { store.start() }
-        .onReceive(NotificationCenter.default.publisher(for: .init("TwoManyDMs.find"))) { _ in searchFocused = true }
+        .onDisappear { store.flushDrafts() }
+        .onReceive(NotificationCenter.default.publisher(for: .init("TwoManyDMs.find"))) { _ in visibility = .all; searchFocused = true }
         .onReceive(NotificationCenter.default.publisher(for: .init("TwoManyDMs.settings"))) { _ in showSettings = true }
+        .onReceive(NotificationCenter.default.publisher(for: .init("TwoManyDMs.details"))) { _ in
+            if store.selected != nil { withAnimation(reduceMotion ? nil : .smooth(duration: 0.28)) { showDetails.toggle() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in store.flushDrafts() }
     }
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Messages").font(.title2.weight(.bold))
-                Spacer()
-                Menu {
-                    Picker("Network", selection: $store.platform) {
-                        Text("All networks").tag("all")
-                        ForEach(Array(Set(store.conversations.map(\.platform))).sorted(), id: \.self) { item in
-                            Text(item == "x" ? "X" : item == "whatsapp" ? "WhatsApp" : item.capitalized).tag(item)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
+                TextField("Search", text: $store.search).textFieldStyle(.plain).focused($searchFocused)
+                    .accessibilityLabel("Search chats and messages")
+                if !store.search.isEmpty {
+                    Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+                .background(.quaternary.opacity(0.4), in: Capsule()).padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 8)
+            if store.loading {
+                VStack(spacing: 24) {
+                    ForEach(0..<6) { _ in
+                        HStack(spacing: 12) {
+                            Circle().fill(.quaternary).frame(width: 40, height: 40)
+                            VStack(alignment: .leading, spacing: 8) { Capsule().fill(.quaternary).frame(width: 100, height: 10); Capsule().fill(.quaternary).frame(height: 8) }
                         }
                     }
-                    Divider()
-                    Button("Open full workspace", systemImage: "arrow.up.right.square") { store.openWorkspace() }
-                    Button("Settings…", systemImage: "gearshape") { showSettings = true }
-                } label: { Image(systemName: store.platform == "all" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill").font(.title3) }
-                .menuStyle(.borderlessButton).fixedSize().help("Filter networks and open workspace options")
-                .accessibilityLabel("Inbox options")
-            }.padding(.horizontal, 20).padding(.top, 40).padding(.bottom, 16)
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search chats and messages", text: $store.search).textFieldStyle(.plain).focused($searchFocused)
-                if !store.search.isEmpty { Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search") }
-            }.padding(10).background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 16)
-            Picker("Inbox", selection: $store.filter) {
-                ForEach(InboxFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 16).padding(.vertical, 12)
-            if store.platform != "all" {
-                HStack { Text("Showing \(store.platform == "x" ? "X" : store.platform.capitalized)").font(.caption).foregroundStyle(.secondary); Spacer(); Button("Clear") { store.platform = "all" }.buttonStyle(.plain).font(.caption) }.padding(.horizontal, 20).padding(.bottom, 8)
-            }
-            if store.loading {
-                VStack(spacing: 16) {
-                    ForEach(0..<6) { _ in HStack(spacing: 12) { Circle().fill(.quaternary).frame(width: 44, height: 44); VStack(alignment: .leading, spacing: 8) { RoundedRectangle(cornerRadius: 4).fill(.quaternary).frame(width: 116, height: 12); RoundedRectangle(cornerRadius: 4).fill(.quaternary).frame(height: 10) } } }
-                }.padding(20).accessibilityLabel("Loading conversations")
+                }.padding(24).accessibilityLabel("Loading conversations")
                 Spacer()
             } else {
                 List(selection: Binding(get: { store.selectedID }, set: { store.select($0) })) {
                     if store.visible.isEmpty && store.searchHits.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) { Text(store.search.isEmpty ? "All caught up" : "No matches yet").font(.headline); Text(store.search.isEmpty ? "New conversations will appear here." : "Try a name, handle, or a phrase from a message.").font(.callout).foregroundStyle(.secondary) }.padding(.vertical, 24).listRowSeparator(.hidden)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(store.search.isEmpty ? "All caught up" : "No matches").font(.headline)
+                            Text(store.search.isEmpty ? "New chats will appear here." : "Try a name or a phrase from a message.").font(.callout).foregroundStyle(.secondary)
+                        }.padding(.vertical, 24).listRowSeparator(.hidden)
                     }
                     ForEach(store.visible) { chat in
                         ConversationRow(chat: chat, selected: store.selectedID == chat.id, draft: store.drafts[chat.id])
-                            .tag(chat.id).listRowSeparator(.hidden).padding(.vertical, 4)
+                            .tag(chat.id).listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
                             .contextMenu {
                                 Button(chat.pinned ? "Unpin" : "Pin conversation", systemImage: chat.pinned ? "pin.slash" : "pin") { Task { await store.update(chat, body: ["pinned": !chat.pinned]) } }
                                 Button(chat.status == "done" ? "Mark open" : "Mark done", systemImage: "checkmark.circle") { Task { await store.update(chat, body: ["status": chat.status == "done" ? "open" : "done"]) } }
                             }
                     }
                     if !store.searchHits.isEmpty {
-                        Section("In messages") {
+                        Section("Messages") {
                             ForEach(store.searchHits) { hit in
-                                Button {
-                                    store.select(hit.conversationId, focus: hit.id)
-                                } label: {
+                                Button { store.select(hit.conversationId, focus: hit.id) } label: {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(store.conversations.first { $0.id == hit.conversationId }?.name ?? "Conversation").font(.caption.weight(.semibold))
-                                        Text(hit.body).font(.callout).lineLimit(3).foregroundStyle(.secondary)
+                                        Text(store.conversations.first { $0.id == hit.conversationId }?.name ?? "Conversation").font(.callout.weight(.medium))
+                                        Text(hit.body).font(.callout).lineLimit(2).foregroundStyle(.secondary)
                                     }.padding(.vertical, 8)
                                 }.buttonStyle(.plain).listRowSeparator(.hidden)
                             }
                         }
                     }
-                    if store.searchBusy { Text("Searching saved messages…").font(.caption).foregroundStyle(.secondary).listRowSeparator(.hidden) }
+                    if store.searchBusy { Text("Searching messages…").font(.caption).foregroundStyle(.secondary).listRowSeparator(.hidden) }
                 }.listStyle(.sidebar).scrollContentBackground(.hidden)
             }
-            if let error = store.error { Text(error).font(.caption).foregroundStyle(.secondary).padding(16) }
-            HStack(spacing: 8) {
-                Button { showConnections.toggle() } label: {
-                    HStack(spacing: 8) {
-                        Circle().fill(store.online ? Color.green : Color.orange).frame(width: 6, height: 6)
-                        Text(store.demo ? "Design preview" : "On this Mac").font(.caption.weight(.medium))
-                        Image(systemName: "chevron.up").font(.system(size: 8, weight: .semibold))
-                    }
-                }.buttonStyle(.plain).help("Connection status").popover(isPresented: $showConnections, arrowEdge: .top) { ConnectionsPopover().environmentObject(store) }
-                Spacer()
-                Button { showSettings = true } label: { Image(systemName: "gearshape") }.buttonStyle(.plain).help("Settings").accessibilityLabel("Settings")
-            }.foregroundStyle(.secondary).padding(20)
+            if let error = store.error { Text(error).font(.caption).foregroundStyle(.secondary).padding(12) }
         }.background(SidebarMaterial())
-        .onChange(of: store.search) { _, _ in store.searchMessages() }
+            .onChange(of: store.search) { _, _ in store.searchMessages() }
     }
 }
 
@@ -128,23 +151,28 @@ struct ConversationRow: View {
     let chat: Conversation
     let selected: Bool
     let draft: String?
+    private var dateLabel: String {
+        if Calendar.current.isDateInToday(chat.date) { return chat.date.formatted(.dateTime.hour().minute()) }
+        if Calendar.current.isDateInYesterday(chat.date) { return "Yesterday" }
+        return chat.date.formatted(.dateTime.month(.abbreviated).day())
+    }
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Avatar(chat: chat, size: 44)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(chat.name).font(.system(size: 13, weight: chat.unread > 0 ? .semibold : .medium)).lineLimit(1)
+        HStack(spacing: 8) {
+            Circle().fill(chat.unread > 0 ? Color.accentColor : .clear).frame(width: 6, height: 6)
+                .accessibilityLabel(chat.unread > 0 ? "\(chat.unread) unread messages" : "Read")
+            Avatar(chat: chat, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(chat.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 2)
                     if chat.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
-                    Text(chat.date, format: .dateTime.hour().minute()).font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                    Text(dateLabel).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
                 }
-                HStack(alignment: .top) {
-                    Text((draft?.isEmpty == false ? "Draft: \(draft!)" : chat.lastMessage) ?? "No messages yet")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                    if chat.unread > 0 { Text(chat.unread > 99 ? "99+" : "\(chat.unread)").font(.system(size: 10, weight: .semibold)).foregroundStyle(selected ? Color.accentColor : .white).padding(.horizontal, 6).padding(.vertical, 2).background(selected ? Color.white : Color.accentColor, in: Capsule()).accessibilityLabel("\(chat.unread) unread messages") }
-                }
-            }.padding(.top, 2)
-        }.padding(.vertical, 4).accessibilityElement(children: .combine)
+                Text((draft?.isEmpty == false ? "Draft: \(draft!)" : chat.lastMessage) ?? "No messages yet")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.padding(.vertical, 12).padding(.trailing, 8)
+            .contentShape(Rectangle()).accessibilityElement(children: .combine)
     }
 }
 
@@ -175,79 +203,133 @@ struct Avatar: View {
     @EnvironmentObject var store: InboxStore
     let chat: Conversation
     var size: CGFloat = 40
+    var showNetwork = true
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle().fill(Color.accentColor.opacity(0.12))
-                .overlay(Text(chat.initials).font(.system(size: size * 0.32, weight: .medium)).foregroundStyle(Color.accentColor))
+            Circle().fill(Color(nsColor: .tertiaryLabelColor).opacity(0.2))
+                .overlay(Text(chat.initials).font(.system(size: size * 0.32, weight: .medium)).foregroundStyle(.primary))
                 .overlay { if let url = store.api.localMediaURL(chat.contact.avatarUrl) { LocalPhoto(url: url, avatar: true).clipShape(Circle()) } }
                 .frame(width: size, height: size)
-            Text(chat.platform == "x" ? "𝕏" : String(chat.network.prefix(1)))
+            if showNetwork { Text(chat.platform == "x" ? "𝕏" : String(chat.network.prefix(1)))
                 .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(width: 16, height: 16).background(.regularMaterial, in: Circle())
                 .overlay(Circle().strokeBorder(.background, lineWidth: 1.5))
-                .offset(x: 2, y: 2)
+                .offset(x: 2, y: 2) }
         }.accessibilityHidden(true)
     }
 }
 
+struct TimelineBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 struct ConversationView: View {
     @EnvironmentObject var store: InboxStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let chat: Conversation
-    @State private var showingDetails = false
+    @Binding var showingDetails: Bool
     @State private var atBottom = true
     @State private var showNewMessages = false
-    private var timeline: [Message] { projectMessages(store.messages, platform: chat.platform) }
+    @State private var initialPositioned = false
+    private var motion: Animation? { reduceMotion ? nil : .smooth(duration: 0.24) }
+
     var body: some View {
+        let items = projectMessages(store.messages, platform: chat.platform)
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Avatar(chat: chat, size: 36)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(chat.name).font(.headline)
-                    Text(chat.network + (chat.isGroup ? " · Group" : "") + (chat.account?.label.map { " · \($0)" } ?? ""))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button { store.openWorkspace() } label: { Image(systemName: "arrow.up.right.square") }
-                    .buttonStyle(.borderless).help("Open this chat in the full workspace").accessibilityLabel("Open full workspace")
-                Button { showingDetails.toggle() } label: { Image(systemName: "info.circle") }
-                    .buttonStyle(.borderless).help("Conversation details").accessibilityLabel("Conversation details")
-                    .popover(isPresented: $showingDetails) { VStack(alignment: .leading, spacing: 16) { Text(chat.name).font(.headline); Text(chat.contact.handle).textSelection(.enabled); Text(chat.network).foregroundStyle(.secondary); if let email = chat.contact.email { Text(email).textSelection(.enabled) }; Button("More details in workspace") { store.openWorkspace() } }.padding(24).frame(minWidth: 240) }
-            }.padding(.horizontal, 24).padding(.top, 36).padding(.bottom, 16).background(.bar)
-            if let error = store.chatError { HStack { Text(error); Button("Retry") { Task { await store.refreshMessages(chat.id) } } }.font(.caption).padding(12) }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        if store.hasMore { Button(store.loadingOlder ? "Loading…" : "Load older messages") { Task { await store.older() } }.buttonStyle(.borderless).disabled(store.loadingOlder).padding(.vertical, 16) }
-                        if store.loadingChat { ProgressView("Loading conversation…").padding(40) }
-                        if !store.loadingChat && store.messages.isEmpty { Text("No saved messages yet").foregroundStyle(.secondary).padding(40) }
-                        ForEach(Array(timeline.enumerated()), id: \.element.id) { index, message in
-                            if index == 0 || !Calendar.current.isDate(message.date, inSameDayAs: timeline[index - 1].date) {
-                                Text(message.date, format: .dateTime.weekday(.wide).month(.abbreviated).day()).font(.caption.weight(.medium)).foregroundStyle(.tertiary).padding(.vertical, 16)
+            if let error = store.chatError {
+                HStack { Text(error); Button("Retry") { Task { await store.refreshMessages(chat.id) } } }.font(.caption).padding(12)
+            }
+            GeometryReader { viewport in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            if store.hasMore {
+                                Button(store.loadingOlder ? "Loading…" : "Load earlier messages") {
+                                    let anchor = store.messages.first?.id
+                                    Task {
+                                        await store.older()
+                                        if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                                    }
+                                }.buttonStyle(.borderless).font(.caption).disabled(store.loadingOlder).padding(.vertical, 12)
                             }
-                            MessageBubble(message: message, isGroup: chat.isGroup, highlighted: store.focusedMessageID == message.id)
-                                .id(message.id)
+                            if store.loadingChat && store.messages.isEmpty { ProgressView().controlSize(.small).padding(24) }
+                            if !store.loadingChat && store.messages.isEmpty { Text("No messages yet").font(.callout).foregroundStyle(.secondary).padding(24) }
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
+                                let previous = index > 0 ? items[index - 1] : nil
+                                let next = index + 1 < items.count ? items[index + 1] : nil
+                                let firstInGroup = previous.map { !messagesAreGrouped($0, message) } ?? true
+                                let lastInGroup = next.map { !messagesAreGrouped(message, $0) } ?? true
+                                if previous == nil || !Calendar.current.isDate(message.date, inSameDayAs: previous!.date) || message.date.timeIntervalSince(previous!.date) > 3600 {
+                                    Text(message.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.vertical, 12)
+                                }
+                                MessageBubble(message: message, isGroup: chat.isGroup, highlighted: store.focusedMessageID == message.id,
+                                              firstInGroup: firstInGroup, lastInGroup: lastInGroup,
+                                              latestOutgoing: message.id == items.last?.id)
+                                    .padding(.top, firstInGroup && index > 0 ? 4 : 0)
+                                    .id(message.id)
+                                    .transition(.asymmetric(insertion: .offset(y: 8).combined(with: .opacity), removal: .opacity))
+                            }
+                            Color.clear.frame(height: 1).id("bottom")
+                                .background(GeometryReader { position in Color.clear.preference(key: TimelineBottomKey.self, value: position.frame(in: .named("transcript")).maxY) })
+                        }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 12)
+                            .frame(maxWidth: 1000).frame(maxWidth: .infinity)
+                            .frame(minHeight: max(0, viewport.size.height), alignment: .bottom)
+                            .animation(initialPositioned && !store.loadingOlder ? motion : nil, value: store.messages.last?.id)
+                    }
+                    .coordinateSpace(name: "transcript")
+                    .onPreferenceChange(TimelineBottomKey.self) { bottom in
+                        atBottom = bottom <= viewport.size.height + 48
+                        if atBottom { showNewMessages = false }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if showNewMessages {
+                            Button { withAnimation(motion) { proxy.scrollTo("bottom", anchor: .bottom) }; showNewMessages = false }
+                                label: { Label("New messages", systemImage: "arrow.down") }
+                                .buttonStyle(.bordered).background(NativeGlass()).padding(12)
                         }
-                        Color.clear.frame(height: 1).id("bottom").onAppear { atBottom = true; showNewMessages = false }.onDisappear { atBottom = false }
-                    }.padding(.horizontal, 32).padding(.vertical, 12).frame(maxWidth: 900).frame(maxWidth: .infinity)
-                }
-                .overlay(alignment: .bottom) {
-                    if showNewMessages { Button { proxy.scrollTo("bottom", anchor: .bottom); showNewMessages = false } label: { Label("New messages", systemImage: "arrow.down") }.buttonStyle(.bordered).background(NativeGlass()).padding(12) }
-                }
-                .onChange(of: store.focusedMessageID) { _, focus in
-                    if let focus { Task { @MainActor in await Task.yield(); proxy.scrollTo(focus, anchor: .center) } }
-                }
-                .onChange(of: store.messages.last?.id, initial: true) { old, new in
-                    if old == nil || old == new || (atBottom && store.focusedMessageID == nil) || store.messages.last?.outgoing == true {
-                        Task { @MainActor in
-                            await Task.yield()
-                            if let focus = store.focusedMessageID { proxy.scrollTo(focus, anchor: .center) }
-                            else { proxy.scrollTo("bottom", anchor: .bottom) }
-                        }
-                    } else if old != new { showNewMessages = true }
+                    }
+                    .onChange(of: store.focusedMessageID) { _, focus in
+                        if let focus { Task { @MainActor in await Task.yield(); proxy.scrollTo(focus, anchor: .center) } }
+                    }
+                    .onChange(of: store.messages.last?.id, initial: true) { old, new in
+                        guard new != nil else { return }
+                        let first = !initialPositioned
+                        initialPositioned = true
+                        if first || atBottom || store.messages.last?.outgoing == true {
+                            Task { @MainActor in
+                                await Task.yield()
+                                if let focus = store.focusedMessageID { proxy.scrollTo(focus, anchor: .center) }
+                                else { withAnimation(first ? nil : motion) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                            }
+                        } else if old != new { showNewMessages = true }
+                    }
                 }
             }
-            Composer(chat: chat).padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
-        }.background(Color(nsColor: .windowBackgroundColor))
+            Composer(chat: chat).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button { withAnimation(motion) { showingDetails.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Avatar(chat: chat, size: 28, showNetwork: false)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(chat.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                            Text(chat.network + (chat.isGroup ? " · Group" : "")).font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                        Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(showingDetails ? 90 : 0))
+                    }
+                }.buttonStyle(.plain).help("Conversation details (⌘I)")
+                    .accessibilityLabel("\(showingDetails ? "Hide" : "Show") details for \(chat.name)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { store.openWorkspace() } label: { Image(systemName: "arrow.up.right.square") }
+                    .help("Open full workspace").accessibilityLabel("Open full workspace")
+            }
+        }
     }
 }
 
@@ -256,14 +338,26 @@ struct MessageBubble: View {
     let message: Message
     let isGroup: Bool
     let highlighted: Bool
+    let firstInGroup: Bool
+    let lastInGroup: Bool
+    let latestOutgoing: Bool
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: !message.outgoing && lastInGroup ? 4 : 18,
+                               bottomTrailingRadius: message.outgoing && lastInGroup ? 4 : 18, topTrailingRadius: 18)
+    }
     var body: some View {
-        HStack {
-            if message.outgoing { Spacer(minLength: 100) }
-            VStack(alignment: message.outgoing ? .trailing : .leading, spacing: 5) {
-                if isGroup && !message.outgoing, let name = message.senderName { Text(name).font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 8) }
+        HStack(alignment: .bottom, spacing: 0) {
+            if message.outgoing { Spacer(minLength: 64) }
+            VStack(alignment: message.outgoing ? .trailing : .leading, spacing: 4) {
+                if isGroup && !message.outgoing && firstInGroup, let name = message.senderName {
+                    Text(name).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
+                }
                 VStack(alignment: .leading, spacing: 8) {
-                    if message.preview { Text("Inbox preview · awaiting full message").font(.caption2).foregroundStyle(.secondary) }
-                    if let reply = message.replyPreview { VStack(alignment: .leading, spacing: 4) { Text(message.replySender ?? "Reply").font(.caption.weight(.semibold)); Text(reply).font(.caption).lineLimit(2) }.padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 8)) }
+                    if message.preview { Text("Preview · syncing full message").font(.caption2).foregroundStyle(.secondary) }
+                    if let reply = message.replyPreview {
+                        VStack(alignment: .leading, spacing: 4) { Text(message.replySender ?? "Reply").font(.caption.weight(.medium)); Text(reply).font(.caption).lineLimit(2) }
+                            .padding(8).background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    }
                     if message.deletedAt != nil { Label("Message deleted", systemImage: "nosign").foregroundStyle(.secondary) }
                     else {
                         if let media = store.api.localMediaURL(message.mediaUrl) {
@@ -274,61 +368,74 @@ struct MessageBubble: View {
                         } else if message.mediaType != nil {
                             Button { store.openWorkspace() } label: { Label("Download attachment in workspace", systemImage: "arrow.down.circle") }.buttonStyle(.plain).font(.callout)
                         }
-                        if !message.body.isEmpty { Text(message.body).font(.system(size: 14)).textSelection(.enabled).lineSpacing(3).fixedSize(horizontal: false, vertical: true) }
+                        if !message.body.isEmpty { Text(message.body).font(.system(size: 16)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .foregroundStyle(message.outgoing ? Color.white : Color.primary)
-                .background(message.outgoing ? Color.accentColor : Color(nsColor: .quaternaryLabelColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(highlighted ? Color.accentColor : .clear, lineWidth: 2))
+                .background(message.outgoing ? Color(nsColor: .systemBlue) : Color(nsColor: .quaternaryLabelColor).opacity(0.9), in: shape)
+                .overlay(shape.strokeBorder(highlighted ? Color.accentColor : .clear, lineWidth: 2))
+                .help(message.date.formatted(date: .abbreviated, time: .shortened))
                 .contextMenu {
                     Button("Copy text", systemImage: "doc.on.doc") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.body, forType: .string) }
-                    if message.deletedAt == nil && !message.preview { Button("Reply", systemImage: "arrowshape.turn.up.left") { if let id = store.selectedID { store.replies[id] = message } } }
+                    if message.deletedAt == nil && !message.preview {
+                        Button("Reply", systemImage: "arrowshape.turn.up.left") { if let id = store.selectedID { store.replies[id] = message } }
+                    }
                     Button("More actions in workspace", systemImage: "arrow.up.right.square") { store.openWorkspace() }
                 }
-                HStack(spacing: 4) {
-                    Text(message.date, format: .dateTime.hour().minute())
-                    if message.editedAt != nil { Text("· Edited") }
-                    if message.deliveryStatus == "failed" { Text("· Failed").foregroundStyle(.red) }
-                    if message.deliveryStatus == "unconfirmed" { Text("· Delivery unknown").foregroundStyle(.orange) }
-                }.font(.system(size: 10)).foregroundStyle(.tertiary).padding(.horizontal, 8)
-            }.frame(maxWidth: 520, alignment: message.outgoing ? .trailing : .leading)
-            if !message.outgoing { Spacer(minLength: 100) }
+                if message.deliveryStatus == "failed" { Text("Not delivered").font(.caption2).foregroundStyle(.red).padding(.horizontal, 8) }
+                else if message.deliveryStatus == "unconfirmed" { Text("Delivery unknown").font(.caption2).foregroundStyle(.orange).padding(.horizontal, 8) }
+                else if latestOutgoing && message.deliveryStatus == "sent" { Text("Sent").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 8) }
+                else if message.editedAt != nil { Text("Edited").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 8) }
+            }.frame(maxWidth: 480, alignment: message.outgoing ? .trailing : .leading)
+            if !message.outgoing { Spacer(minLength: 64) }
         }
     }
 }
 
 struct Composer: View {
     @EnvironmentObject var store: InboxStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var textWidth: CGFloat = 400
     let chat: Conversation
     private var textHeight: CGFloat {
         let text = store.draft.isEmpty ? " " : store.draft + " "
-        let bounds = (text as NSString).boundingRect(with: NSSize(width: max(60, textWidth - 12), height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 14)])
-        return min(104, max(34, ceil(bounds.height) + 16))
+        let bounds = (text as NSString).boundingRect(with: NSSize(width: max(60, textWidth - 16), height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 16)])
+        return min(112, max(32, ceil(bounds.height) + 14))
     }
     var body: some View {
         VStack(spacing: 8) {
-            if let error = store.currentSendError { HStack(alignment: .top, spacing: 8) { Image(systemName: "exclamationmark.circle"); Text(error).fixedSize(horizontal: false, vertical: true); Button("Review") { store.openWorkspace() } }.font(.caption).foregroundStyle(.secondary) }
+            if let error = store.currentSendError {
+                HStack(alignment: .top, spacing: 8) { Image(systemName: "exclamationmark.circle"); Text(error).fixedSize(horizontal: false, vertical: true); Button("Review") { store.openWorkspace() } }.font(.caption).foregroundStyle(.secondary)
+            }
             if store.uncertainSends.contains(chat.id) { Button("I checked delivery in the workspace") { store.acknowledgeUncertainSend(chat.id) }.font(.caption).buttonStyle(.borderless) }
-            if let reply = store.replies[chat.id] { HStack { Text("Replying to \(reply.senderName ?? chat.name): \(reply.body)").font(.caption).lineLimit(1); Spacer(); Button { store.replies[chat.id] = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Cancel reply") }.padding(.horizontal, 12) }
-            if let attachment = store.attachments[chat.id] { HStack { Image(systemName: "doc"); Text(attachment.lastPathComponent).lineLimit(1); Spacer(); Button { store.attachments[chat.id] = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Remove attachment") }.font(.caption).padding(.horizontal, 12) }
-            HStack(alignment: .bottom, spacing: 12) {
-                Button { store.attachFile() } label: { Image(systemName: "plus").font(.system(size: 18, weight: .medium)).frame(width: 32, height: 32) }.buttonStyle(.borderless).help("Attach a photo or file").accessibilityLabel("Attach a file").disabled(store.sending.contains(chat.id))
-                ZStack(alignment: .topLeading) {
-                    if store.draft.isEmpty { Text("Message on \(chat.network)").foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false) }
-                    TextEditor(text: Binding(get: { store.draft }, set: { store.draft = $0 })).font(.system(size: 14))
-                        .scrollContentBackground(.hidden).frame(height: textHeight).background(GeometryReader { geometry in Color.clear.onAppear { textWidth = geometry.size.width }.onChange(of: geometry.size.width) { _, width in textWidth = width } }).accessibilityLabel("Message on \(chat.network)")
-                }
-                Button { Task { await store.send() } } label: { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)).foregroundStyle(store.canSend ? .white : Color.secondary).frame(width: 32, height: 32).background(store.canSend ? Color.accentColor : Color.secondary.opacity(0.12), in: Circle()) }
-                    .buttonStyle(.plain).disabled(!store.canSend).keyboardShortcut(.return, modifiers: .command).help("Send message (⌘ Return)").accessibilityLabel("Send message")
-            }.padding(12).background(NativeGlass(radius: 24))
-            HStack {
-                if chat.translationEnabled == true { Text("Translating to \(chat.translationLanguageName ?? "selected language")") }
-                else { Text(store.demo ? "Preview mode · nothing leaves this app" : "Drafts stay on this Mac") }
-                Spacer(); Text("⌘ Return to send")
-            }.font(.system(size: 10)).foregroundStyle(.tertiary).padding(.horizontal, 12)
-        }.frame(maxWidth: 900).frame(maxWidth: .infinity)
+            if let reply = store.replies[chat.id] {
+                HStack { Text("Reply to \(reply.senderName ?? chat.name): \(reply.body)").font(.caption).lineLimit(1); Spacer(); Button { store.replies[chat.id] = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Cancel reply") }.padding(.horizontal, 12)
+            }
+            if let attachment = store.attachments[chat.id] {
+                HStack { Image(systemName: "doc"); Text(attachment.lastPathComponent).lineLimit(1); Spacer(); Button { store.attachments[chat.id] = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Remove attachment") }.font(.caption).padding(.horizontal, 12)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                Button { store.attachFile() } label: { Image(systemName: "plus").font(.system(size: 18)).frame(width: 32, height: 32) }
+                    .buttonStyle(.plain).background(NativeGlass(radius: 16)).help("Attach a photo or file").accessibilityLabel("Attach a file").disabled(store.sending.contains(chat.id))
+                HStack(alignment: .bottom, spacing: 4) {
+                    ZStack(alignment: .topLeading) {
+                        if store.draft.isEmpty { Text(chat.translationEnabled == true ? "Message · translating" : "Message").font(.system(size: 16)).foregroundStyle(.secondary).padding(.top, 7).padding(.leading, 8).allowsHitTesting(false) }
+                        NativeComposerEditor(text: Binding(get: { store.draft }, set: { store.draft = $0 }), label: "Message on \(chat.network)", send: { Task { await store.send() } })
+                            .frame(height: textHeight)
+                            .background(GeometryReader { geometry in Color.clear.onAppear { textWidth = geometry.size.width }.onChange(of: geometry.size.width) { _, width in textWidth = width } })
+                    }
+                    Button { Task { await store.send() } } label: {
+                        Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold)).foregroundStyle(store.canSend ? .white : Color.secondary)
+                            .frame(width: 24, height: 24).background(store.canSend ? Color(nsColor: .systemBlue) : .clear, in: Circle())
+                    }.buttonStyle(.plain).disabled(!store.canSend).keyboardShortcut(.return, modifiers: .command)
+                        .help("Send (Return). Shift Return adds a line.").accessibilityLabel("Send message").padding(4)
+                }.padding(.horizontal, 4).background(NativeGlass(radius: 18))
+            }
+            if chat.translationEnabled == true { Text("Translating to \(chat.translationLanguageName ?? "selected language")").font(.caption2).foregroundStyle(.secondary) }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: textHeight)
+        .frame(maxWidth: 1000).frame(maxWidth: .infinity)
     }
 }
 

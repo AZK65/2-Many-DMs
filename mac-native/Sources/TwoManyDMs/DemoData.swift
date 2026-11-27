@@ -21,5 +21,9 @@ enum DemoData {
         Message(id: "demo-message-" + id, body: body, direction: direction, createdAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)), deliveryStatus: direction == "out" ? "sent" : nil)
     }
     static func messagesFor(_ id: String) -> [Message] { id == "demo-0" ? messages : [message(id, chats.first { $0.id == id }?.lastMessage ?? "", "in", -60)] }
+    static var shared: SharedContent {
+        var photo = message("sample-photo", "", "in", -7200); photo.mediaType = "image"; photo.mediaName = "Sample landscape"
+        return SharedContent(pinned: [], media: [photo], links: [SharedLink(id: "sample-link", messageId: "demo-message-1", url: "https://example.com/studio", body: "Studio inspiration", createdAt: photo.createdAt)])
+    }
     static let networks = [NetworkStatus(id: "telegram", name: "Telegram", state: "ready", detail: "Live messages connected"), NetworkStatus(id: "whatsapp", name: "WhatsApp", state: "ready", detail: "Live messages connected"), NetworkStatus(id: "x", name: "X", state: "ready", detail: "Older history restoring in the background")]
 }

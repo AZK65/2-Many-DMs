@@ -72,6 +72,33 @@ final class FixtureProtocol: URLProtocol {
         let restored = try JSONDecoder().decode(NativeDraftState.self, from: JSONEncoder().encode(journal))
         check(restored.attempts["fixture-chat"] == attempt && restored.drafts["fixture-chat"] == attempt.body, "draft and unresolved send identity survive a restart together")
         check(api.localMediaURL("http://user:secret@127.0.0.1:3000/media/example.png") == nil, "media URL cannot inject credentials")
+        var cache = NativeChatCache(capacity: 2, messageLimit: 2)
+        cache.store("first", messages: [original, repeated, photo], hasMore: false)
+        check(cache.take("first")?.messages.count == 2 && cache.take("first")?.hasMore == true, "chat cache bounds memory and preserves older history access")
+        cache.store("second", messages: [original], hasMore: false)
+        _ = cache.take("first")
+        cache.store("third", messages: [repeated], hasMore: false)
+        check(cache.take("second") == nil && cache.take("first") != nil, "chat cache evicts least recently opened conversations")
+        cache.store("first", messages: [], hasMore: false)
+        check(cache.take("first")?.messages.isEmpty == false, "empty loading state cannot erase cached history")
+        cache.remove("first")
+        check(cache.take("first") == nil, "confirmed removals cannot reappear from the chat cache")
+        var grouped = original; grouped.createdAt = "2026-11-27T14:01:00Z"
+        check(messagesAreGrouped(original, grouped), "adjacent same-sender messages form a visual group")
+        grouped.direction = "in"
+        check(!messagesAreGrouped(original, grouped), "different directions do not group")
+        grouped = original; grouped.createdAt = "2026-11-27T15:00:00Z"
+        check(!messagesAreGrouped(original, grouped), "large time gaps start a new message group")
+        let sharedJSON = Data("""
+        {"pinned":[],"media":[{"id":"photo","body":"","direction":"in","createdAt":"2026-11-27T14:00:00Z","mediaType":"image","mediaUrl":null,"mediaName":"Example photo"},{"id":"file","body":"","direction":"in","createdAt":"2026-11-27T14:00:00Z","mediaType":"document","mediaUrl":"/media/example.pdf","mediaName":"Example.pdf"}],"links":[{"id":"link","messageId":"original","url":"https://example.com/article","body":"A link","createdAt":"2026-11-27T14:00:00Z"}]}
+        """.utf8)
+        let shared = try JSONDecoder().decode(SharedContent.self, from: sharedJSON)
+        check(shared.photos.map(\.id) == ["photo"] && shared.files.map(\.id) == ["file"], "details separates saved photos and files, including undownloaded media")
+        check(shared.links.first?.safeURL?.host == "example.com", "shared links keep their original destination")
+        for destination in ["javascript:alert(1)", "file:///etc/passwd", "https://user:secret@example.com"] {
+            var unsafe = shared.links[0]; unsafe.url = destination
+            check(unsafe.safeURL == nil, "shared links reject unsafe schemes or embedded credentials")
+        }
         let formatter = ISO8601DateFormatter()
         let bulk = (0..<5000).map { index in
             Conversation(id: "bulk-\(index)", platform: "x", unread: 0,
@@ -89,7 +116,11 @@ final class FixtureProtocol: URLProtocol {
         if CommandLine.arguments.contains("--live") {
             let chats: [Conversation] = try await api.get("api/conversations")
             check(!chats.isEmpty, "existing inbox decodes in native client")
-            if let chat = chats.first { let page = try await api.messages(chat.id); check(!page.messages.isEmpty, "existing message contract decodes without marking read") }
+            if let chat = chats.first {
+                let page = try await api.messages(chat.id); check(!page.messages.isEmpty, "existing message contract decodes without marking read")
+                let saved: SharedContent = try await api.get("api/conversations/\(chat.id)/shared")
+                check(saved.photos.count + saved.files.count <= saved.media.count, "live shared-items response decodes for native details")
+            }
             print("Live read-only contract verified. No messages sent or marked read.")
         }
         print("\(count) native contract checks passed.")

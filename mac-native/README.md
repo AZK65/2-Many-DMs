@@ -25,6 +25,7 @@ Both app bundles are built locally and ad hoc signed by default. A Developer ID 
 
 ## Included
 
+- A native split view with a compact toolbar, collapsible sidebar, and inbox/network filters in the toolbar menu.
 - Unified conversation list, network filtering, unread and request views.
 - Chat and saved-message search, including jumping to a result.
 - Recent messages, explicit older-history loading, and connection status.
@@ -33,14 +34,19 @@ Both app bundles are built locally and ad hoc signed by default. A Developer ID 
 - Per-chat drafts, persistent protection for a send interrupted by a crash or timeout, and visible failed/unknown delivery states.
 - System, light and dark appearances; native menu and accessibility labels.
 - Live inbox events with a polling fallback for older local services.
+- Opened conversations reappear from a bounded memory cache while refreshing; unchanged inbox snapshots do not rebuild the list.
+- Grouped message bubbles, smooth new-message scrolling, and an AppKit composer that preserves the caret, undo and input-method composition.
+- A sliding Details inspector with copyable contact information, pin/done controls, shared photos, a photo viewer, links, files and pinned messages. Shared items come from the saved-history service, independently of the visible message page.
 
-Keyboard shortcuts: **⌘F** search, **⌘Return** send, **⌘R** refresh, **⌘,** settings, **⇧⌘O** open the selected chat in the full workspace. Return in the composer inserts a new line.
+Keyboard shortcuts: **⌘F** search, **⌘I** show/hide Details, **Return** or **⌘Return** send, **⇧Return** or **⌥Return** new line, **⌘R** refresh, **⌘,** settings, **⇧⌘O** open the selected chat in the full workspace. Click the contact name to open Details; its X closes it.
 
 Account setup, translation/OCR controls, edit/delete/reactions, group administration and other advanced workflows currently open in the full workspace. The client does not bundle the connectors, add an offline history database, or provide a remote authenticated service connection yet. Closing the local service makes the inbox unavailable; drafts remain on this Mac.
 
 ## Glass and accessibility
 
 On macOS 26, the composer uses Apple's documented `NSGlassEffectView`. A small Objective-C bridge resolves that public class at runtime so the package can also compile with older command-line SDKs. Older systems and Reduce Transparency use `NSVisualEffectView` instead. Content remains on ordinary surfaces; glass is reserved for controls.
+
+Reduce Motion disables message, composer, Details-panel and tab animations. New incoming messages scroll into view only when you are already at the bottom; a new-message control appears while you are reading earlier messages. Exact message times remain available on hover.
 
 ## Data and delivery
 

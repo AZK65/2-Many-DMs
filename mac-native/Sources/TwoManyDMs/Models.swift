@@ -5,6 +5,8 @@ struct Contact: Codable, Equatable {
     var handle: String
     var avatarUrl: String?
     var email: String?
+    var phone: String?
+    var company: String?
 }
 
 struct Account: Codable, Equatable {
@@ -87,6 +89,25 @@ struct SendEnvelope: Decodable { var message: Message?; var error: String?; var 
 struct SearchHit: Decodable, Identifiable { var id: String; var conversationId: String; var body: String; var createdAt: String }
 struct SearchPage: Decodable { var results: [SearchHit]; var hasMore: Bool? }
 struct NetworkStatus: Identifiable, Equatable { var id: String; var name: String; var state: String; var detail: String }
+struct SharedContent: Decodable {
+    var pinned: [Message]
+    var media: [Message]
+    var links: [SharedLink]
+    var photos: [Message] { media.filter { $0.deletedAt == nil && ["image", "sticker"].contains($0.mediaType ?? "") } }
+    var files: [Message] { media.filter { $0.deletedAt == nil && !["image", "sticker"].contains($0.mediaType ?? "") } }
+}
+struct SharedLink: Decodable, Identifiable {
+    var id: String
+    var messageId: String
+    var url: String
+    var body: String
+    var createdAt: String
+    var safeURL: URL? {
+        guard let parsed = URL(string: url), ["http", "https"].contains(parsed.scheme?.lowercased() ?? ""),
+              parsed.host != nil, parsed.user == nil, parsed.password == nil else { return nil }
+        return parsed
+    }
+}
 
 private enum NativeDates {
     static let lock = NSLock()
@@ -203,4 +224,36 @@ struct NativeSendAttempt: Codable, Equatable {
 struct NativeDraftState: Codable {
     var drafts: [String: String]
     var attempts: [String: NativeSendAttempt]
+}
+
+struct NativeCachedChat {
+    var messages: [Message]
+    var hasMore: Bool
+}
+struct NativeChatCache {
+    private var values: [String: NativeCachedChat] = [:]
+    private var order: [String] = []
+    let capacity: Int
+    let messageLimit: Int
+    init(capacity: Int = 12, messageLimit: Int = 750) {
+        self.capacity = max(1, capacity); self.messageLimit = max(1, messageLimit)
+    }
+    mutating func store(_ id: String, messages: [Message], hasMore: Bool) {
+        guard !messages.isEmpty else { return }
+        values[id] = NativeCachedChat(messages: Array(messages.suffix(messageLimit)), hasMore: hasMore || messages.count > messageLimit)
+        touch(id)
+        while order.count > capacity { values.removeValue(forKey: order.removeFirst()) }
+    }
+    mutating func take(_ id: String) -> NativeCachedChat? {
+        guard let cached = values[id] else { return nil }
+        touch(id); return cached
+    }
+    mutating func remove(_ id: String) { values.removeValue(forKey: id); order.removeAll { $0 == id } }
+    private mutating func touch(_ id: String) { order.removeAll { $0 == id }; order.append(id) }
+}
+
+func messagesAreGrouped(_ earlier: Message, _ later: Message) -> Bool {
+    earlier.direction == later.direction && earlier.senderName == later.senderName &&
+    later.date.timeIntervalSince(earlier.date) >= 0 && later.date.timeIntervalSince(earlier.date) < 300 &&
+    Calendar.current.isDate(earlier.date, inSameDayAs: later.date)
 }
